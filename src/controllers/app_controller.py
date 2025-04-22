@@ -118,6 +118,7 @@ class AppController(QObject):
         # Initialize ball tracking controller with the same config manager
         self.ball_tracking_controller = BallTrackingController()
         self.ball_tracking_controller.mask_updated.connect(self._on_mask_updated)
+        self.ball_tracking_controller.roi_updated.connect(self._on_roi_updated)
         
         # Initialize ball tracking settings dialog
         self.ball_tracking_dialog = None
@@ -437,6 +438,18 @@ class AppController(QObject):
         """
         # Update the view with the new masks
         self.view.image_view.set_masks(left_mask, right_mask)
+    
+    @Slot(np.ndarray, np.ndarray)
+    def _on_roi_updated(self, left_roi, right_roi):
+        """
+        Handle ROI update from the ball tracking controller.
+        
+        Args:
+            left_roi (numpy.ndarray): Updated left ROI
+            right_roi (numpy.ndarray): Updated right ROI
+        """
+        # Update the view with the new ROIs
+        self.view.image_view.set_rois(left_roi, right_roi)
     
     @Slot()
     def _on_ball_tracking_button_clicked(self):

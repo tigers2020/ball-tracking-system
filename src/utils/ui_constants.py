@@ -89,3 +89,16 @@ class Icons:
     SETTINGS = os.path.join(ICONS_DIR, "check.svg")  # Using check.svg as a substitute
     OPEN = os.path.join(ICONS_DIR, "check.svg")      # Using check.svg as a substitute
     EXIT = os.path.join(ICONS_DIR, "stop.svg") 
+
+
+class ROI:
+    """ROI constants"""
+    DEFAULT_WIDTH = 100
+    DEFAULT_HEIGHT = 100
+    MIN_SIZE = 10
+    MAX_SIZE = 500
+    BORDER_THICKNESS = 2
+    BORDER_COLOR = (0, 0, 255)  # BGR format (Red)
+    FILL_COLOR = (0, 0, 255, 64)  # BGRA format (Red with transparency)
+    CENTER_MARKER_SIZE = 5
+    CENTER_MARKER_COLOR = (255, 255, 255)  # BGR format (White) 

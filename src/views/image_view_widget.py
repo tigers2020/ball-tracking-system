@@ -13,7 +13,7 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy
 import logging
 
-from src.utils.ui_constants import Layout
+from src.utils.ui_constants import Layout, ROI
 
 
 class ImageViewWidget(QWidget):
@@ -51,6 +51,7 @@ class ImageViewWidget(QWidget):
         # Store current CV image
         self.current_cv_image = None
         self.current_mask = None
+        self.current_roi = None
         
         # Empty pixmap as placeholder
         self.clear_image()
@@ -72,19 +73,26 @@ class ImageViewWidget(QWidget):
         # Store the original CV image
         self.current_cv_image = cv_image.copy()
         
+        # Create a working copy of the image
+        display_image = cv_image.copy()
+        
         # Apply mask if available
         if self.current_mask is not None:
-            cv_image = self._apply_mask(cv_image, self.current_mask)
+            display_image = self._apply_mask(display_image, self.current_mask)
+        
+        # Draw ROI if available
+        if self.current_roi is not None:
+            display_image = self._draw_roi(display_image, self.current_roi)
         
         # Convert from BGR to RGB
-        if len(cv_image.shape) == 3 and cv_image.shape[2] == 3:
-            cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+        if len(display_image.shape) == 3 and display_image.shape[2] == 3:
+            display_image = cv2.cvtColor(display_image, cv2.COLOR_BGR2RGB)
         
         # Create QImage from numpy array
-        height, width = cv_image.shape[:2]
+        height, width = display_image.shape[:2]
         bytes_per_line = 3 * width
         
-        q_image = QImage(cv_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+        q_image = QImage(display_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
         
         # Convert to pixmap and display
         pixmap = QPixmap.fromImage(q_image)
@@ -104,6 +112,24 @@ class ImageViewWidget(QWidget):
         self.current_mask = mask
         
         # Reapply image with mask if we have an image
+        if self.current_cv_image is not None:
+            return self.set_image_from_cv(self.current_cv_image)
+        
+        return False
+    
+    def set_roi(self, roi):
+        """
+        Set a ROI to display on the image.
+        
+        Args:
+            roi (dict): ROI information with x, y, width, height, center_x, center_y
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        self.current_roi = roi
+        
+        # Reapply image with ROI if we have an image
         if self.current_cv_image is not None:
             return self.set_image_from_cv(self.current_cv_image)
         
@@ -163,6 +189,57 @@ class ImageViewWidget(QWidget):
             logging.error(f"Error applying mask: {e}")
             return image
     
+    def _draw_roi(self, image, roi):
+        """
+        Draw ROI rectangle and center point on the image.
+        
+        Args:
+            image (numpy.ndarray): Original image
+            roi (dict): ROI information with x, y, width, height, center_x, center_y
+            
+        Returns:
+            numpy.ndarray: Image with ROI visualization
+        """
+        if image is None or roi is None:
+            return image
+        
+        try:
+            # Make a copy to avoid modifying the original
+            result = image.copy()
+            
+            # Extract ROI information
+            x = roi["x"]
+            y = roi["y"]
+            w = roi["width"]
+            h = roi["height"]
+            center_x = roi["center_x"]
+            center_y = roi["center_y"]
+            
+            # Draw ROI rectangle
+            cv2.rectangle(
+                result,
+                (x, y),
+                (x + w, y + h),
+                ROI.BORDER_COLOR,
+                ROI.BORDER_THICKNESS
+            )
+            
+            # Draw center marker
+            cv2.drawMarker(
+                result,
+                (center_x, center_y),
+                ROI.CENTER_MARKER_COLOR,
+                cv2.MARKER_CROSS,
+                ROI.CENTER_MARKER_SIZE * 2,
+                ROI.BORDER_THICKNESS
+            )
+            
+            return result
+            
+        except Exception as e:
+            logging.error(f"Error drawing ROI: {e}")
+            return image
+    
     def set_image(self, pixmap):
         """
         Set the image from a QPixmap.
@@ -193,6 +270,7 @@ class ImageViewWidget(QWidget):
         # Clear stored images and masks
         self.current_cv_image = None
         self.current_mask = None
+        self.current_roi = None
     
     def set_title(self, title):
         """
@@ -285,6 +363,21 @@ class StereoImageViewWidget(QWidget):
         """
         left_success = self.left_image_view.set_mask(left_mask)
         right_success = self.right_image_view.set_mask(right_mask)
+        return left_success, right_success
+    
+    def set_rois(self, left_roi, right_roi):
+        """
+        Set ROIs for the left and right images.
+        
+        Args:
+            left_roi (dict): ROI information for left image
+            right_roi (dict): ROI information for right image
+            
+        Returns:
+            tuple: (left_success, right_success) indicating if each ROI was successfully set
+        """
+        left_success = self.left_image_view.set_roi(left_roi)
+        right_success = self.right_image_view.set_roi(right_roi)
         return left_success, right_success
     
     def set_titles(self, left_title="Left Image", right_title="Right Image"):

@@ -35,6 +35,12 @@ class ConfigManager:
                 "s_max": 255,
                 "v_min": 100, # 0-255 in OpenCV
                 "v_max": 255
+            },
+            "roi_settings": {
+                "width": 100,  # ROI width in pixels
+                "height": 100, # ROI height in pixels
+                "enabled": True, # Whether ROI is enabled
+                "auto_center": True  # Whether to center ROI automatically on detected objects
             }
         }
         
@@ -136,4 +142,25 @@ class ConfigManager:
         current_settings = self.get_hsv_settings().copy()
         current_settings.update(hsv_settings)
         self.set("hsv_settings", current_settings)
+        self.save_config()
+    
+    def get_roi_settings(self):
+        """
+        Get the ROI settings for ball tracking.
+        
+        Returns:
+            dict: ROI settings
+        """
+        return self.get("roi_settings", self.default_config["roi_settings"])
+    
+    def set_roi_settings(self, roi_settings):
+        """
+        Set the ROI settings for ball tracking.
+        
+        Args:
+            roi_settings (dict): ROI settings
+        """
+        current_settings = self.get_roi_settings().copy()
+        current_settings.update(roi_settings)
+        self.set("roi_settings", current_settings)
         self.save_config() 

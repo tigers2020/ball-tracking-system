@@ -127,6 +127,17 @@ class ImageView(QWidget):
         if self.show_mask:
             self.stereo_view.set_masks(left_mask, right_mask)
     
+    def set_rois(self, left_roi, right_roi):
+        """
+        Set the ROIs for left and right images.
+        
+        Args:
+            left_roi (dict): ROI information for left image
+            right_roi (dict): ROI information for right image
+        """
+        # Apply ROIs to current images
+        self.stereo_view.set_rois(left_roi, right_roi)
+    
     def enable_mask_overlay(self, enabled=True):
         """
         Enable or disable mask overlay on images.
