@@ -10,10 +10,10 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSlider, QPushButton, 
-    QLabel, QSpinBox, QSizePolicy
+    QLabel, QSpinBox, QSizePolicy, QCheckBox
 )
 
-from src.utils.ui_constants import Layout, Timing
+from src.utils.ui_constants import Layout, Timing, Icons
 
 
 class PlaybackControlsWidget(QWidget):
@@ -29,6 +29,7 @@ class PlaybackControlsWidget(QWidget):
     prev_clicked = Signal()
     frame_changed = Signal(int)
     fps_changed = Signal(int)
+    skip_frames_changed = Signal(bool)
     
     def __init__(self, parent=None):
         """
@@ -43,6 +44,7 @@ class PlaybackControlsWidget(QWidget):
         self.is_playing = False
         self.current_frame = 0
         self.total_frames = 0
+        self.skip_frames = False
         
         # Set up UI
         self._setup_ui()
@@ -88,9 +90,18 @@ class PlaybackControlsWidget(QWidget):
         controls_layout = QHBoxLayout()
         controls_layout.setSpacing(Layout.SPACING)
         
+        # Skip frames checkbox
+        self.skip_frames_checkbox = QCheckBox("Skip 16 frames")
+        self.skip_frames_checkbox.setToolTip("Skip 16 frames during playback")
+        self.skip_frames_checkbox.setChecked(self.skip_frames)
+        self.skip_frames_checkbox.stateChanged.connect(self._on_skip_frames_changed)
+        controls_layout.addWidget(self.skip_frames_checkbox)
+        
+        controls_layout.addStretch()
+        
         # Previous button
         self.prev_button = QPushButton()
-        self.prev_button.setIcon(QIcon("src/resources/prev.png"))
+        self.prev_button.setIcon(QIcon(Icons.PREV))
         self.prev_button.setToolTip("Previous Frame")
         self.prev_button.setFixedHeight(Layout.BUTTON_HEIGHT)
         self.prev_button.clicked.connect(self._on_prev_clicked)
@@ -98,7 +109,7 @@ class PlaybackControlsWidget(QWidget):
         
         # Play button
         self.play_button = QPushButton()
-        self.play_button.setIcon(QIcon("src/resources/play.png"))
+        self.play_button.setIcon(QIcon(Icons.PLAY))
         self.play_button.setToolTip("Play")
         self.play_button.setFixedHeight(Layout.BUTTON_HEIGHT)
         self.play_button.clicked.connect(self._on_play_clicked)
@@ -106,7 +117,7 @@ class PlaybackControlsWidget(QWidget):
         
         # Stop button
         self.stop_button = QPushButton()
-        self.stop_button.setIcon(QIcon("src/resources/stop.png"))
+        self.stop_button.setIcon(QIcon(Icons.STOP))
         self.stop_button.setToolTip("Stop")
         self.stop_button.setFixedHeight(Layout.BUTTON_HEIGHT)
         self.stop_button.clicked.connect(self._on_stop_clicked)
@@ -114,7 +125,7 @@ class PlaybackControlsWidget(QWidget):
         
         # Next button
         self.next_button = QPushButton()
-        self.next_button.setIcon(QIcon("src/resources/next.png"))
+        self.next_button.setIcon(QIcon(Icons.NEXT))
         self.next_button.setToolTip("Next Frame")
         self.next_button.setFixedHeight(Layout.BUTTON_HEIGHT)
         self.next_button.clicked.connect(self._on_next_clicked)
@@ -130,19 +141,19 @@ class PlaybackControlsWidget(QWidget):
         """Handle play button click."""
         if self.is_playing:
             self.is_playing = False
-            self.play_button.setIcon(QIcon("src/resources/play.png"))
+            self.play_button.setIcon(QIcon(Icons.PLAY))
             self.play_button.setToolTip("Play")
             self.pause_clicked.emit()
         else:
             self.is_playing = True
-            self.play_button.setIcon(QIcon("src/resources/pause.png"))
+            self.play_button.setIcon(QIcon(Icons.PAUSE))
             self.play_button.setToolTip("Pause")
             self.play_clicked.emit()
     
     def _on_stop_clicked(self):
         """Handle stop button click."""
         self.is_playing = False
-        self.play_button.setIcon(QIcon("src/resources/play.png"))
+        self.play_button.setIcon(QIcon(Icons.PLAY))
         self.play_button.setToolTip("Play")
         self.stop_clicked.emit()
     
@@ -174,6 +185,18 @@ class PlaybackControlsWidget(QWidget):
             value (int): New FPS value
         """
         self.fps_changed.emit(value)
+    
+    def _on_skip_frames_changed(self, state):
+        """
+        Handle skip frames checkbox state change.
+        
+        Args:
+            state (int): Checkbox state (Qt.Checked or Qt.Unchecked)
+        """
+        is_checked = (state == Qt.Checked)
+        if self.skip_frames != is_checked:
+            self.skip_frames = is_checked
+            self.skip_frames_changed.emit(self.skip_frames)
     
     def _update_frame_label(self):
         """Update the frame label text."""
@@ -213,6 +236,15 @@ class PlaybackControlsWidget(QWidget):
         """
         return self.fps_spinbox.value()
     
+    def is_skipping_frames(self):
+        """
+        Get the current state of frame skipping.
+        
+        Returns:
+            bool: True if frames should be skipped, False otherwise
+        """
+        return self.skip_frames_checkbox.isChecked()
+    
     def set_is_playing(self, is_playing):
         """
         Set the playing state.
@@ -223,10 +255,10 @@ class PlaybackControlsWidget(QWidget):
         if is_playing != self.is_playing:
             self.is_playing = is_playing
             if is_playing:
-                self.play_button.setIcon(QIcon("src/resources/pause.png"))
+                self.play_button.setIcon(QIcon(Icons.PAUSE))
                 self.play_button.setToolTip("Pause")
             else:
-                self.play_button.setIcon(QIcon("src/resources/play.png"))
+                self.play_button.setIcon(QIcon(Icons.PLAY))
                 self.play_button.setToolTip("Play")
     
     def enable_controls(self, enable=True):
@@ -241,4 +273,5 @@ class PlaybackControlsWidget(QWidget):
         self.stop_button.setEnabled(enable)
         self.next_button.setEnabled(enable)
         self.prev_button.setEnabled(enable)
-        self.fps_spinbox.setEnabled(enable) 
+        self.fps_spinbox.setEnabled(enable)
+        self.skip_frames_checkbox.setEnabled(enable) 

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QMenu, QStatusBar, QMessageBox, QProgressDialog, QTabWidget
 )
 
-from src.utils.ui_constants import WindowSize, Messages, Layout, FileDialog
+from src.utils.ui_constants import WindowSize, Messages, Layout, FileDialog, Icons
 from src.views.image_view import ImageView
 from src.views.setting_view import SettingView
 
@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
         menu_bar.addMenu(file_menu)
         
         # Open action
-        open_action = QAction(QIcon("src/resources/open.png"), "&Open Folder...", self)
+        open_action = QAction(QIcon(Icons.OPEN), "&Open Folder...", self)
         open_action.setShortcut("Ctrl+O")
         open_action.setStatusTip("Open a folder containing stereo images")
         open_action.triggered.connect(self._on_open_folder)
@@ -97,7 +97,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         
         # Exit action
-        exit_action = QAction(QIcon("src/resources/exit.png"), "E&xit", self)
+        exit_action = QAction(QIcon(Icons.EXIT), "E&xit", self)
         exit_action.setShortcut("Alt+F4")
         exit_action.setStatusTip("Exit the application")
         exit_action.triggered.connect(self.close)

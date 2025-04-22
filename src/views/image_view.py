@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout
 
 from src.views.image_view_widget import StereoImageViewWidget
 from src.views.playback_controls_widget import PlaybackControlsWidget
+from src.views.info_view import InfoView
 from src.utils.ui_constants import Layout
 
 
@@ -37,6 +38,10 @@ class ImageView(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(Layout.MARGIN, Layout.MARGIN, Layout.MARGIN, Layout.MARGIN)
         main_layout.setSpacing(Layout.SPACING)
+        
+        # Create info view
+        self.info_view = InfoView()
+        main_layout.addWidget(self.info_view)
         
         # Create stereo image view
         self.stereo_view = StereoImageViewWidget()
@@ -70,4 +75,34 @@ class ImageView(QWidget):
     
     def clear_images(self):
         """Clear both the left and right images."""
-        self.stereo_view.clear_images() 
+        self.stereo_view.clear_images()
+        self.info_view.clear_info()
+    
+    def update_detection_info(self, detection_rate=0.0, pixel_coords=None, position_coords=None):
+        """
+        Update detection information.
+        
+        Args:
+            detection_rate (float, optional): Detection rate (0.0 to 1.0)
+            pixel_coords (tuple, optional): 2D pixel coordinates (x, y)
+            position_coords (tuple, optional): 3D position coordinates (x, y, z)
+        """
+        if detection_rate is not None:
+            self.info_view.set_detection_rate(detection_rate)
+        
+        if pixel_coords is not None:
+            x, y = pixel_coords
+            self.info_view.set_pixel_coords(x, y)
+        
+        if position_coords is not None:
+            x, y, z = position_coords
+            self.info_view.set_position_coords(x, y, z) 
+            
+    def is_skipping_frames(self):
+        """
+        Check if frame skipping is enabled.
+        
+        Returns:
+            bool: True if frames should be skipped, False otherwise
+        """
+        return self.playback_controls.is_skipping_frames() 

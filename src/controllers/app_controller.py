@@ -10,13 +10,44 @@ import logging
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QTimer, Slot, Signal, Qt
+from PySide6.QtCore import QObject, QTimer, Slot, Signal, Qt, QThread
 from PySide6.QtGui import QPixmap
 
 from src.models.stereo_image_model import StereoImageModel
 from src.views.main_window import MainWindow
 from src.utils.ui_constants import Messages, Timing
 from src.utils.config_manager import ConfigManager
+
+
+class FrameLoaderThread(QThread):
+    """
+    Thread for preloading frames in the background.
+    This improves UI responsiveness during playback.
+    """
+    
+    def __init__(self, model, frame_indices, parent=None):
+        """
+        Initialize the frame loader thread.
+        
+        Args:
+            model (StereoImageModel): The model containing frames
+            frame_indices (list): List of frame indices to preload
+            parent (QObject, optional): Parent object
+        """
+        super(FrameLoaderThread, self).__init__(parent)
+        self.model = model
+        self.frame_indices = frame_indices
+        
+    def run(self):
+        """Execute the thread's main task: preloading frames."""
+        for index in self.frame_indices:
+            if self.isInterruptionRequested():
+                return
+                
+            frame = self.model.get_frame(index)
+            if frame:
+                # Just load the images into memory
+                frame.load_images()
 
 
 class AppController(QObject):
@@ -40,6 +71,13 @@ class AppController(QObject):
         self.playback_timer = QTimer()
         self.playback_timer.timeout.connect(self._on_next_frame)
         
+        # Frame skipping flag
+        self.skip_frames = False
+        self.skip_frame_count = 16  # Number of frames to skip
+        
+        # Preload thread
+        self.preload_thread = None
+        
         # Connect signals from model
         self.model.loading_progress.connect(self._on_loading_progress)
         self.model.loading_complete.connect(self._on_loading_complete)
@@ -54,6 +92,7 @@ class AppController(QObject):
         self.view.image_view.playback_controls.prev_clicked.connect(self._on_prev_frame)
         self.view.image_view.playback_controls.frame_changed.connect(self._on_frame_slider_changed)
         self.view.image_view.playback_controls.fps_changed.connect(self._on_fps_changed)
+        self.view.image_view.playback_controls.skip_frames_changed.connect(self._on_skip_frames_changed)
         
         # Connect signals from settings view
         self.view.setting_view.settings_changed.connect(self._on_settings_changed)
@@ -167,8 +206,42 @@ class AppController(QObject):
         else:
             self.view.image_view.clear_images()
         
-        # Preload some frames ahead for smoother playback
-        self.model.preload_frames(5)
+        # Preload frames in background
+        self._preload_frames_in_background(5)
+    
+    def _preload_frames_in_background(self, num_frames):
+        """
+        Preload frames in a background thread for smoother playback.
+        
+        Args:
+            num_frames (int): Number of frames to preload ahead
+        """
+        # Stop any existing preload thread
+        if self.preload_thread and self.preload_thread.isRunning():
+            self.preload_thread.requestInterruption()
+            self.preload_thread.wait()
+        
+        # Calculate frame indices to preload
+        current_index = self.model.current_frame_index
+        total_frames = len(self.model.frames)
+        
+        if total_frames <= 1:
+            return
+            
+        # Get skip frames state directly from UI
+        is_skipping = self.view.image_view.playback_controls.is_skipping_frames()
+        
+        # Determine frame indices to preload based on skip setting
+        indices = []
+        step = self.skip_frame_count if is_skipping else 1
+        
+        for i in range(1, num_frames + 1):
+            next_index = (current_index + i * step) % total_frames
+            indices.append(next_index)
+        
+        # Create and start the preload thread
+        self.preload_thread = FrameLoaderThread(self.model, indices)
+        self.preload_thread.start()
     
     @Slot()
     def _on_play(self):
@@ -220,16 +293,48 @@ class AppController(QObject):
     @Slot()
     def _on_next_frame(self):
         """Handle next frame button click or timer timeout."""
-        next_frame = self.model.next_frame()
+        # Get the current frame skip state directly from the UI
+        self.skip_frames = self.view.image_view.playback_controls.is_skipping_frames()
         
-        # If we reached the end of the sequence during playback, loop back to the start
-        if not next_frame and self.model.is_playing:
-            self.model.set_current_frame_index(0)
+        if self.skip_frames and self.model.is_playing:
+            # Skip frames during playback
+            current_index = self.model.current_frame_index
+            total_frames = len(self.model.frames)
+            
+            if total_frames <= 1:
+                return
+                
+            # Calculate next frame index with skipping
+            next_index = (current_index + self.skip_frame_count) % total_frames
+            self.model.set_current_frame_index(next_index)
+        else:
+            # Normal next frame behavior
+            next_frame = self.model.next_frame()
+            
+            # If we reached the end of the sequence during playback, loop back to the start
+            if not next_frame and self.model.is_playing:
+                self.model.set_current_frame_index(0)
     
     @Slot()
     def _on_prev_frame(self):
         """Handle previous frame button click."""
-        self.model.prev_frame()
+        # Get the current frame skip state directly from the UI
+        self.skip_frames = self.view.image_view.playback_controls.is_skipping_frames()
+        
+        if self.skip_frames:
+            # Skip frames when navigating backwards
+            current_index = self.model.current_frame_index
+            total_frames = len(self.model.frames)
+            
+            if total_frames <= 1:
+                return
+                
+            # Calculate previous frame index with skipping
+            prev_index = (current_index - self.skip_frame_count) % total_frames
+            self.model.set_current_frame_index(prev_index)
+        else:
+            # Normal previous frame behavior
+            self.model.prev_frame()
     
     @Slot(int)
     def _on_frame_slider_changed(self, value):
@@ -253,6 +358,22 @@ class AppController(QObject):
             # Update timer interval without stopping playback
             interval = 1000 // fps
             self.playback_timer.setInterval(interval)
+    
+    @Slot(bool)
+    def _on_skip_frames_changed(self, skip):
+        """
+        Handle skip frames checkbox state change.
+        
+        Args:
+            skip (bool): True if frames should be skipped, False otherwise
+        """
+        self.skip_frames = skip
+        logging.info(f"Frame skipping {'enabled' if skip else 'disabled'}")
+        
+        # Synchronize with the view's checkbox
+        is_checked = self.view.image_view.playback_controls.skip_frames_checkbox.isChecked()
+        if is_checked != skip:
+            self.view.image_view.playback_controls.skip_frames_checkbox.setChecked(skip)
     
     @Slot(dict)
     def _on_settings_changed(self, settings):

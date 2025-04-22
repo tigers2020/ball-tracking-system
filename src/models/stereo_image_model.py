@@ -334,9 +334,25 @@ class StereoImageModel(QObject):
         Returns:
             StereoFrame: The current frame, or None if no frames are loaded
         """
-        if not self.frames or self.current_frame_index >= len(self.frames):
+        if not self.frames or self.current_frame_index < 0 or self.current_frame_index >= len(self.frames):
             return None
+        
         return self.frames[self.current_frame_index]
+    
+    def get_frame(self, index):
+        """
+        Get a frame by index.
+        
+        Args:
+            index (int): Frame index
+            
+        Returns:
+            StereoFrame: The frame at the specified index, or None if the index is out of bounds
+        """
+        if not self.frames or index < 0 or index >= len(self.frames):
+            return None
+        
+        return self.frames[index]
     
     def set_current_frame_index(self, index):
         """

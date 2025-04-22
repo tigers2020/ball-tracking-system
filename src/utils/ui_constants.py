@@ -6,6 +6,13 @@ UI Constants for the Stereo Image Player application.
 This file contains all the constants used in the UI.
 """
 
+import os
+from pathlib import Path
+
+
+# Get the absolute path to the root directory
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+
 
 class WindowSize:
     """Window size constants"""
@@ -69,12 +76,16 @@ class Messages:
 
 
 class Icons:
-    """Icon resource paths"""
-    PLAY = "resources/play.png"
-    PAUSE = "resources/pause.png"
-    STOP = "resources/stop.png"
-    NEXT = "resources/next.png"
-    PREVIOUS = "resources/previous.png"
-    OPEN = "resources/open.png"
-    SAVE = "resources/save.png"
-    EXIT = "resources/exit.png" 
+    """Icon resource paths (absolute paths)"""
+    # Directory paths
+    ICONS_DIR = os.path.join(ROOT_DIR, "src", "resources", "icons")
+    
+    # Icon files
+    PLAY = os.path.join(ICONS_DIR, "play.svg")
+    PAUSE = os.path.join(ICONS_DIR, "pause.svg")
+    STOP = os.path.join(ICONS_DIR, "stop.svg")
+    NEXT = os.path.join(ICONS_DIR, "next_frame.svg")
+    PREV = os.path.join(ICONS_DIR, "prev_frame.svg")
+    SETTINGS = os.path.join(ICONS_DIR, "check.svg")  # Using check.svg as a substitute
+    OPEN = os.path.join(ICONS_DIR, "check.svg")      # Using check.svg as a substitute
+    EXIT = os.path.join(ICONS_DIR, "stop.svg") 
