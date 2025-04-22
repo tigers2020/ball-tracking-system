@@ -1,0 +1,115 @@
+---
+description: 
+globs: *.py
+alwaysApply: false
+---
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Cursor AI Refactoring Rules
+## 0. trnaslate to English
+   - Every code and comments logs are must written in English.
+## 1. Pre-Refactoring Preparation
+
+### (1) Secure Test Coverage
+- **Mandatory:**  
+  - Establish unit or integration tests to ensure the current code behaves as expected before any refactoring begins.
+  - Without tests, refactoring may inadvertently change behavior or introduce bugs.
+  - Remember: "Refactoring without tests is gambling." citeturn0search0
+
+---
+
+## 2. Refactoring Sequence and Methods
+
+### (1) Analyze the Code and Identify Problem Areas
+- Evaluate code for:
+  - Readability issues
+  - Redundancy and duplication
+  - Complex control flows
+  - Inappropriate naming conventions
+
+### (2) Implement Incremental Changes
+- **Small Steps:**  
+  - Refactor in small, manageable units (e.g., function or module level) rather than attempting large-scale modifications.
+  - After each change, run tests to verify that external behavior remains consistent.
+
+### (3) Apply Refactoring Techniques
+
+- **Function Extraction:**
+  - Extract duplicated or single-purpose code blocks into separate functions for improved reusability.
+  - *Example:*
+    ```python
+    if len(my_list) < 2:
+        raise Error("No List to preview")
+    a = ListSetting(**my_list[0])
+    b = ListSetting(**my_list[1])
+    active, preview = (a, b) if license_metadata[0]["active"] else (b, a)
+    ```
+  - citeturn0search3
+
+- **Eliminate Duplication (DRY Principle):**
+  - Consolidate repeated code into a single function or module.
+
+- **Simplify Conditional Statements:**
+  - Merge nested if statements using logical operators (e.g., `and`, `or`).
+  - Replace unnecessary else blocks with guard clauses.
+
+- **Utilize List Comprehensions and Built-In Functions:**
+  - Replace loops used solely for collecting values with list comprehensions.
+  - Use functions like `enumerate()`, `any()`, and `len()` to simplify iterations.
+  - citeturn0search15
+
+- **Adhere to Coding Standards:**
+  - Follow established coding style guidelines (e.g., PEP 8) to maintain readability and consistency.
+  - For Python 2.7 code, clearly define indentation, whitespace, and naming conventions.
+
+- **Leverage Automation Tools:**
+  - Use refactoring tools (e.g., rope, PyCharm’s refactoring features, VS Code plugins) for systematic and safe refactoring.
+  - citeturn0search17, citeturn0search20
+
+---
+
+## 3. Refactoring Precautions
+
+### (1) Preserve Control Flow
+- When extracting code (e.g., from loops or conditionals), ensure that the control flow (like `continue` or `break`) is not disrupted.
+- If a keyword such as `continue` is necessary within an extracted function, use conditional checks to return a value and handle it appropriately in the caller.
+- citeturn0search17
+
+### (2) Consider Python 2.7 Syntax Differences
+- Be aware of the differences between Python 2 and Python 3 (e.g., print statements, division operators, Unicode handling).
+- Document these differences and include plans for future migration if needed.
+
+### (3) Document Changes and Comment Code
+- Clearly document the rationale behind each change.
+- Add comments or docstrings to clarify the intent and assist future maintenance.
+
+---
+
+## 4. Mandatory vs. Prohibited Practices
+
+### Mandatory Practices
+- **Test Addition and Execution:**  
+  - Always run tests before and after refactoring to ensure unchanged external behavior.
+- **Incremental Changes:**  
+  - Make small, manageable changes and commit frequently.
+- **Clear Naming and Documentation:**  
+  - Use descriptive names for variables, functions, and modules; add docstrings where necessary.
+- **Utilize Automation Tools:**  
+  - Employ IDE refactoring features and tools (e.g., rope, flake8, Black) to maintain consistency.
+- **Rigorous Version Control:**  
+  - Commit changes frequently to enable easy rollback if issues arise.
+
+### Prohibited Practices
+- **Sacrificing Readability for Brevity:**  
+  - Do not reduce code length at the expense of clarity and maintainability.
+- **Refactoring Without Tests:**  
+  - Avoid refactoring without proper tests, as this increases the risk of introducing errors.
+- **Large-Scale, One-Time Changes:**  
+  - Refrain from making sweeping changes in one go; prefer incremental improvements.
+- **Misplacing Control Flow Keywords:**  
+  - Do not inappropriately move control flow keywords (e.g., `continue`, `break`) into functions, as they are valid only within loops.
+- **Unreviewed Git Commits:**  
+  - Do not commit changes without prior code review and verification.

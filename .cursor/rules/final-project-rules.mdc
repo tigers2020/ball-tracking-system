@@ -1,0 +1,370 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Below is the natural English translation of your provided text:
+
+---
+
+I will pass on the essence of Python coding to you. The rules you’re learning are more than just a matter of style; they are the foundation that keeps your code stable and prevents you from getting embroiled in debugging wars. If you break these rules, your code will soon crumble, and you will regret it once I catch wind of your mistakes. However, if you adhere strictly to these rules, you too will one day rise to the level of a genius developer. Now, let’s review some key principles and corresponding code examples that you must follow.
+
+
+### 0. All Comments, Explanations, Code, and UI Must Be in English
+- Do not commit unless I say so.
+
+---
+
+### 1. Use Concise and Efficient Syntax
+
+- **Purpose:** Your code should be concise. Avoid overly complex expressions and ensure that your code is easy to read and maintain.
+- **Example:**
+
+    ```python
+    # A simple function to add two numbers
+    def add(a, b):
+        # Return the sum of the two inputs.
+        return a + b
+
+    # Usage example
+    result = add(3, 5)
+    print result  # Output: 8
+    ```
+
+> **Advice:** Adding unnecessary code or duplicating logic will not go unnoticed. Write your code as simply and clearly as possible.
+
+---
+
+### 2. Leverage the Flexibility of Dynamic Typing
+
+- **Purpose:** Python’s dynamic typing is a powerful tool. Write your code freely without worrying about types, but make sure your variable and function names clearly express their purpose.
+- **Example:**
+
+    ```python
+    # A function that processes data of various types
+    def process(data):
+        # If it's a string, convert it to uppercase; if it's a list, print its elements.
+        if isinstance(data, str):
+            return data.upper()
+        elif isinstance(data, list):
+            for item in data:
+                print item
+        else:
+            return data
+
+    print process("hello")  # Output: HELLO
+    process([1, 2, 3])      # Output: prints 1, 2, 3
+    ```
+
+> **Warning:** Neglecting proper type checking will lead to runtime errors. Always verify your code carefully.
+
+---
+
+### 3. Strictly Manage Project File References and External Functions
+
+- **Purpose:** Always use only the functions and modules that actually exist, and actively utilize internal project references.
+- **Example:**
+
+    ```python
+    # File structure:
+    # ├─ project/
+    # │  ├─ utils.py
+    # │  └─ main.py
+
+    # utils.py
+    def greet(name):
+        # Return a greeting message with the provided name.
+        return "Hello, " + name
+
+    # main.py
+    from utils import greet  # Only import modules that exist.
+
+    print greet("Student")  # Output: Hello, Student
+    ```
+
+> **Warning:** Relying on non-existent functions or modules will lead to a storm of errors at runtime. Always double-check your code.
+
+---
+
+### 4. Use Table-Based Data Structures (Dictionaries) and Leverage Metaclasses
+
+- **Purpose:** Manage data using table-based structures (dictionaries) and use metaclasses when necessary to automate tasks during object creation.
+- **Example (Using Dictionaries):**
+
+    ```python
+    # Structuring student information in a dictionary
+    student = {
+        'name': 'Alice',
+        'age': 21,
+        'major': 'Computer Engineering'
+    }
+    print student['name']  # Output: Alice
+    ```
+
+- **Example (Using Metaclasses):**
+
+    ```python
+    # Using a metaclass to add extra logic during class creation
+    class MyMeta(type):
+        def __new__(cls, name, bases, dct):
+            # Add a class variable before creating the class
+            dct['created_by'] = 'Master Developer'
+            return super(MyMeta, cls).__new__(cls, name, bases, dct)
+
+    class MyClass(object):
+        __metaclass__ = MyMeta  # Python metaclass declaration
+        def __init__(self, value):
+            self.value = value
+
+    instance = MyClass(42)
+    print instance.created_by  # Output: Master Developer
+    ```
+
+> **Caution:** Overusing metaclasses can make your code too complex, eventually making it difficult to understand. Use them only when necessary.
+
+---
+
+### 5. Follow the Single Responsibility Principle (SRP)
+
+- **Purpose:** Each function and module should only perform one role. This makes the code easier to maintain and extend.
+- **Example:**
+
+    ```python
+    # Separate data loading and processing logic
+    def load_data(filepath):
+        # Read data from a file.
+        try:
+            with open(filepath, 'r') as file:
+                data = file.read()
+            return data
+        except IOError as e:
+            print "Error loading file:", e
+            return None
+
+    def process_data(data):
+        # Process the loaded data.
+        return data.strip() if data else None
+
+    # Main logic
+    data = load_data("data.txt")
+    processed = process_data(data)
+    print processed
+    ```
+
+> **Warning:** Combining multiple responsibilities in a single function will lead to endless debugging headaches. Always adhere to the SRP.
+
+---
+
+### 6. Use Clear and Intuitive Variable/Function Names with Adequate Comments
+
+- **Purpose:** Ensure that anyone reading the code understands its intent immediately by paying attention to naming and commenting.
+- **Example:**
+
+    ```python
+    # Good example: using clear and meaningful names for variables and functions
+    def calculate_total_price(unit_price, quantity):
+        """
+        Calculate the total price given the unit price and quantity.
+        """
+        return unit_price * quantity
+
+    total_price = calculate_total_price(9.99, 5)
+    print total_price  # Output: 49.95
+    ```
+
+> **Praise:** Your dedication so far has been recognized, and clear naming is an asset as a developer. Never neglect it.
+
+---
+
+### 7. Maintain Consistent Code Formatting and Exception Handling
+
+- **Purpose:** Consistent formatting is the basis of collaboration. Implement thorough exception handling for any anticipated errors.
+- **Example (Formatting and Exception Handling):**
+
+    ```python
+    def divide(a, b):
+        """
+        Divide two numbers.
+        If b is zero, handle the exception.
+        """
+        try:
+            result = a / b
+        except ZeroDivisionError:
+            print "Error: Division by zero!"
+            return None
+        else:
+            return result
+
+    print divide(10, 2)  # Output: 5
+    print divide(10, 0)  # Output: Error message and returns None
+    ```
+
+> **Warning:** Skipping exception handling is like driving without a seatbelt. A small mistake could lead to a major catastrophe, so always handle errors meticulously.
+
+---
+
+### 8. Use Coroutines for Asynchronous Tasks
+
+- **Purpose:** In Python, you can simulate asynchronous tasks using generator-based coroutines. Use them to cleanly manage complex asynchronous logic.
+- **Example:**
+
+    ```python
+    # A simple coroutine example: simulating asynchronous tasks using a generator
+    def coroutine_example():
+        print "Coroutine started"
+        while True:
+            data = (yield)
+            if data is None:
+                # Terminate the coroutine if None is received
+                break
+            print "Processing:", data
+        print "Coroutine ended"
+
+    # Initialize and use the coroutine
+    cr = coroutine_example()
+    cr.next()  # Start the coroutine
+    cr.send("Task 1")
+    cr.send("Task 2")
+    cr.send(None)  # End the coroutine
+    ```
+
+> **Warning:** Failing to handle asynchronous tasks properly will cause your program to freeze and throw errors. Design your coroutines carefully.
+
+---
+
+### 9. Harness the Benefits of Functional Programming: Closures and First-Class Functions
+
+- **Purpose:** Use closures and first-class functions to maximize modularity and reusability.
+- **Example:**
+
+    ```python
+    # A simple example using a closure
+    def multiplier(factor):
+        # Create a closure that remembers the factor
+        def multiply(n):
+            return n * factor
+        return multiply
+
+    double = multiplier(2)
+    triple = multiplier(3)
+    print double(5)  # Output: 10
+    print triple(5)  # Output: 15
+    ```
+
+> **Praise:** Leveraging functional programming will make your code cleaner and more flexible. Keep this advantage in mind.
+
+---
+
+### 10. Optimize Performance, Manage Memory, and Utilize Debugging Tools
+
+- **Purpose:** For performance optimization, pay close attention to memory management and garbage collection. Also, actively use debugging and profiling tools to identify and improve performance bottlenecks.
+- **Practical Tips:**
+  - **Memory Management:** Remove unnecessary object references, especially when dealing with large datasets.
+  - **Debugging Tools:** Use modules like `pdb` or external profilers.
+  - **Code Reviews and Refactoring:** Regularly rform unit testing, and refactor to improve quality.
+
+> **Warning:** Neglecting performance optimization or memory management can cause small mistakes to collapse the entire system. Always profile and address bottlenecks.
+
+---
+
+### 11. Utilize Hardware Acceleration: OpenGL and GPU Optimization
+
+- **Purpose:** For performance-critical applications, make the most of hardware acceleration. In particular, GPU acceleration in image processing or rendering can dramatically boost performance.
+- **Example (Basic OpenGL Setup):**
+
+    ```python
+    # A basic rendering example using PyOpenGL
+    from OpenGL.GL import *
+    from OpenGL.GLU import *
+    import wx
+    from wx import glcanvas
+
+    class OpenGLCanvas(glcanvas.GLCanvas):
+        def __init__(self, parent):
+            glcanvas.GLCanvas.__init__(self, parent, -1)
+            self.context = glcanvas.GLContext(self)
+            self.SetCurrent(self.context)
+            
+            # Initialize OpenGL
+            glClearColor(0.0, 0.0, 0.0, 0.0)
+            glEnable(GL_TEXTURE_2D)
+            
+            # Bind events
+            self.Bind(wx.EVT_PAINT, self.on_paint)
+        
+        def on_paint(self, event):
+            dc = wx.PaintDC(self)
+            self.SetCurrent(self.context)
+            glClear(GL_COLOR_BUFFER_BIT)
+            
+            # Rendering code...
+            
+            self.SwapBuffers()  # Double buffering
+    ```
+
+- **Example (GPU Memory Optimization):**
+
+    ```python
+    # An example of efficiently loading a texture into GPU memory
+    def load_texture(self, image_path):
+        # Load the image
+        img = wx.Image(image_path)
+        img_data = img.GetData()
+        width, height = img.GetWidth(), img.GetHeight()
+        
+        # Generate and bind texture
+        texture_id = glGenTextures(1)
+        glBindTexture(GL_TEXTURE_2D, texture_id)
+        
+        # Set texture parameters
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        
+        # Upload texture data
+        glTexImage2D(
+            GL_TEXTURE_2D, 0, GL_RGB, width, height, 0,
+            GL_RGB, GL_UNSIGNED_BYTE, img_data
+        )
+        
+        return texture_id
+    ```
+
+> **Advice:** Efficiently manage both CPU and GPU memory. When handling large images or textures, pre-calculate memory usage and immediately release unnecessary data. Textures stored in GPU memory enhance performance by avoiding redundant copying during rendering.
+
+---
+
+### 12. Multithreading and Resource Management
+
+- **Purpose:** Offload heavy tasks to separate threads to prevent blocking the UI thread. However, be cautious with resource management across threads.
+- **Example (OpenGL and Thread Safety):**
+
+    ```python
+    # Execute OpenGL commands only on the UI thread
+    def preload_texture(self, image_path, frame_num):
+        # Load image in a separate thread
+        img = wx.Image(image_path)
+        
+        # Execute OpenGL tasks on the main thread
+        wx.CallAfter(self.upload_texture, img, frame_num)
+    
+    def upload_texture(self, img, frame_num):
+        # Upload texture on the main thread where OpenGL commands are safe
+        self.SetCurrent(self.context)
+        texture_id = glGenTextures(1)
+        glBindTexture(GL_TEXTURE_2D, texture_id)
+        # ... set texture parameters and upload ...
+        self.textures[frame_num] = texture_id
+    ```
+
+> **Warning:** OpenGL contexts are not thread-safe! You must execute OpenGL commands on the same thread (typically the main UI thread). Transfer tasks safely between threads using tools like `CallAfter` or a task queue.
+
+---
+
+All these rules are not just about “coding style” but are the essential building blocks to transform your code into stable, maintainable software. If you take these guidelines lightly, you will inevitably regret it. However, if you internalize these rules and apply them every day, your skills will improve dramatically.
+
+Also, make sure to study the contents of @Project_Overview.md and strictly adhere to its requirements.

@@ -1,0 +1,20 @@
+---
+description: 
+globs: *.py
+alwaysApply: false
+---
+---
+description: 
+globs: 
+alwaysApply: true
+---
+explan the reason why you coding this way before coding it.
+must use english description when commit to git.
+do not use Korean in Code.
+코딩에 한글 금지!!!!!!!!!!!
+if Find other language tha English, translate to English.
+must use early return style.
+must use English for GUI Interfaces.
+must use English for coding.
+must use Englsih for logging.
+must use ENglish for comments.

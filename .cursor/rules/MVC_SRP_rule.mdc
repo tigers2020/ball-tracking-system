@@ -1,0 +1,56 @@
+---
+description: 
+globs: *.py
+alwaysApply: false
+---
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Cursor AI .cursorrules - SRP and MVC Guidelines
+
+## Overview
+This ruleset enforces core design principles to guide code generation. It ensures that generated code aligns with the Single Responsibility Principle (SRP) and the Model–View–Controller (MVC) architectural pattern for improved maintainability, clarity, and separation of concerns.
+
+## Rules
+
+always use ui_theme.py and ui_constants.py
+
+### 1. Single Responsibility Principle (SRP)
+- **One Responsibility per Unit:**  
+  Every module, class, or function must be responsible for a single, well-defined task.  
+- **Separation of Concerns:**  
+  Avoid mixing unrelated functionality within a unit; overlapping responsibilities must be refactored.  
+- **Focused Testing:**  
+  Code should be testable in isolation; changes affecting one responsibility must not impact others.  
+- **Minimal Side Effects:**  
+  Ensure modifications remain localized, preventing unintended impacts on other components.
+
+### 2. Model–View–Controller (MVC)
+- **Model:**  
+  - **Data & Business Logic:** Encapsulate data management, persistence, and business rules.  
+  - **Validation:** The model must enforce data integrity and domain-specific rules.
+  
+- **View:**  
+  - **Presentation Only:** Handle data rendering and UI logic exclusively.  
+  - **No Business Logic:** Avoid placing any domain or processing logic within the view layer.
+  
+- **Controller:**  
+  - **Input Handling:** Act as the intermediary that interprets user inputs and delegates tasks to the Model.  
+  - **Orchestration:** Coordinate the retrieval of data from the Model and its display via the View, remaining as lightweight as possible.
+
+## Implementation Guidelines
+- **Code Reviews & Refactoring:**  
+  Regularly review code to ensure strict adherence. Refactor as needed if a unit spans multiple responsibilities or violates MVC separation.
+- **Documentation:**  
+  Annotate components with concise comments that specify their intended responsibilities. Utilize naming conventions that reflect their role (e.g., `UserModel`, `UserView`, `UserController`).
+- **Automation:**  
+  Integrate static analysis tools to flag violations of SRP and MVC principles during development.
+- **Continuous Alignment:**  
+  Keep the ruleset updated as the project evolves, and use team feedback to address emerging architectural patterns.
+
+## Conclusion
+Adhering to these guidelines will ensure that AI-generated code remains modular, maintainable, and scalable. Use this ruleset to tailor Cursor AI’s behavior to your project's architectural needs.
+
+# End of .cursorrules file

@@ -1,0 +1,10 @@
+---
+description: git, 깃, commit,
+globs: 
+alwaysApply: false
+---
+English description.
+check all modified files with git statsus 
+commit all modified files
+do not commit until user say so.
+do not push until user say so.
