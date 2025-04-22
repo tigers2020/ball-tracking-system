@@ -27,7 +27,15 @@ class ConfigManager:
         """
         # Default configuration
         self.default_config = {
-            "last_image_folder": ""
+            "last_image_folder": "",
+            "hsv_settings": {
+                "h_min": 0,   # 0-179 in OpenCV
+                "h_max": 10,
+                "s_min": 100, # 0-255 in OpenCV
+                "s_max": 255,
+                "v_min": 100, # 0-255 in OpenCV
+                "v_max": 255
+            }
         }
         
         # Current configuration
@@ -107,4 +115,25 @@ class ConfigManager:
         Returns:
             str: Last image folder path
         """
-        return self.get("last_image_folder", "") 
+        return self.get("last_image_folder", "")
+    
+    def get_hsv_settings(self):
+        """
+        Get the HSV settings for ball tracking.
+        
+        Returns:
+            dict: HSV settings
+        """
+        return self.get("hsv_settings", self.default_config["hsv_settings"])
+    
+    def set_hsv_settings(self, hsv_settings):
+        """
+        Set the HSV settings for ball tracking.
+        
+        Args:
+            hsv_settings (dict): HSV settings
+        """
+        current_settings = self.get_hsv_settings().copy()
+        current_settings.update(hsv_settings)
+        self.set("hsv_settings", current_settings)
+        self.save_config() 

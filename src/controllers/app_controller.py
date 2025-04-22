@@ -12,11 +12,14 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Slot, Signal, Qt, QThread
 from PySide6.QtGui import QPixmap
+import numpy as np
 
 from src.models.stereo_image_model import StereoImageModel
 from src.views.main_window import MainWindow
 from src.utils.ui_constants import Messages, Timing
 from src.utils.config_manager import ConfigManager
+from src.controllers.ball_tracking_controller import BallTrackingController
+from src.views.ball_tracking_settings_dialog import BallTrackingSettingsDialog
 
 
 class FrameLoaderThread(QThread):
@@ -111,6 +114,16 @@ class AppController(QObject):
         
         # Variables
         self.progress_dialog = None
+        
+        # Initialize ball tracking controller with the same config manager
+        self.ball_tracking_controller = BallTrackingController()
+        self.ball_tracking_controller.mask_updated.connect(self._on_mask_updated)
+        
+        # Initialize ball tracking settings dialog
+        self.ball_tracking_dialog = None
+        
+        # Connect ball tracking button
+        self.view.image_view.playback_controls.ball_tracking_clicked.connect(self._on_ball_tracking_button_clicked)
     
     def show(self):
         """Show the main window."""
@@ -203,6 +216,10 @@ class AppController(QObject):
             right_image = frame.get_right_image()
             
             self.view.image_view.set_images(left_image, right_image)
+            
+            # Update ball tracking controller with new images
+            if self.ball_tracking_controller.is_enabled:
+                self.ball_tracking_controller.set_images(left_image, right_image)
         else:
             self.view.image_view.clear_images()
         
@@ -260,6 +277,10 @@ class AppController(QObject):
         # Update model state
         self.model.is_playing = True
         
+        # Close ball tracking dialog if open during playback
+        if self.ball_tracking_dialog and self.ball_tracking_dialog.isVisible():
+            self.ball_tracking_dialog.close()
+        
         # Update status
         self.view.update_status(Messages.PLAYBACK_STARTED)
     
@@ -274,6 +295,14 @@ class AppController(QObject):
         
         # Update status
         self.view.update_status(Messages.PLAYBACK_PAUSED)
+        
+        # Refresh ball tracking display if enabled
+        if self.ball_tracking_controller.is_enabled:
+            frame = self.model.get_current_frame()
+            if frame:
+                left_image = frame.get_left_image()
+                right_image = frame.get_right_image()
+                self.ball_tracking_controller.set_images(left_image, right_image)
     
     @Slot()
     def _on_stop(self):
@@ -289,6 +318,14 @@ class AppController(QObject):
         
         # Update status
         self.view.update_status(Messages.PLAYBACK_STOPPED)
+        
+        # Refresh ball tracking display if enabled
+        if self.ball_tracking_controller.is_enabled:
+            frame = self.model.get_current_frame()
+            if frame:
+                left_image = frame.get_left_image()
+                right_image = frame.get_right_image()
+                self.ball_tracking_controller.set_images(left_image, right_image)
     
     @Slot()
     def _on_next_frame(self):
@@ -387,4 +424,44 @@ class AppController(QObject):
         if "last_image_folder" in settings:
             last_folder = settings["last_image_folder"]
             if last_folder:
-                self.config_manager.set_last_image_folder(last_folder) 
+                self.config_manager.set_last_image_folder(last_folder)
+
+    @Slot(np.ndarray, np.ndarray)
+    def _on_mask_updated(self, left_mask, right_mask):
+        """
+        Handle mask update from the ball tracking controller.
+        
+        Args:
+            left_mask (numpy.ndarray): Updated left mask
+            right_mask (numpy.ndarray): Updated right mask
+        """
+        # Update the view with the new masks
+        self.view.image_view.set_masks(left_mask, right_mask)
+    
+    @Slot()
+    def _on_ball_tracking_button_clicked(self):
+        """Handle ball tracking button click."""
+        # Create dialog if it doesn't exist
+        if not self.ball_tracking_dialog:
+            self.ball_tracking_dialog = BallTrackingSettingsDialog(self.view)
+            
+            # Connect dialog signals
+            self.ball_tracking_dialog.hsv_changed.connect(self.ball_tracking_controller.set_hsv_values)
+        
+        # Set current HSV values in the dialog
+        current_hsv = self.ball_tracking_controller.get_hsv_values()
+        self.ball_tracking_dialog.set_hsv_values(current_hsv)
+        
+        # Enable ball tracking and mask overlay
+        self.ball_tracking_controller.enable(True)
+        self.view.image_view.enable_mask_overlay(True)
+        
+        # Set current images to the ball tracking controller
+        current_frame = self.model.get_current_frame()
+        if current_frame:
+            left_image = current_frame.get_left_image()
+            right_image = current_frame.get_right_image()
+            self.ball_tracking_controller.set_images(left_image, right_image)
+        
+        # Show the dialog
+        self.ball_tracking_dialog.exec() 

@@ -30,6 +30,7 @@ class PlaybackControlsWidget(QWidget):
     frame_changed = Signal(int)
     fps_changed = Signal(int)
     skip_frames_changed = Signal(bool)
+    ball_tracking_clicked = Signal()
     
     def __init__(self, parent=None):
         """
@@ -96,6 +97,13 @@ class PlaybackControlsWidget(QWidget):
         self.skip_frames_checkbox.setChecked(self.skip_frames)
         self.skip_frames_checkbox.stateChanged.connect(self._on_skip_frames_changed)
         controls_layout.addWidget(self.skip_frames_checkbox)
+        
+        # Ball tracking settings button
+        self.ball_tracking_button = QPushButton("Ball Tracking")
+        self.ball_tracking_button.setToolTip("Open ball tracking settings")
+        self.ball_tracking_button.setFixedHeight(Layout.BUTTON_HEIGHT)
+        self.ball_tracking_button.clicked.connect(self._on_ball_tracking_clicked)
+        controls_layout.addWidget(self.ball_tracking_button)
         
         controls_layout.addStretch()
         
@@ -198,6 +206,11 @@ class PlaybackControlsWidget(QWidget):
             self.skip_frames = is_checked
             self.skip_frames_changed.emit(self.skip_frames)
     
+    def _on_ball_tracking_clicked(self):
+        """Handle ball tracking button click."""
+        # Emit signal that the ball tracking button was clicked
+        self.ball_tracking_clicked.emit()
+    
     def _update_frame_label(self):
         """Update the frame label text."""
         self.frame_label.setText(f"Frame: {self.current_frame + 1} / {self.total_frames}")
@@ -257,9 +270,13 @@ class PlaybackControlsWidget(QWidget):
             if is_playing:
                 self.play_button.setIcon(QIcon(Icons.PAUSE))
                 self.play_button.setToolTip("Pause")
+                # Disable ball tracking button during playback
+                self.ball_tracking_button.setEnabled(False)
             else:
                 self.play_button.setIcon(QIcon(Icons.PLAY))
                 self.play_button.setToolTip("Play")
+                # Enable ball tracking button when not playing
+                self.ball_tracking_button.setEnabled(True)
     
     def enable_controls(self, enable=True):
         """
@@ -274,4 +291,5 @@ class PlaybackControlsWidget(QWidget):
         self.next_button.setEnabled(enable)
         self.prev_button.setEnabled(enable)
         self.fps_spinbox.setEnabled(enable)
-        self.skip_frames_checkbox.setEnabled(enable) 
+        self.skip_frames_checkbox.setEnabled(enable)
+        self.ball_tracking_button.setEnabled(enable and not self.is_playing) 

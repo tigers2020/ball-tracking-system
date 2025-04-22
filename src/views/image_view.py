@@ -32,6 +32,11 @@ class ImageView(QWidget):
         
         # Set up UI
         self._setup_ui()
+        
+        # Mask overlay state
+        self.show_mask = False
+        self.left_mask = None
+        self.right_mask = None
     
     def _setup_ui(self):
         """Set up the user interface."""
@@ -105,4 +110,35 @@ class ImageView(QWidget):
         Returns:
             bool: True if frames should be skipped, False otherwise
         """
-        return self.playback_controls.is_skipping_frames() 
+        return self.playback_controls.is_skipping_frames()
+        
+    def set_masks(self, left_mask, right_mask):
+        """
+        Set the HSV masks for left and right images.
+        
+        Args:
+            left_mask (numpy.ndarray): Binary mask for left image
+            right_mask (numpy.ndarray): Binary mask for right image
+        """
+        self.left_mask = left_mask
+        self.right_mask = right_mask
+        
+        # Apply masks to current images if enabled
+        if self.show_mask:
+            self.stereo_view.set_masks(left_mask, right_mask)
+    
+    def enable_mask_overlay(self, enabled=True):
+        """
+        Enable or disable mask overlay on images.
+        
+        Args:
+            enabled (bool): True to enable, False to disable
+        """
+        self.show_mask = enabled
+        
+        if enabled:
+            # Apply current masks
+            self.stereo_view.set_masks(self.left_mask, self.right_mask)
+        else:
+            # Clear masks
+            self.stereo_view.set_masks(None, None) 

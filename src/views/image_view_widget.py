@@ -11,6 +11,7 @@ import numpy as np
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy
+import logging
 
 from src.utils.ui_constants import Layout
 
@@ -47,6 +48,10 @@ class ImageViewWidget(QWidget):
         self.image_label.setMinimumSize(320, 240)
         self.layout.addWidget(self.image_label)
         
+        # Store current CV image
+        self.current_cv_image = None
+        self.current_mask = None
+        
         # Empty pixmap as placeholder
         self.clear_image()
     
@@ -64,6 +69,13 @@ class ImageViewWidget(QWidget):
             self.clear_image()
             return False
         
+        # Store the original CV image
+        self.current_cv_image = cv_image.copy()
+        
+        # Apply mask if available
+        if self.current_mask is not None:
+            cv_image = self._apply_mask(cv_image, self.current_mask)
+        
         # Convert from BGR to RGB
         if len(cv_image.shape) == 3 and cv_image.shape[2] == 3:
             cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
@@ -78,6 +90,78 @@ class ImageViewWidget(QWidget):
         pixmap = QPixmap.fromImage(q_image)
         self.set_image(pixmap)
         return True
+    
+    def set_mask(self, mask):
+        """
+        Set a binary mask to overlay on the image.
+        
+        Args:
+            mask (numpy.ndarray): Binary mask (0-255)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        self.current_mask = mask
+        
+        # Reapply image with mask if we have an image
+        if self.current_cv_image is not None:
+            return self.set_image_from_cv(self.current_cv_image)
+        
+        return False
+    
+    def _apply_mask(self, image, mask):
+        """
+        Apply a mask overlay to the image.
+        
+        Args:
+            image (numpy.ndarray): Original image
+            mask (numpy.ndarray): Binary mask
+            
+        Returns:
+            numpy.ndarray: Image with mask overlay
+        """
+        if image is None or mask is None:
+            return image
+        
+        try:
+            # Make a copy of the original image
+            result = image.copy()
+            
+            # 1. Apply contour highlighting (red boundary around detected area)
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            cv2.drawContours(result, contours, -1, (0, 0, 255), 2)  # Red contour with thickness 2
+            
+            # 2. Apply colored mask overlay
+            # Create a colored overlay (red with transparency)
+            overlay = np.zeros_like(image, dtype=np.uint8)
+            overlay[mask > 0] = (0, 0, 255)  # Apply red color where mask is non-zero
+            
+            # Blend the overlay with the contour-highlighted image
+            alpha = 0.3  # Transparency factor
+            cv2.addWeighted(overlay, alpha, result, 1 - alpha, 0, result)
+            
+            # 3. Draw a small square at the center of each contour
+            for contour in contours:
+                if contour.size > 5:  # Only if contour has enough points
+                    M = cv2.moments(contour)
+                    if M["m00"] != 0:
+                        cX = int(M["m10"] / M["m00"])
+                        cY = int(M["m01"] / M["m00"])
+                        # Draw a small white square at the center
+                        square_size = 5
+                        cv2.rectangle(result, 
+                                     (cX - square_size, cY - square_size), 
+                                     (cX + square_size, cY + square_size), 
+                                     (255, 255, 255), -1)  # White filled square
+            
+            # Log successful mask application
+            logging.debug(f"Mask applied successfully - mask shape: {mask.shape}, non-zero pixels: {np.count_nonzero(mask)}")
+            
+            return result
+            
+        except Exception as e:
+            logging.error(f"Error applying mask: {e}")
+            return image
     
     def set_image(self, pixmap):
         """
@@ -105,6 +189,10 @@ class ImageViewWidget(QWidget):
         empty_pixmap = QPixmap(640, 480)
         empty_pixmap.fill(Qt.black)
         self.image_label.setPixmap(empty_pixmap)
+        
+        # Clear stored images and masks
+        self.current_cv_image = None
+        self.current_mask = None
     
     def set_title(self, title):
         """
@@ -183,6 +271,21 @@ class StereoImageViewWidget(QWidget):
         """Clear both the left and right images."""
         self.left_image_view.clear_image()
         self.right_image_view.clear_image()
+    
+    def set_masks(self, left_mask, right_mask):
+        """
+        Set masks for the left and right images.
+        
+        Args:
+            left_mask (numpy.ndarray): Binary mask for left image
+            right_mask (numpy.ndarray): Binary mask for right image
+            
+        Returns:
+            tuple: (left_success, right_success) indicating if each mask was successfully set
+        """
+        left_success = self.left_image_view.set_mask(left_mask)
+        right_success = self.right_image_view.set_mask(right_mask)
+        return left_success, right_success
     
     def set_titles(self, left_title="Left Image", right_title="Right Image"):
         """
