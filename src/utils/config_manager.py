@@ -41,6 +41,33 @@ class ConfigManager:
                 "height": 100, # ROI height in pixels
                 "enabled": True, # Whether ROI is enabled
                 "auto_center": True  # Whether to center ROI automatically on detected objects
+            },
+            "hough_circle_settings": {
+                "dp": 1,               # Resolution ratio
+                "min_dist": 50,        # Minimum distance between circles
+                "param1": 100,         # Higher threshold for edge detection (Canny)
+                "param2": 30,          # Threshold for center detection
+                "min_radius": 10,      # Minimum radius
+                "max_radius": 100,     # Maximum radius
+                "adaptive": False       # Whether to adapt parameters based on ROI size
+            },
+            "kalman_settings": {
+                "process_noise": 0.03, # Process noise covariance
+                "measurement_noise": 1.0 # Measurement noise covariance
+            },
+            "camera_settings": {
+                "camera_location_x": 0.0,
+                "camera_location_y": 29.089,
+                "camera_location_z": 12.503,
+                "camera_rotation_x": 65.0,
+                "camera_rotation_y": 0.0,
+                "camera_rotation_z": 180.0,
+                "focal_length_mm": 50.0,
+                "baseline_m": 1.0,
+                "sensor_width": 36.0,
+                "sensor_height": 24.0,
+                "principal_point_x": 320.0,
+                "principal_point_y": 240.0
             }
         }
         
@@ -163,4 +190,132 @@ class ConfigManager:
         current_settings = self.get_roi_settings().copy()
         current_settings.update(roi_settings)
         self.set("roi_settings", current_settings)
-        self.save_config() 
+        self.save_config()
+    
+    def get_hough_circle_settings(self):
+        """
+        Get the Hough Circle detection settings.
+        
+        Returns:
+            dict: Hough Circle settings
+        """
+        # Return a copy to avoid mutating original configuration
+        return self.get("hough_circle_settings", self.default_config["hough_circle_settings"]).copy()
+    
+    def set_hough_circle_settings(self, hough_circle_settings):
+        """
+        Set the Hough Circle detection settings.
+        
+        Args:
+            hough_circle_settings (dict): Hough Circle settings
+        """
+        current_settings = self.get_hough_circle_settings().copy()
+        current_settings.update(hough_circle_settings)
+        self.set("hough_circle_settings", current_settings)
+        self.save_config()
+    
+    def get_kalman_settings(self):
+        """
+        Get the Kalman filter settings.
+        
+        Returns:
+            dict: Kalman filter settings
+        """
+        return self.get("kalman_settings", self.default_config["kalman_settings"])
+    
+    def set_kalman_settings(self, kalman_settings):
+        """
+        Set the Kalman filter settings.
+        
+        Args:
+            kalman_settings (dict): Kalman filter settings
+        """
+        current_settings = self.get_kalman_settings().copy()
+        current_settings.update(kalman_settings)
+        self.set("kalman_settings", current_settings)
+        self.save_config()
+    
+    def get_camera_settings(self):
+        """
+        Get the camera settings.
+        
+        Returns:
+            dict: Camera settings
+        """
+        return self.get("camera_settings", self.default_config["camera_settings"])
+    
+    def set_camera_settings(self, camera_settings):
+        """
+        Set the camera settings.
+        
+        Args:
+            camera_settings (dict): Camera settings
+        """
+        current_settings = self.get_camera_settings().copy()
+        current_settings.update(camera_settings)
+        self.set("camera_settings", current_settings)
+        self.save_config()
+
+    def validate_roi(self, roi_settings=None, image_width=None, image_height=None):
+        """
+        Validate ROI settings against image dimensions.
+        Adjusts ROI dimensions if they exceed image boundaries.
+        
+        Args:
+            roi_settings (dict, optional): ROI settings to validate.
+                If None, current settings will be used.
+            image_width (int, optional): Image width in pixels.
+                If None, no validation against width will be performed.
+            image_height (int, optional): Image height in pixels.
+                If None, no validation against height will be performed.
+                
+        Returns:
+            dict: Validated (and possibly adjusted) ROI settings
+        """
+        # Use provided ROI settings or get current ones
+        settings = roi_settings.copy() if roi_settings is not None else self.get_roi_settings().copy()
+        
+        # Validate width if image width is provided
+        if image_width is not None and settings.get("width") is not None:
+            if settings["width"] > image_width:
+                old_width = settings["width"]
+                settings["width"] = image_width
+                logging.warning(f"ROI width ({old_width}) exceeds image width ({image_width}). Adjusted to {settings['width']}.")
+        
+        # Validate height if image height is provided
+        if image_height is not None and settings.get("height") is not None:
+            if settings["height"] > image_height:
+                old_height = settings["height"]
+                settings["height"] = image_height
+                logging.warning(f"ROI height ({old_height}) exceeds image height ({image_height}). Adjusted to {settings['height']}.")
+        
+        # Ensure ROI dimensions are positive
+        if settings.get("width") is not None and settings["width"] <= 0:
+            settings["width"] = 100  # Default reasonable width
+            logging.warning(f"Invalid ROI width <= 0. Set to default: {settings['width']}.")
+            
+        if settings.get("height") is not None and settings["height"] <= 0:
+            settings["height"] = 100  # Default reasonable height
+            logging.warning(f"Invalid ROI height <= 0. Set to default: {settings['height']}.")
+        
+        return settings
+    
+    def set_roi_settings_with_validation(self, roi_settings, image_width=None, image_height=None):
+        """
+        Validate and set the ROI settings for ball tracking.
+        
+        Args:
+            roi_settings (dict): ROI settings
+            image_width (int, optional): Image width for validation
+            image_height (int, optional): Image height for validation
+        
+        Returns:
+            dict: The validated and applied ROI settings
+        """
+        # Validate ROI settings
+        validated_settings = self.validate_roi(roi_settings, image_width, image_height)
+        
+        # Apply validated settings
+        self.set_roi_settings(validated_settings)
+        
+        return validated_settings 

@@ -152,4 +152,41 @@ class ImageView(QWidget):
             self.stereo_view.set_masks(self.left_mask, self.right_mask)
         else:
             # Clear masks
-            self.stereo_view.set_masks(None, None) 
+            self.stereo_view.set_masks(None, None)
+            
+    def set_circle_images(self, left_circle_image, right_circle_image):
+        """
+        Set the images with detected circles.
+        
+        Args:
+            left_circle_image (numpy.ndarray): Left image with circles drawn
+            right_circle_image (numpy.ndarray): Right image with circles drawn
+        """
+        if left_circle_image is not None and right_circle_image is not None:
+            self.stereo_view.set_images(left_circle_image, right_circle_image)
+        elif left_circle_image is not None:
+            left_success, _ = self.stereo_view.set_images(left_circle_image, None)
+        elif right_circle_image is not None:
+            _, right_success = self.stereo_view.set_images(None, right_circle_image)
+            
+    def connect_ball_tracking_controller(self, controller):
+        """
+        Connect to a ball tracking controller to receive updates.
+        
+        Args:
+            controller: BallTrackingController instance
+        """
+        if controller:
+            # Connect mask update signal
+            controller.mask_updated.connect(self.set_masks)
+            
+            # Connect ROI update signal
+            controller.roi_updated.connect(self.set_rois)
+            
+            # Connect circles processed signal
+            controller.circles_processed.connect(self.set_circle_images)
+            
+            # Connect info view to controller
+            self.info_view.connect_tracking_controller(controller)
+            
+            logging.info("Connected to ball tracking controller") 

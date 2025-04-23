@@ -1,0 +1,19 @@
+# Kalman Filter Configuration
+
+# Frame time interval (dt)
+dt: 1.0
+
+# Process noise covariance factor
+# Higher values = faster adaptation to changes
+process_noise: 5.0e-2
+
+# Measurement noise covariance factor
+# Higher values = measurements are treated as less reliable
+measurement_noise: 1.0e0
+
+# Initial state error covariance factor
+initial_error_cov: 1.0
+
+# State initialization
+init_velocity_x: 0.0
+init_velocity_y: 0.0 

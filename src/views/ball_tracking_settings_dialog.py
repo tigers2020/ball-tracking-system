@@ -24,6 +24,8 @@ class BallTrackingSettingsDialog(QDialog):
     # Signals
     hsv_changed = Signal(dict)
     roi_changed = Signal(dict)
+    hough_circle_changed = Signal(dict)
+    kalman_changed = Signal(dict)
     
     def __init__(self, parent=None):
         """
@@ -47,6 +49,22 @@ class BallTrackingSettingsDialog(QDialog):
         
         # ROI settings - load from configuration
         self.roi_settings = self.config_manager.get_roi_settings()
+        
+        # Hough Circle parameters - create default values if not in config
+        self.hough_circle_params = self.config_manager.get_hough_circle_settings() if hasattr(self.config_manager, 'get_hough_circle_settings') else {
+            "dp": 1,               # Resolution ratio
+            "min_dist": 50,        # Minimum distance between circles
+            "param1": 100,         # Higher threshold for edge detection (Canny)
+            "param2": 30,          # Threshold for center detection
+            "min_radius": 10,      # Minimum radius
+            "max_radius": 100      # Maximum radius
+        }
+        
+        # Kalman filter parameters - create default values if not in config
+        self.kalman_params = self.config_manager.get_kalman_settings() if hasattr(self.config_manager, 'get_kalman_settings') else {
+            "process_noise": 0.03, # Process noise covariance
+            "measurement_noise": 1.0 # Measurement noise covariance
+        }
         
         # Set up UI
         self._setup_ui()
@@ -171,6 +189,110 @@ class BallTrackingSettingsDialog(QDialog):
         roi_group.setLayout(roi_layout)
         main_layout.addWidget(roi_group)
         
+        # Create Hough Circle parameters group
+        hough_group = QGroupBox("Hough Circle Detection")
+        hough_layout = QGridLayout()
+        
+        # Resolution parameter (dp)
+        dp_label = QLabel("Resolution (dp):")
+        self.dp_slider = self._create_slider(10, 30, int(self.hough_circle_params["dp"] * 10))
+        self.dp_value_label = QLabel(str(self.hough_circle_params["dp"]))
+        self.dp_slider.valueChanged.connect(
+            lambda v: self._update_hough_value("dp", v / 10.0))
+            
+        # Min distance parameter
+        min_dist_label = QLabel("Min Distance:")
+        self.min_dist_slider = self._create_slider(10, 200, self.hough_circle_params["min_dist"])
+        self.min_dist_value_label = QLabel(str(self.hough_circle_params["min_dist"]))
+        self.min_dist_slider.valueChanged.connect(
+            lambda v: self._update_hough_value("min_dist", v))
+            
+        # Edge threshold parameter (param1)
+        param1_label = QLabel("Edge Threshold:")
+        self.param1_slider = self._create_slider(10, 300, self.hough_circle_params["param1"])
+        self.param1_value_label = QLabel(str(self.hough_circle_params["param1"]))
+        self.param1_slider.valueChanged.connect(
+            lambda v: self._update_hough_value("param1", v))
+            
+        # Center threshold parameter (param2)
+        param2_label = QLabel("Center Threshold:")
+        self.param2_slider = self._create_slider(1, 100, self.hough_circle_params["param2"])
+        self.param2_value_label = QLabel(str(self.hough_circle_params["param2"]))
+        self.param2_slider.valueChanged.connect(
+            lambda v: self._update_hough_value("param2", v))
+            
+        # Min radius parameter
+        min_radius_label = QLabel("Min Radius:")
+        self.min_radius_slider = self._create_slider(1, 100, self.hough_circle_params["min_radius"])
+        self.min_radius_value_label = QLabel(str(self.hough_circle_params["min_radius"]))
+        self.min_radius_slider.valueChanged.connect(
+            lambda v: self._update_hough_value("min_radius", v))
+            
+        # Max radius parameter
+        max_radius_label = QLabel("Max Radius:")
+        self.max_radius_slider = self._create_slider(10, 300, self.hough_circle_params["max_radius"])
+        self.max_radius_value_label = QLabel(str(self.hough_circle_params["max_radius"]))
+        self.max_radius_slider.valueChanged.connect(
+            lambda v: self._update_hough_value("max_radius", v))
+            
+        # Add widgets to grid layout
+        hough_layout.addWidget(dp_label, 0, 0)
+        hough_layout.addWidget(self.dp_slider, 0, 1)
+        hough_layout.addWidget(self.dp_value_label, 0, 2)
+        
+        hough_layout.addWidget(min_dist_label, 1, 0)
+        hough_layout.addWidget(self.min_dist_slider, 1, 1)
+        hough_layout.addWidget(self.min_dist_value_label, 1, 2)
+        
+        hough_layout.addWidget(param1_label, 2, 0)
+        hough_layout.addWidget(self.param1_slider, 2, 1)
+        hough_layout.addWidget(self.param1_value_label, 2, 2)
+        
+        hough_layout.addWidget(param2_label, 3, 0)
+        hough_layout.addWidget(self.param2_slider, 3, 1)
+        hough_layout.addWidget(self.param2_value_label, 3, 2)
+        
+        hough_layout.addWidget(min_radius_label, 4, 0)
+        hough_layout.addWidget(self.min_radius_slider, 4, 1)
+        hough_layout.addWidget(self.min_radius_value_label, 4, 2)
+        
+        hough_layout.addWidget(max_radius_label, 5, 0)
+        hough_layout.addWidget(self.max_radius_slider, 5, 1)
+        hough_layout.addWidget(self.max_radius_value_label, 5, 2)
+        
+        hough_group.setLayout(hough_layout)
+        main_layout.addWidget(hough_group)
+        
+        # Create Kalman filter parameters group
+        kalman_group = QGroupBox("Kalman Filter Settings")
+        kalman_layout = QGridLayout()
+        
+        # Process noise parameter
+        process_noise_label = QLabel("Process Noise:")
+        self.process_noise_slider = self._create_slider(1, 100, int(self.kalman_params["process_noise"] * 1000))
+        self.process_noise_value_label = QLabel(str(self.kalman_params["process_noise"]))
+        self.process_noise_slider.valueChanged.connect(
+            lambda v: self._update_kalman_value("process_noise", v / 1000.0))
+            
+        # Measurement noise parameter
+        measurement_noise_label = QLabel("Measurement Noise:")
+        self.measurement_noise_slider = self._create_slider(1, 100, int(self.kalman_params["measurement_noise"] * 10))
+        self.measurement_noise_value_label = QLabel(str(self.kalman_params["measurement_noise"]))
+        self.measurement_noise_slider.valueChanged.connect(
+            lambda v: self._update_kalman_value("measurement_noise", v / 10.0))
+            
+        # Add widgets to grid layout
+        kalman_layout.addWidget(process_noise_label, 0, 0)
+        kalman_layout.addWidget(self.process_noise_slider, 0, 1)
+        kalman_layout.addWidget(self.process_noise_value_label, 0, 2)
+        
+        kalman_layout.addWidget(measurement_noise_label, 1, 0)
+        kalman_layout.addWidget(self.measurement_noise_slider, 1, 1)
+        kalman_layout.addWidget(self.measurement_noise_value_label, 1, 2)
+        
+        kalman_group.setLayout(kalman_layout)
+        main_layout.addWidget(kalman_group)
+        
         # Add buttons
         button_layout = QHBoxLayout()
         button_layout.addStretch()
@@ -253,6 +375,52 @@ class BallTrackingSettingsDialog(QDialog):
         # Emit signal with updated ROI settings
         self.roi_changed.emit(self.roi_settings)
     
+    def _update_hough_value(self, key, value):
+        """
+        Update Hough Circle parameter value and emit change signal.
+        
+        Args:
+            key (str): Hough Circle parameter key
+            value: New value
+        """
+        self.hough_circle_params[key] = value
+        
+        # Update the value label
+        if key == "dp":
+            self.dp_value_label.setText(str(value))
+        elif key == "min_dist":
+            self.min_dist_value_label.setText(str(value))
+        elif key == "param1":
+            self.param1_value_label.setText(str(value))
+        elif key == "param2":
+            self.param2_value_label.setText(str(value))
+        elif key == "min_radius":
+            self.min_radius_value_label.setText(str(value))
+        elif key == "max_radius":
+            self.max_radius_value_label.setText(str(value))
+        
+        # Emit signal with updated Hough Circle parameters
+        self.hough_circle_changed.emit(self.hough_circle_params)
+    
+    def _update_kalman_value(self, key, value):
+        """
+        Update Kalman filter parameter value and emit change signal.
+        
+        Args:
+            key (str): Kalman filter parameter key
+            value: New value
+        """
+        self.kalman_params[key] = value
+        
+        # Update the value label
+        if key == "process_noise":
+            self.process_noise_value_label.setText(str(value))
+        elif key == "measurement_noise":
+            self.measurement_noise_value_label.setText(str(value))
+        
+        # Emit signal with updated Kalman filter parameters
+        self.kalman_changed.emit(self.kalman_params)
+    
     def get_hsv_values(self):
         """
         Get the current HSV values.
@@ -270,6 +438,24 @@ class BallTrackingSettingsDialog(QDialog):
             dict: Current ROI settings
         """
         return self.roi_settings
+    
+    def get_hough_circle_params(self):
+        """
+        Get the current Hough Circle parameters.
+        
+        Returns:
+            dict: Current Hough Circle parameters
+        """
+        return self.hough_circle_params
+    
+    def get_kalman_params(self):
+        """
+        Get the current Kalman filter parameters.
+        
+        Returns:
+            dict: Current Kalman filter parameters
+        """
+        return self.kalman_params
     
     def set_hsv_values(self, hsv_values):
         """
@@ -329,6 +515,56 @@ class BallTrackingSettingsDialog(QDialog):
                     self.height_slider.setValue(value)
                     self.height_value_label.setText(str(value))
     
+    def set_hough_circle_params(self, hough_circle_params):
+        """
+        Set Hough Circle parameters and update UI controls.
+        
+        Args:
+            hough_circle_params (dict): Hough Circle parameters to set
+        """
+        for key, value in hough_circle_params.items():
+            if key in self.hough_circle_params:
+                self.hough_circle_params[key] = value
+                
+                # Update controls
+                if key == "dp":
+                    self.dp_slider.setValue(int(value * 10))
+                    self.dp_value_label.setText(str(value))
+                elif key == "min_dist":
+                    self.min_dist_slider.setValue(value)
+                    self.min_dist_value_label.setText(str(value))
+                elif key == "param1":
+                    self.param1_slider.setValue(value)
+                    self.param1_value_label.setText(str(value))
+                elif key == "param2":
+                    self.param2_slider.setValue(value)
+                    self.param2_value_label.setText(str(value))
+                elif key == "min_radius":
+                    self.min_radius_slider.setValue(value)
+                    self.min_radius_value_label.setText(str(value))
+                elif key == "max_radius":
+                    self.max_radius_slider.setValue(value)
+                    self.max_radius_value_label.setText(str(value))
+    
+    def set_kalman_params(self, kalman_params):
+        """
+        Set Kalman filter parameters and update UI controls.
+        
+        Args:
+            kalman_params (dict): Kalman filter parameters to set
+        """
+        for key, value in kalman_params.items():
+            if key in self.kalman_params:
+                self.kalman_params[key] = value
+                
+                # Update controls
+                if key == "process_noise":
+                    self.process_noise_slider.setValue(int(value * 1000))
+                    self.process_noise_value_label.setText(str(value))
+                elif key == "measurement_noise":
+                    self.measurement_noise_slider.setValue(int(value * 10))
+                    self.measurement_noise_value_label.setText(str(value))
+    
     def closeEvent(self, event):
         """
         Handle close event to save settings.
@@ -340,6 +576,10 @@ class BallTrackingSettingsDialog(QDialog):
         self.config_manager.set_hsv_settings(self.hsv_values)
         # Save current ROI settings to configuration
         self.config_manager.set_roi_settings(self.roi_settings)
+        # Save current Hough Circle parameters to configuration
+        self.config_manager.set_hough_circle_settings(self.hough_circle_params)
+        # Save current Kalman filter parameters to configuration
+        self.config_manager.set_kalman_settings(self.kalman_params)
         super(BallTrackingSettingsDialog, self).closeEvent(event)
         
     def accept(self):
@@ -348,4 +588,8 @@ class BallTrackingSettingsDialog(QDialog):
         self.config_manager.set_hsv_settings(self.hsv_values)
         # Save current ROI settings to configuration
         self.config_manager.set_roi_settings(self.roi_settings)
+        # Save current Hough Circle parameters to configuration
+        self.config_manager.set_hough_circle_settings(self.hough_circle_params)
+        # Save current Kalman filter parameters to configuration
+        self.config_manager.set_kalman_settings(self.kalman_params)
         super(BallTrackingSettingsDialog, self).accept() 

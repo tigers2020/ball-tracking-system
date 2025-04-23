@@ -153,6 +153,11 @@ class ImageViewWidget(QWidget):
             # Make a copy of the original image
             result = image.copy()
             
+            # Ensure mask is the same size as the image
+            if mask.shape[:2] != image.shape[:2]:
+                logging.debug(f"Resizing mask from {mask.shape} to match image size {image.shape[:2]}")
+                mask = cv2.resize(mask, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_NEAREST)
+            
             # 1. Apply contour highlighting (red boundary around detected area)
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             cv2.drawContours(result, contours, -1, (0, 0, 255), 2)  # Red contour with thickness 2
@@ -160,7 +165,16 @@ class ImageViewWidget(QWidget):
             # 2. Apply colored mask overlay
             # Create a colored overlay (red with transparency)
             overlay = np.zeros_like(image, dtype=np.uint8)
-            overlay[mask > 0] = (0, 0, 255)  # Apply red color where mask is non-zero
+            
+            # Create a binary mask that matches the image size
+            binary_mask = (mask > 0)
+            if binary_mask.shape[:2] != overlay.shape[:2]:
+                logging.error(f"Mask shape {binary_mask.shape} doesn't match overlay shape {overlay.shape[:2]}")
+                # Safety check - don't apply mismatched mask
+                return result
+                
+            # Apply red color where mask is non-zero
+            overlay[binary_mask] = (0, 0, 255)
             
             # Blend the overlay with the contour-highlighted image
             alpha = 0.3  # Transparency factor
@@ -389,4 +403,98 @@ class StereoImageViewWidget(QWidget):
             right_title (str): Right image title
         """
         self.left_image_view.set_title(left_title)
-        self.right_image_view.set_title(right_title) 
+        self.right_image_view.set_title(right_title)
+        
+    def display_roi_images(self, left_roi_image, right_roi_image):
+        """
+        Display cropped ROI images in separate windows.
+        
+        Args:
+            left_roi_image (numpy.ndarray): Cropped ROI image from left camera
+            right_roi_image (numpy.ndarray): Cropped ROI image from right camera
+            
+        Returns:
+            bool: True if at least one ROI image was displayed successfully
+        """
+        success = False
+        
+        # Create ROI display windows if needed
+        if not hasattr(self, 'left_roi_view'):
+            self.left_roi_view = ImageViewWidget("Left ROI")
+            self.left_roi_view.setWindowTitle("Left ROI")
+            self.left_roi_view.resize(320, 240)
+            
+        if not hasattr(self, 'right_roi_view'):
+            self.right_roi_view = ImageViewWidget("Right ROI")
+            self.right_roi_view.setWindowTitle("Right ROI")
+            self.right_roi_view.resize(320, 240)
+            
+        # Display left ROI image if available
+        if left_roi_image is not None:
+            self.left_roi_view.set_image_from_cv(left_roi_image)
+            self.left_roi_view.show()
+            success = True
+        else:
+            self.left_roi_view.hide()
+            
+        # Display right ROI image if available
+        if right_roi_image is not None:
+            self.right_roi_view.set_image_from_cv(right_roi_image)
+            self.right_roi_view.show()
+            success = True
+        else:
+            self.right_roi_view.hide()
+            
+        return success
+    
+    def save_roi_images(self, left_roi_image, right_roi_image, left_path=None, right_path=None):
+        """
+        Save ROI images to disk.
+        
+        Args:
+            left_roi_image (numpy.ndarray): Cropped ROI image from left camera
+            right_roi_image (numpy.ndarray): Cropped ROI image from right camera
+            left_path (str, optional): Path to save left ROI image. If None, a default path is used.
+            right_path (str, optional): Path to save right ROI image. If None, a default path is used.
+            
+        Returns:
+            tuple: (left_success, right_success) indicating if each image was successfully saved
+        """
+        import os
+        from datetime import datetime
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_dir = os.path.join(os.getcwd(), "roi_images")
+        
+        # Create directory if it doesn't exist
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+            
+        # Set default paths if not provided
+        if left_path is None:
+            left_path = os.path.join(save_dir, f"left_roi_{timestamp}.png")
+        if right_path is None:
+            right_path = os.path.join(save_dir, f"right_roi_{timestamp}.png")
+            
+        left_success = False
+        right_success = False
+        
+        # Save left ROI image
+        if left_roi_image is not None:
+            try:
+                cv2.imwrite(left_path, left_roi_image)
+                left_success = True
+                logging.info(f"Left ROI image saved to {left_path}")
+            except Exception as e:
+                logging.error(f"Error saving left ROI image: {e}")
+                
+        # Save right ROI image
+        if right_roi_image is not None:
+            try:
+                cv2.imwrite(right_path, right_roi_image)
+                right_success = True
+                logging.info(f"Right ROI image saved to {right_path}")
+            except Exception as e:
+                logging.error(f"Error saving right ROI image: {e}")
+                
+        return left_success, right_success 

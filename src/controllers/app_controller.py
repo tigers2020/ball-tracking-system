@@ -101,6 +101,9 @@ class AppController(QObject):
         self.view.setting_view.settings_changed.connect(self._on_settings_changed)
         self.view.setting_view.folder_selected.connect(self.open_folder)
         
+        # Connect app closing signal
+        self.view.app_closing.connect(self._on_app_closing)
+        
         # Override view methods
         self.view.open_folder = self.open_folder
         
@@ -117,14 +120,19 @@ class AppController(QObject):
         
         # Initialize ball tracking controller with the same config manager
         self.ball_tracking_controller = BallTrackingController()
-        self.ball_tracking_controller.mask_updated.connect(self._on_mask_updated)
-        self.ball_tracking_controller.roi_updated.connect(self._on_roi_updated)
+        
+        # Connect image_view to ball_tracking_controller
+        self.view.image_view.connect_ball_tracking_controller(self.ball_tracking_controller)
         
         # Initialize ball tracking settings dialog
         self.ball_tracking_dialog = None
         
         # Connect ball tracking button
         self.view.image_view.playback_controls.ball_tracking_clicked.connect(self._on_ball_tracking_button_clicked)
+        
+        # Tracking data save settings
+        self.tracking_data_save_enabled = True  # Enable/disable saving
+        self.tracking_data_folder = os.path.join(os.getcwd(), "tracking_data")  # Default folder
     
     def show(self):
         """Show the main window."""
@@ -221,6 +229,33 @@ class AppController(QObject):
             # Update ball tracking controller with new images
             if self.ball_tracking_controller.is_enabled:
                 self.ball_tracking_controller.set_images(left_image, right_image)
+                
+                # Save tracking data for the current frame if tracking is active
+                if self.tracking_data_save_enabled and self.ball_tracking_controller.detection_stats["is_tracking"]:
+                    # Use folder name based on current image folder
+                    folder_name = os.path.basename(self.config_manager.get_last_image_folder())
+                    if not folder_name:
+                        folder_name = "default"
+                    
+                    # Create specific folder for this dataset
+                    tracking_folder = os.path.join(self.tracking_data_folder, folder_name)
+                    
+                    # First ensure XML tracking is initialized
+                    if not hasattr(self.ball_tracking_controller, 'xml_root') or self.ball_tracking_controller.xml_root is None:
+                        self.ball_tracking_controller.initialize_xml_tracking(folder_name)
+                    
+                    # Save frame to XML (primary method)
+                    frame_name = f"frame_{frame_index:06d}.png"
+                    success = self.ball_tracking_controller.save_frame_to_xml(frame_index, frame_name)
+                    
+                    # entire XML File specific Only at intervals save (Performance problem prevention and disk I/O decrease)
+                    if frame_index % 10 == 0:  # 10 Every frame save
+                        self.ball_tracking_controller.save_xml_tracking_data(tracking_folder)
+                        logging.debug(f"XML tracking data saved at frame {frame_index} (periodic save)")
+                    
+                    # Fallback to JSON if XML saving failed
+                    if not success:
+                        self.ball_tracking_controller.save_tracking_data_for_frame(frame_index, tracking_folder)
         else:
             self.view.image_view.clear_images()
         
@@ -319,6 +354,9 @@ class AppController(QObject):
         
         # Update status
         self.view.update_status(Messages.PLAYBACK_STOPPED)
+        
+        # Reset ball tracking data
+        self.ball_tracking_controller.reset_tracking()
         
         # Refresh ball tracking display if enabled
         if self.ball_tracking_controller.is_enabled:
@@ -477,4 +515,114 @@ class AppController(QObject):
             self.ball_tracking_controller.set_images(left_image, right_image)
         
         # Show the dialog
-        self.ball_tracking_dialog.exec() 
+        self.ball_tracking_dialog.exec()
+
+    def set_tracking_data_save(self, enabled, folder=None):
+        """
+        Enable or disable tracking data saving and set the output folder.
+        
+        Args:
+            enabled (bool): Whether to save tracking data
+            folder (str, optional): Output folder path. If None, use default.
+        """
+        self.tracking_data_save_enabled = enabled
+        
+        if folder:
+            self.tracking_data_folder = folder
+        
+        if enabled:
+            os.makedirs(self.tracking_data_folder, exist_ok=True)
+            logging.info(f"Tracking data saving enabled. Output folder: {self.tracking_data_folder}")
+        else:
+            logging.info("Tracking data saving disabled")
+
+    def save_all_tracking_data(self):
+        """
+        Save all accumulated tracking data to a comprehensive XML file.
+        Call this on application exit or when user wants to save all tracking
+        data for further analysis. Falls back to JSON if XML saving fails.
+        
+        Returns:
+            str: Path to the saved file
+        """
+        if not self.tracking_data_save_enabled:
+            logging.info("Tracking data saving is disabled")
+            return None
+        
+        # Use folder name based on current image folder
+        folder_name = os.path.basename(self.config_manager.get_last_image_folder())
+        if not folder_name:
+            folder_name = "default"
+        
+        # Create specific folder for this dataset
+        tracking_folder = os.path.join(self.tracking_data_folder, folder_name)
+        
+        # First try XML saving (primary method)
+        try:
+            # Initialize XML tracking if not already initialized
+            self.ball_tracking_controller.initialize_xml_tracking(folder_name)
+            xml_path = self.ball_tracking_controller.save_xml_tracking_data(tracking_folder)
+            
+            if xml_path:
+                logging.info(f"All tracking data saved to XML: {xml_path}")
+                return xml_path
+        except Exception as e:
+            logging.error(f"Error saving XML tracking data: {e}. Falling back to JSON.")
+        
+        # Fallback to JSON if XML saving failed
+        detection_rate = self.ball_tracking_controller.get_detection_rate()
+        total_frames = self.ball_tracking_controller.detection_stats["total_frames"]
+        detection_count = self.ball_tracking_controller.detection_stats["detection_count"]
+        
+        filename = f"summary_rate{int(detection_rate*100)}_frames{total_frames}_detections{detection_count}"
+        
+        json_path = self.ball_tracking_controller.save_tracking_data_to_json(tracking_folder, filename)
+        if json_path:
+            logging.info(f"All tracking data saved to JSON (fallback): {json_path}")
+        
+        return json_path
+
+    @Slot()
+    def _on_app_closing(self):
+        """Handle application closing."""
+        logging.info("Application closing. Saving tracking data...")
+        
+        # 1. First The second certainly XML Data directly save (most importance)
+        try:
+            # Get folder name based on current image folder
+            folder_name = os.path.basename(self.config_manager.get_last_image_folder())
+            if not folder_name:
+                folder_name = "default"
+            
+            # Create specific folder for this dataset
+            tracking_folder = os.path.join(self.tracking_data_folder, folder_name)
+            
+            # Ensure XML tracking is initialized
+            if not hasattr(self.ball_tracking_controller, 'xml_root') or self.ball_tracking_controller.xml_root is None:
+                self.ball_tracking_controller.initialize_xml_tracking(folder_name)
+            
+            # Force XML data to be saved with final statistics
+            xml_path = self.ball_tracking_controller.save_xml_tracking_data(tracking_folder)
+            if xml_path:
+                logging.info(f"XML tracking data finalized successfully: {xml_path}")
+            else:
+                logging.warning("XML tracking data could not be saved directly.")
+        except Exception as e:
+            logging.error(f"Error finalizing XML tracking data: {e}")
+        
+        # 2. By backup existing save_all_tracking_data() Call (JSON Paul bag include)
+        try:
+            result = self.save_all_tracking_data()
+            if result:
+                logging.info(f"Additional tracking data backup saved to: {result}")
+        except Exception as e:
+            logging.error(f"Error while saving tracking data backup: {e}")
+        
+        # Clean up resources
+        self.progress_dialog = None
+        self.preload_thread = None
+        self.ball_tracking_dialog = None
+        self.tracking_data_save_enabled = False
+        self.tracking_data_folder = None
+        
+        logging.info("Application closed.") 

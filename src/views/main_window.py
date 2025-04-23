@@ -9,7 +9,7 @@ This module contains the MainWindow class which serves as the main UI for the St
 import os
 import logging
 
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QWidget, QFileDialog, QMenuBar, 
@@ -25,6 +25,9 @@ class MainWindow(QMainWindow):
     """
     Main window for the Stereo Image Player application.
     """
+    
+    # Signal for app closing
+    app_closing = Signal()
     
     def __init__(self, parent=None):
         """
@@ -207,10 +210,25 @@ class MainWindow(QMainWindow):
         progress_dialog = QProgressDialog(message, "Cancel", minimum, maximum, self)
         progress_dialog.setWindowTitle(title)
         progress_dialog.setWindowModality(Qt.WindowModal)
+        progress_dialog.setMinimumDuration(0)  # Show immediately
         progress_dialog.setAutoClose(True)
         progress_dialog.setAutoReset(True)
         
         return progress_dialog
+    
+    def closeEvent(self, event):
+        """
+        Handle window close event.
+        Emit signal for saving tracking data before closing.
+        
+        Args:
+            event (QCloseEvent): Close event
+        """
+        # Emit app closing signal
+        self.app_closing.emit()
+        
+        # Accept the close event
+        event.accept()
     
     def open_folder(self, folder_path):
         """
