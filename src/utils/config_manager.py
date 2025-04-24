@@ -159,9 +159,26 @@ class ConfigManager:
         Get the HSV settings for ball tracking.
         
         Returns:
-            dict: HSV settings
+            dict: HSV settings with standardized keys (h_min, h_max, etc.)
         """
-        return self.get("hsv_settings", self.default_config["hsv_settings"])
+        settings = self.get("hsv_settings", self.default_config["hsv_settings"]).copy()
+        
+        # 표준화된 키 매핑
+        key_mapping = {
+            "lower_h": "h_min", "upper_h": "h_max",
+            "lower_s": "s_min", "upper_s": "s_max",
+            "lower_v": "v_min", "upper_v": "v_max"
+        }
+        
+        # 이전 키들을 새 형식으로 변환하고 이전 키는 제거
+        for old_key, new_key in key_mapping.items():
+            if old_key in settings:
+                if new_key not in settings:
+                    settings[new_key] = settings[old_key]
+                # 이전 키는 항상 제거
+                del settings[old_key]
+        
+        return settings
     
     def set_hsv_settings(self, hsv_settings):
         """
@@ -171,6 +188,27 @@ class ConfigManager:
             hsv_settings (dict): HSV settings
         """
         current_settings = self.get_hsv_settings().copy()
+        
+        # 표준화된 키 매핑
+        key_mapping = {
+            "lower_h": "h_min", "upper_h": "h_max",
+            "lower_s": "s_min", "upper_s": "s_max",
+            "lower_v": "v_min", "upper_v": "v_max"
+        }
+        
+        # 이전 키들을 새 형식으로 변환
+        for old_key, new_key in key_mapping.items():
+            if old_key in hsv_settings:
+                hsv_settings[new_key] = hsv_settings[old_key]
+                # 이전 키 제거
+                if old_key in hsv_settings:
+                    del hsv_settings[old_key]
+            
+            # 이전 형식의 키가 현재 설정에 있으면 제거
+            if old_key in current_settings:
+                del current_settings[old_key]
+        
+        # 업데이트된 설정 적용
         current_settings.update(hsv_settings)
         self.set("hsv_settings", current_settings)
         self.save_config()

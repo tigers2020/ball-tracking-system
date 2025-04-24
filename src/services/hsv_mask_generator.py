@@ -32,20 +32,7 @@ class HSVMaskGenerator:
         """
         self.hsv_settings = hsv_settings.copy()
         
-        # Create reverse mapping for backward compatibility
-        reverse_alias = {
-            "lower_h": "h_min", "upper_h": "h_max",
-            "lower_s": "s_min", "upper_s": "s_max",
-            "lower_v": "v_min", "upper_v": "v_max",
-        }
-        
-        # Map old keys to new keys
-        for old, new in reverse_alias.items():
-            if old in self.hsv_settings:
-                self.hsv_settings[new] = self.hsv_settings[old]
-                logging.debug(f"Mapped HSV key {old} to {new}: {self.hsv_settings[old]}")
-        
-        # Log missing HSV parameters after mapping
+        # Log missing HSV parameters
         for param in ["h_min", "h_max", "s_min", "s_max", "v_min", "v_max"]:
             if param not in self.hsv_settings:
                 logging.warning(f"Missing HSV parameter: {param}, using default")
@@ -60,20 +47,6 @@ class HSVMaskGenerator:
             hsv_settings: Dictionary containing HSV ranges and parameters
         """
         self.hsv_settings.update(hsv_settings.copy())
-        
-        # Create reverse mapping for backward compatibility
-        reverse_alias = {
-            "lower_h": "h_min", "upper_h": "h_max",
-            "lower_s": "s_min", "upper_s": "s_max",
-            "lower_v": "v_min", "upper_v": "v_max",
-        }
-        
-        # Map old keys to new keys
-        for old, new in reverse_alias.items():
-            if old in hsv_settings:
-                self.hsv_settings[new] = hsv_settings[old]
-                logging.debug(f"Mapped HSV key {old} to {new}: {hsv_settings[old]}")
-        
         logging.info(f"HSV mask generator settings updated: {self.hsv_settings}")
 
     def update_hsv_values(self, hsv_values: Dict[str, Any]) -> None:

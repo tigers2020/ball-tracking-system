@@ -1,0 +1,57 @@
+{
+    "last_image_folder": "C:/Users/hyper/PycharmProjects/CPET_Final_Project/data files/hawk_eye_serve_volley/serve1",
+    "hsv_settings": {
+        "h_min": 0,
+        "h_max": 179,
+        "s_min": 0,
+        "s_max": 255,
+        "v_min": 0,
+        "v_max": 255,
+        "blur_size": 1,
+        "morph_iterations": 1,
+        "dilation_iterations": 3
+    },
+    "roi_settings": {
+        "enabled": false,
+        "width": 150,
+        "height": 150,
+        "auto_center": true
+    },
+    "hough_circle_settings": {
+        "dp": 1.3,
+        "min_dist": 112,
+        "param1": 64,
+        "param2": 31,
+        "min_radius": 13,
+        "max_radius": 25,
+        "enabled": true,
+        "adaptive": true
+    },
+    "kalman_settings": {
+        "process_noise": 0.036,
+        "measurement_noise": 0.7,
+        "max_lost_frames": 20,
+        "dynamic_process_noise": false,
+        "adaptive_measurement_noise": false
+    },
+    "camera_settings": {
+        "camera_location_x": 0.0,
+        "camera_location_y": 29.089,
+        "camera_location_z": 12.503,
+        "camera_rotation_x": 65.0,
+        "camera_rotation_y": 0.0,
+        "camera_rotation_z": 180.0,
+        "focal_length_mm": 50.0,
+        "baseline_m": 1.0,
+        "sensor_width": 36.0,
+        "sensor_height": 24.0,
+        "principal_point_x": 320.0,
+        "principal_point_y": 240.0,
+        "resizing_scale": 0.5
+    },
+    "fallback_settings": {
+        "use_hsv_centroid": false,
+        "accuracy_threshold": 20.0,
+        "show_accuracy": false
+    }
+}

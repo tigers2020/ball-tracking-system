@@ -94,21 +94,6 @@ class BallTrackingController(QObject):
         roi_settings = self.config_manager.get_roi_settings()
         hough_settings = self.config_manager.get_hough_circle_settings()
         
-        # Add key mapping for HSV value compatibility (same as HSVMaskGenerator)
-        hsv_alias = {
-            "hMin": "lower_h", "sMin": "lower_s", "vMin": "lower_v",
-            "hMax": "upper_h", "sMax": "upper_s", "vMax": "upper_v",
-            "h_min": "lower_h", "h_max": "upper_h",
-            "s_min": "lower_s", "s_max": "upper_s",
-            "v_min": "lower_v", "v_max": "upper_v"
-        }
-        
-        # Map old keys to new keys if new keys are not present
-        for old, new in hsv_alias.items():
-            if old in hsv_values and new not in hsv_values:
-                hsv_values[new] = hsv_values[old]
-                logging.debug(f"Mapped HSV key {old} to {new}: {hsv_values[old]}")
-        
         # Store settings internally for model compatibility
         self._hsv_values = hsv_values
         self._roi_settings = roi_settings
@@ -220,21 +205,6 @@ class BallTrackingController(QObject):
         Args:
             hsv_values (dict): Dictionary containing HSV min/max values
         """
-        # Apply key mapping for HSV value compatibility (same as HSVMaskGenerator)
-        hsv_alias = {
-            "hMin": "lower_h", "sMin": "lower_s", "vMin": "lower_v",
-            "hMax": "upper_h", "sMax": "upper_s", "vMax": "upper_v",
-            "h_min": "lower_h", "h_max": "upper_h",
-            "s_min": "lower_s", "s_max": "upper_s",
-            "v_min": "lower_v", "v_max": "upper_v"
-        }
-        
-        # Map old keys to new keys if new keys are not present
-        for old, new in hsv_alias.items():
-            if old in hsv_values and new not in hsv_values:
-                hsv_values[new] = hsv_values[old]
-                logging.debug(f"Mapped HSV key {old} to {new}: {hsv_values[old]}")
-        
         # Store internally for model compatibility
         self._hsv_values = hsv_values
         
@@ -432,14 +402,14 @@ class BallTrackingController(QObject):
         # Process left image
         left_hsv = cv2.cvtColor(left_image, cv2.COLOR_BGR2HSV)
         left_mask = cv2.inRange(left_hsv, 
-                              (hsv_values['lower_h'], hsv_values['lower_s'], hsv_values['lower_v']),
-                              (hsv_values['upper_h'], hsv_values['upper_s'], hsv_values['upper_v']))
+                              (hsv_values['h_min'], hsv_values['s_min'], hsv_values['v_min']),
+                              (hsv_values['h_max'], hsv_values['s_max'], hsv_values['v_max']))
         
         # Process right image
         right_hsv = cv2.cvtColor(right_image, cv2.COLOR_BGR2HSV)
         right_mask = cv2.inRange(right_hsv,
-                               (hsv_values['lower_h'], hsv_values['lower_s'], hsv_values['lower_v']),
-                               (hsv_values['upper_h'], hsv_values['upper_s'], hsv_values['upper_v']))
+                               (hsv_values['h_min'], hsv_values['s_min'], hsv_values['v_min']),
+                               (hsv_values['h_max'], hsv_values['s_max'], hsv_values['v_max']))
         
         return left_mask, right_mask
     
