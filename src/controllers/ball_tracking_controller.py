@@ -304,8 +304,14 @@ class BallTrackingController(QObject):
         2. Compute ROIs
         3. Detect circles in ROIs
         4. Process predictions through Kalman filter (if enabled)
+        5. Draw visualizations (ROI, circles, predictions, trajectories)
         """
         try:
+            # Import visualization modules at the beginning
+            from src.views.visualization.hough_visualizer import draw_circles
+            from src.views.visualization.kalman_visualizer import draw_prediction, draw_trajectory
+            from src.views.visualization.roi_visualizer import draw_roi
+            
             # Skip processing if model or images aren't available
             if not hasattr(self.model, 'left_image') or not hasattr(self.model, 'right_image'):
                 logging.warning("Model missing image attributes, skipping image processing")
@@ -334,24 +340,17 @@ class BallTrackingController(QObject):
             self.left_mask = left_mask.copy()
             self.right_mask = right_mask.copy()
             
-            # Check if ROI is enabled
+            # Calculate ROIs based on settings (even if disabled, for visualization purposes)
+            self.left_roi, self.right_roi = self._compute_rois(left_image, right_image, roi_settings)
+            
+            # Set the ROIs to the model
+            self.model.left_roi = self.left_roi
+            self.model.right_roi = self.right_roi
+            
+            # Apply ROI masks only if ROI is enabled for detection
             if roi_settings.get('enabled', False):
-                # Compute ROIs
-                self.left_roi, self.right_roi = self._compute_rois(left_image, right_image, roi_settings)
-                
-                # Set the ROIs to the model
-                self.model.left_roi = self.left_roi
-                self.model.right_roi = self.right_roi
-                
-                # Apply ROI masks
                 self.left_mask = self._apply_roi_mask(self.left_mask, self.left_roi)
                 self.right_mask = self._apply_roi_mask(self.right_mask, self.right_roi)
-            else:
-                # Clear ROIs
-                self.left_roi = None
-                self.right_roi = None
-                self.model.left_roi = None
-                self.model.right_roi = None
             
             # Detect circles
             left_circles, right_circles = self._detect_circles(left_image, right_image, left_mask, right_mask, roi_settings)
@@ -371,56 +370,121 @@ class BallTrackingController(QObject):
             self.model.left_prediction = left_prediction
             self.model.right_prediction = right_prediction
             
-            # Draw circles on images and emit circles_processed signal
-            left_circle_image = left_image.copy()
-            right_circle_image = right_image.copy()
+            # Create copies for visualization
+            left_viz_image = left_image.copy()
+            right_viz_image = right_image.copy()
             
-            # Import visualization modules
-            from src.views.visualization.hough_visualizer import draw_circles
-            from src.views.visualization.kalman_visualizer import draw_prediction, draw_trajectory
+            # 1. Always draw ROI on images (regardless of whether ROI is enabled)
+            if self.left_roi:
+                # Use thicker lines (4) for better visibility
+                left_viz_image = draw_roi(
+                    left_viz_image, 
+                    self.left_roi, 
+                    color=(0, 255, 0),  # Green color
+                    thickness=4,
+                    show_center=True,
+                    center_color=(0, 0, 255)  # Red center
+                )
+                logging.debug(f"Drew left ROI: {self.left_roi}")
             
-            # Draw ROI on images if enabled
-            if roi_settings.get('enabled', False) and self.left_roi:
-                from src.views.visualization.roi_visualizer import draw_roi
-                left_circle_image = draw_roi(left_circle_image, self.left_roi)
-                right_circle_image = draw_roi(right_circle_image, self.right_roi)
+            if self.right_roi:
+                right_viz_image = draw_roi(
+                    right_viz_image, 
+                    self.right_roi, 
+                    color=(0, 255, 0),  # Green color
+                    thickness=4,
+                    show_center=True,
+                    center_color=(0, 0, 255)  # Red center
+                )
+                logging.debug(f"Drew right ROI: {self.right_roi}")
             
-            # Draw circles on images if detected
+            # 2. Draw circles on images if detected
             if left_circles:
-                left_circle_image = draw_circles(left_circle_image, left_circles)
+                # Use thicker lines for better visibility
+                left_viz_image = draw_circles(
+                    left_viz_image, 
+                    left_circles, 
+                    main_color=(0, 255, 0),  # Green for main circle
+                    thickness=4,
+                    label_circles=True  # Add numbered labels for clearer identification
+                )
+                logging.debug(f"Drew {len(left_circles)} circles on left image")
+            
             if right_circles:
-                right_circle_image = draw_circles(right_circle_image, right_circles)
-                
-            # Draw Kalman prediction on images if available
+                right_viz_image = draw_circles(
+                    right_viz_image, 
+                    right_circles, 
+                    main_color=(0, 255, 0),  # Green for main circle
+                    thickness=4,
+                    label_circles=True
+                )
+                logging.debug(f"Drew {len(right_circles)} circles on right image")
+            
+            # 3. Draw Kalman prediction and trajectory on images if available
             if left_prediction:
                 # Extract current position from circles and predicted position from Kalman
                 current_pos = (int(left_circles[0][0]), int(left_circles[0][1])) if left_circles else None
                 pred_pos = (int(left_prediction[0]), int(left_prediction[1]))
-                left_circle_image = draw_prediction(left_circle_image, current_pos, pred_pos)
+                
+                # Draw prediction arrow with thicker line
+                left_viz_image = draw_prediction(
+                    left_viz_image, 
+                    current_pos, 
+                    pred_pos, 
+                    arrow_color=(0, 255, 255),  # Yellow-green arrow
+                    thickness=4,
+                    draw_uncertainty=True,  # 예측 불확실성 표시
+                    uncertainty_radius=20   # 더 큰 불확실성 원
+                )
                 
                 # Draw trajectory if available
                 left_history = self.kalman_processor.get_position_history("left")
                 if left_history and len(left_history) > 1:
-                    left_circle_image = draw_trajectory(left_circle_image, left_history, max_points=10)
-                
+                    left_viz_image = draw_trajectory(
+                        left_viz_image, 
+                        left_history, 
+                        color=(255, 255, 0),  # Yellow trajectory
+                        thickness=5,          # 더 두꺼운 선으로 변경
+                        max_points=20         # 더 많은 히스토리 포인트 표시
+                    )
+                    logging.debug(f"Drew left trajectory with {len(left_history)} points")
+            
             if right_prediction:
                 # Extract current position from circles and predicted position from Kalman
                 current_pos = (int(right_circles[0][0]), int(right_circles[0][1])) if right_circles else None
                 pred_pos = (int(right_prediction[0]), int(right_prediction[1]))
-                right_circle_image = draw_prediction(right_circle_image, current_pos, pred_pos)
+                
+                # Draw prediction arrow with thicker line
+                right_viz_image = draw_prediction(
+                    right_viz_image, 
+                    current_pos, 
+                    pred_pos, 
+                    arrow_color=(0, 255, 255),  # Yellow-green arrow
+                    thickness=4,
+                    draw_uncertainty=True,  # 예측 불확실성 표시
+                    uncertainty_radius=20   # 더 큰 불확실성 원
+                )
                 
                 # Draw trajectory if available
                 right_history = self.kalman_processor.get_position_history("right")
                 if right_history and len(right_history) > 1:
-                    right_circle_image = draw_trajectory(right_circle_image, right_history, max_points=10)
-                
-            # Emit circles_processed signal with images that have circles drawn
-            self.circles_processed.emit(left_circle_image, right_circle_image)
+                    right_viz_image = draw_trajectory(
+                        right_viz_image, 
+                        right_history, 
+                        color=(255, 255, 0),  # Yellow trajectory
+                        thickness=5,          # 더 두꺼운 선으로 변경
+                        max_points=20         # 더 많은 히스토리 포인트 표시
+                    )
+                    logging.debug(f"Drew right trajectory with {len(right_history)} points")
             
-            # Emit mask and ROI signals
+            # 4. Emit processed images signal with visualization
+            self.circles_processed.emit(left_viz_image, right_viz_image)
+            
+            # 5. Emit mask and ROI signals (these will be drawn by the ImageViewWidget)
             self.mask_updated.emit(self.left_mask, self.right_mask)
-            if roi_settings.get('enabled', False):
-                self.roi_updated.emit(self.left_roi, self.right_roi)
+            
+            # 6. Always emit ROI signal regardless of whether it's enabled for detection
+            self.roi_updated.emit(self.left_roi, self.right_roi)
             
             # Update internal predictions
             self.left_prediction = left_prediction
@@ -434,8 +498,10 @@ class BallTrackingController(QObject):
             # Emit signal for image processing complete
             if hasattr(self, 'image_processed') and self.image_processed is not None:
                 self.image_processed.emit()
+            
         except Exception as e:
             logging.error(f"Error processing images: {str(e)}")
+            import traceback
             logging.error(f"Error details: {traceback.format_exc()}")
     
     def _apply_hsv_threshold(self, left_image, right_image, hsv_values):
@@ -492,7 +558,11 @@ class BallTrackingController(QObject):
             numpy.ndarray: Mask with ROI applied
         """
         if roi:
-            x, y, w, h = roi.values()
+            # 직접 필요한 값만 추출
+            x = roi.get("x", 0)
+            y = roi.get("y", 0)
+            w = roi.get("width", 100)
+            h = roi.get("height", 100)
             return cv2.rectangle(mask, (x, y), (x + w, y + h), (255), -1)
         else:
             return mask

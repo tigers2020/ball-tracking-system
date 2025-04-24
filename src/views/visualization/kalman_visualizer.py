@@ -7,9 +7,9 @@ def draw_prediction(img: np.ndarray,
                    current_pos: Optional[Tuple[int, int]],
                    predicted_pos: Optional[Tuple[int, int]],
                    arrow_color: Tuple[int, int, int] = (0, 255, 255),
-                   thickness: int = 3,
+                   thickness: int = 4,
                    draw_uncertainty: bool = False,
-                   uncertainty_radius: int = 10,
+                   uncertainty_radius: int = 15,
                    uncertainty_color: Tuple[int, int, int] = (0, 165, 255)) -> np.ndarray:
     """
     Draw Kalman prediction arrow on image
@@ -45,7 +45,7 @@ def draw_prediction(img: np.ndarray,
 def draw_trajectory(img: np.ndarray,
                    positions: List[Tuple[int, int]],
                    color: Tuple[int, int, int] = (255, 255, 0),
-                   thickness: int = 2,
+                   thickness: int = 3,
                    max_points: int = 10) -> np.ndarray:
     """
     Draw trajectory line from position history

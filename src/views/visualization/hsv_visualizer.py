@@ -4,7 +4,7 @@ import logging
 from typing import Tuple, Optional
 
 def apply_mask_overlay(img: np.ndarray, mask: np.ndarray, 
-                      alpha: float = 0.4, 
+                      alpha: float = 0.3, 
                       mask_color: Tuple[int, int, int] = (0, 255, 0)) -> np.ndarray:
     """
     Apply HSV mask overlay on the original image

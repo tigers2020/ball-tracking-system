@@ -6,7 +6,7 @@ from typing import Tuple, Optional, Dict, Union
 def draw_roi(img: np.ndarray, 
             roi: Optional[Union[Tuple[int, int, int, int], Dict]], 
             color: Tuple[int, int, int] = (255, 255, 0),
-            thickness: int = 3,
+            thickness: int = 4,
             show_center: bool = True,
             center_color: Tuple[int, int, int] = (0, 0, 255)) -> np.ndarray:
     """
@@ -46,8 +46,8 @@ def draw_roi(img: np.ndarray,
     # Draw center point if requested
     if show_center:
         center_x, center_y = x + w // 2, y + h // 2
-        cv2.circle(output_img, (center_x, center_y), 5, center_color, -1)
-        cv2.line(output_img, (center_x - 7, center_y), (center_x + 7, center_y), center_color, 2)
-        cv2.line(output_img, (center_x, center_y - 7), (center_x, center_y + 7), center_color, 2)
+        cv2.circle(output_img, (center_x, center_y), 7, center_color, -1)
+        cv2.line(output_img, (center_x - 10, center_y), (center_x + 10, center_y), center_color, 2)
+        cv2.line(output_img, (center_x, center_y - 10), (center_x, center_y + 10), center_color, 2)
     
     return output_img 

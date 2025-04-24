@@ -8,7 +8,7 @@ def draw_circles(img: np.ndarray,
                 main_color: Tuple[int, int, int] = (0, 255, 0),
                 secondary_color: Tuple[int, int, int] = (255, 0, 0),
                 center_color: Tuple[int, int, int] = (0, 0, 255),
-                thickness: int = 3,
+                thickness: int = 4,
                 label_circles: bool = False) -> np.ndarray:
     """
     Draw detected Hough circles on image
@@ -47,11 +47,11 @@ def draw_circles(img: np.ndarray,
         cv2.circle(output_img, (x, y), r, circle_color, thickness)
         
         # Draw center point
-        cv2.circle(output_img, (x, y), 4, center_color, -1)
+        cv2.circle(output_img, (x, y), 6, center_color, -1)
         
         # Add label if requested
         if label_circles:
             cv2.putText(output_img, str(i+1), (x+r//2, y), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, circle_color, 2, cv2.LINE_AA)
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, circle_color, 3, cv2.LINE_AA)
     
     return output_img 
