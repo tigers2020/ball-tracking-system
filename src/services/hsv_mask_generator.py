@@ -23,30 +23,30 @@ class HSVMaskGenerator:
         
         Args:
             hsv_settings: Dictionary containing HSV ranges and parameters
-                - lower_h, upper_h: Hue range (0-179)
-                - lower_s, upper_s: Saturation range (0-255)
-                - lower_v, upper_v: Value range (0-255)
+                - h_min, h_max: Hue range (0-179)
+                - s_min, s_max: Saturation range (0-255)
+                - v_min, v_max: Value range (0-255)
                 - morph_iterations: Number of iterations for morphological operations
                 - blur_size: Size of the Gaussian blur kernel
                 - dilation_iterations: Number of iterations for dilation
         """
         self.hsv_settings = hsv_settings.copy()
         
-        # Add key mapping for backward compatibility
-        alias = {
-            "h_min": "lower_h", "h_max": "upper_h",
-            "s_min": "lower_s", "s_max": "upper_s",
-            "v_min": "lower_v", "v_max": "upper_v",
+        # Create reverse mapping for backward compatibility
+        reverse_alias = {
+            "lower_h": "h_min", "upper_h": "h_max",
+            "lower_s": "s_min", "upper_s": "s_max",
+            "lower_v": "v_min", "upper_v": "v_max",
         }
         
-        # Map old keys to new keys if new keys are not present
-        for old, new in alias.items():
-            if old in self.hsv_settings and new not in self.hsv_settings:
+        # Map old keys to new keys
+        for old, new in reverse_alias.items():
+            if old in self.hsv_settings:
                 self.hsv_settings[new] = self.hsv_settings[old]
                 logging.debug(f"Mapped HSV key {old} to {new}: {self.hsv_settings[old]}")
         
         # Log missing HSV parameters after mapping
-        for param in ["lower_h", "upper_h", "lower_s", "upper_s", "lower_v", "upper_v"]:
+        for param in ["h_min", "h_max", "s_min", "s_max", "v_min", "v_max"]:
             if param not in self.hsv_settings:
                 logging.warning(f"Missing HSV parameter: {param}, using default")
         
@@ -61,16 +61,16 @@ class HSVMaskGenerator:
         """
         self.hsv_settings.update(hsv_settings.copy())
         
-        # Add key mapping for backward compatibility
-        alias = {
-            "h_min": "lower_h", "h_max": "upper_h",
-            "s_min": "lower_s", "s_max": "upper_s",
-            "v_min": "lower_v", "v_max": "upper_v",
+        # Create reverse mapping for backward compatibility
+        reverse_alias = {
+            "lower_h": "h_min", "upper_h": "h_max",
+            "lower_s": "s_min", "upper_s": "s_max",
+            "lower_v": "v_min", "upper_v": "v_max",
         }
         
-        # Map old keys to new keys if new keys are not present
-        for old, new in alias.items():
-            if old in hsv_settings and new not in hsv_settings:
+        # Map old keys to new keys
+        for old, new in reverse_alias.items():
+            if old in hsv_settings:
                 self.hsv_settings[new] = hsv_settings[old]
                 logging.debug(f"Mapped HSV key {old} to {new}: {hsv_settings[old]}")
         
@@ -114,13 +114,13 @@ class HSVMaskGenerator:
             # Convert image to HSV color space
             hsv = cv2.cvtColor(roi_img, cv2.COLOR_BGR2HSV)
             
-            # Extract HSV thresholds from settings
-            lower_h = self.hsv_settings.get('lower_h', 0)
-            upper_h = self.hsv_settings.get('upper_h', 179)
-            lower_s = self.hsv_settings.get('lower_s', 0)
-            upper_s = self.hsv_settings.get('upper_s', 255)
-            lower_v = self.hsv_settings.get('lower_v', 0)
-            upper_v = self.hsv_settings.get('upper_v', 255)
+            # Extract HSV thresholds from settings - use standardized keys (h_min, h_max, etc.)
+            lower_h = self.hsv_settings.get('h_min', 0)
+            upper_h = self.hsv_settings.get('h_max', 179)
+            lower_s = self.hsv_settings.get('s_min', 0)
+            upper_s = self.hsv_settings.get('s_max', 255)
+            lower_v = self.hsv_settings.get('v_min', 0)
+            upper_v = self.hsv_settings.get('v_max', 255)
             
             # Handle Hue wraparound case (e.g., red color which wraps around 0/179)
             if lower_h > upper_h:  # Wraparound case

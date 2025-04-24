@@ -208,7 +208,10 @@ def create_hsv_mask_gpu(image_tensor, hsv_values, device=None):
     Args:
         image_tensor (torch.Tensor): Input tensor in RGB format 
                                     - Supports [B, C, H, W], [C, H, W], or [H, W, C] formats
-        hsv_values (dict): Dictionary containing HSV min/max values
+        hsv_values (dict): Dictionary containing HSV min/max values:
+                          - h_min, h_max: Hue range (0-179)
+                          - s_min, s_max: Saturation range (0-255)
+                          - v_min, v_max: Value range (0-255)
         device (torch.device): Device to use (defaults to global DEVICE)
         
     Returns:
@@ -257,7 +260,7 @@ def create_hsv_mask_gpu(image_tensor, hsv_values, device=None):
         batch_size = image_tensor.shape[0]
         
         # Process in smaller batches if needed (for very large batches)
-        max_batch_size = 8  # Adjust based on GPU memory
+        max_batch_size = 8
         
         if batch_size > max_batch_size:
             # Process in smaller batches
