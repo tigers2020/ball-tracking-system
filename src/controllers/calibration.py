@@ -46,7 +46,7 @@ class CourtCalibrationController(QObject):
         self.logger.info("Court Calibration Controller initialized")
         
         # ROI size (half-width of the region)
-        self.roi_size = 20
+        self.roi_size = 60  # Changed from 20 to 60 to improve intersection detection
         
         # Load calibration data from config
         self._load_from_config()
@@ -184,70 +184,71 @@ class CourtCalibrationController(QObject):
         Returns:
             list: Fine-tuned points
         """
+        # Set default result to return in case of failure
+        fine_pts = []
+        
         # Check if RoiCropper, Skeletonizer, and IntersectionFinder are available
         try:
-            # Try to import and use the actual processing classes
-            fine_pts = []
+            # Try to process with actual algorithms
+            all_intersections = []
+            # Create an instance of IntersectionFinder
+            intersection_finder = IntersectionFinder()
             
-            # Start with a copy of raw points in case real processing fails
-            for x, y in raw_pts:
-                # Add small random offset to simulate fine-tuning
-                # In a real implementation, this would use actual image processing
-                import random
-                offset_x = random.uniform(-2, 2)
-                offset_y = random.uniform(-2, 2)
-                fine_pts.append((x + offset_x, y + offset_y))
+            for pt in raw_pts:
+                # Crop ROI around the point
+                roi = RoiCropper.crop(img, pt, self.roi_size)
+                
+                if roi.size == 0:
+                    self.logger.warning(f"Empty ROI at point {pt}")
+                    continue
+                    
+                # Preprocess and skeletonize
+                preprocessed = RoiCropper.preprocess_roi(roi)
+                skeleton = Skeletonizer.run(preprocessed)
+                
+                # Find intersections
+                # Updated to use the instance method with correct parameters
+                roi_intersections = intersection_finder.find_intersections(
+                    skeleton,
+                    roi_padding=self.roi_size//5  # Use roi_padding parameter instead
+                )
+                
+                # Convert ROI coordinates to image coordinates
+                x, y = pt
+                image_intersections = [
+                    (x - self.roi_size + ix, y - self.roi_size + iy)
+                    for ix, iy in roi_intersections
+                ]
+                
+                all_intersections.extend(image_intersections)
             
-            # Try to process with actual algorithms if available
-            try:
-                all_intersections = []
+            if all_intersections:
+                # Match raw points to fine intersections
+                result = IntersectionFinder.match_raw_to_fine(raw_pts, all_intersections)
+                if result:
+                    fine_pts = result
+                    return fine_pts
+                else:
+                    self.logger.warning("Failed to match raw points to intersections")
+            else:
+                self.logger.warning("No intersections found in any ROI")
+                raise RuntimeError("No intersections found in image ROIs")
                 
-                for pt in raw_pts:
-                    # Crop ROI around the point
-                    roi = RoiCropper.crop(img, pt, self.roi_size)
-                    
-                    if roi.size == 0:
-                        continue
-                        
-                    # Preprocess and skeletonize
-                    preprocessed = RoiCropper.preprocess_roi(roi)
-                    skeleton = Skeletonizer.run(preprocessed)
-                    
-                    # Find intersections
-                    roi_intersections = IntersectionFinder.find_intersections(skeleton)
-                    
-                    # Convert ROI coordinates to image coordinates
-                    x, y = pt
-                    image_intersections = [
-                        (x - self.roi_size + ix, y - self.roi_size + iy)
-                        for ix, iy in roi_intersections
-                    ]
-                    
-                    all_intersections.extend(image_intersections)
-                
-                if all_intersections:
-                    # Match raw points to fine intersections
-                    result = IntersectionFinder.match_raw_to_fine(raw_pts, all_intersections)
-                    if result:
-                        fine_pts = result
-            except Exception as e:
-                self.logger.warning(f"Using simulated fine points due to error: {str(e)}")
-                
-            return fine_pts
+        except (ImportError, NameError, AttributeError) as e:
+            self.logger.warning(f"Processing libraries unavailable: {str(e)}")
+            self.logger.warning("Using simulated fine points as fallback")
+        except Exception as e:
+            self.logger.warning(f"Error in image processing: {str(e)}")
+            self.logger.warning("Using simulated fine points as fallback")
             
-        except (ImportError, NameError, AttributeError):
-            # If processing classes are not available, use simulated fine points
-            self.logger.warning("Using simulated fine points - processing classes not available")
+        # Fallback: Add small random offset to simulate fine-tuning
+        import random
+        for x, y in raw_pts:
+            offset_x = random.uniform(-2, 2)
+            offset_y = random.uniform(-2, 2)
+            fine_pts.append((x + offset_x, y + offset_y))
             
-            fine_pts = []
-            # Add small random offset to simulate fine-tuning
-            import random
-            for x, y in raw_pts:
-                offset_x = random.uniform(-2, 2)
-                offset_y = random.uniform(-2, 2)
-                fine_pts.append((x + offset_x, y + offset_y))
-                
-            return fine_pts
+        return fine_pts
     
     @Slot(int)
     def set_roi_size(self, size: int) -> None:
@@ -274,14 +275,41 @@ class CourtCalibrationController(QObject):
         """
         return self.model
     
-    def get_active_points(self) -> list:
+    def get_active_points(self, side="left") -> list:
         """
         Get the active calibration points.
         
+        Args:
+            side (str): 'left' or 'right' to specify which side's points to return
+            
         Returns:
             list: List of active points (fine-tuned or raw)
         """
-        return self.model.get_active_points()
+        if side == "left":
+            if self.model.left_fine_pts:
+                return self.model.left_fine_pts
+            else:
+                return self.model.left_raw_pts
+        else:
+            if self.model.right_fine_pts:
+                return self.model.right_fine_pts
+            else:
+                return self.model.right_raw_pts
+    
+    def get_fine_points(self, side="left") -> list:
+        """
+        Get only the fine-tuned calibration points.
+        
+        Args:
+            side (str): 'left' or 'right' to specify which side's points to return
+            
+        Returns:
+            list: List of fine-tuned points or empty list if none available
+        """
+        if side == "left":
+            return self.model.left_fine_pts if self.model.left_fine_pts else []
+        else:
+            return self.model.right_fine_pts if self.model.right_fine_pts else []
     
     def get_left_image(self) -> np.ndarray:
         """
@@ -483,47 +511,26 @@ class CourtCalibrationController(QObject):
             self.calibration_status_changed.emit(f"Calibration error: {str(e)}")
             raise
     
-    def tune_calibration(self):
+    def tune_calibration(self) -> bool:
         """
-        Fine-tune existing calibration points.
+        Perform fine-tuning of calibration points to find exact intersections.
         
-        Raises:
-            Exception: If tuning fails
+        Returns:
+            bool: True if tuning was successful
         """
+        # Check if we have enough data
+        if not self.is_ready_for_tuning():
+            self.error_occurred.emit("Insufficient data for tuning")
+            return False
+        
         try:
-            if not self.has_calibration():
-                raise ValueError("No calibration data to tune")
-            
-            # Start tuning process
-            self.calibration_status_changed.emit("Calibration tuning in progress...")
-            
-            # Process the points (simulate progress)
-            for i in range(1, 101):
-                self.calibration_progress.emit(i)
-                # Simulate processing time (would be removed in production)
-                import time
-                time.sleep(0.01)
-            
-            # Process left image points if available
-            left_fine_pts = None
-            if self.model.left_img is not None and self.model.left_raw_pts:
-                left_fine_pts = self._process_image_points(self.model.left_img, self.model.left_raw_pts)
-                
-            # Process right image points if available
-            right_fine_pts = None
-            if self.model.right_img is not None and self.model.right_raw_pts:
-                right_fine_pts = self._process_image_points(self.model.right_img, self.model.right_raw_pts)
-            
-            # Update the model
-            self.model.update_fine_points(left_fine_pts, right_fine_pts)
-            
-            # Notify completion
-            self.calibration_status_changed.emit("Calibration tuning completed")
-            
+            # Request tuning (will emit signals for progress/completion)
+            self.request_tuning()
+            return True
         except Exception as e:
-            self.logger.error(f"Tuning error: {str(e)}", exc_info=True)
-            self.calibration_status_changed.emit(f"Tuning error: {str(e)}")
-            raise
+            self.error_occurred.emit(f"Tuning failed: {str(e)}")
+            self.logger.error(f"Tuning failed: {str(e)}", exc_info=True)
+            return False
     
     def has_calibration(self) -> bool:
         """
@@ -551,23 +558,31 @@ class CourtCalibrationController(QObject):
             self.logger.error(f"Error saving calibration: {str(e)}", exc_info=True)
             raise
     
-    def get_active_points(self, side="left") -> list:
+    def update_point(self, index: int, new_pos: tuple, side: str = "left") -> None:
         """
-        Get the active calibration points.
+        Update the position of a calibration point after it has been dragged.
         
         Args:
-            side (str): 'left' or 'right' to specify which side's points to return
-            
-        Returns:
-            list: List of active points (fine-tuned or raw)
+            index (int): Index of the point to update
+            new_pos (tuple): New (x, y) coordinates
+            side (str): 'left' or 'right' to specify which side to update
         """
-        if side == "left":
-            if self.model.left_fine_pts:
-                return self.model.left_fine_pts
-            else:
-                return self.model.left_raw_pts
-        else:
-            if self.model.right_fine_pts:
-                return self.model.right_fine_pts
-            else:
-                return self.model.right_raw_pts 
+        # Update the raw points (fine points will be recalculated during tuning)
+        if side == "left" and index < len(self.model.left_raw_pts):
+            self.model.left_raw_pts[index] = new_pos
+            self.logger.debug(f"Updated left point {index} to {new_pos}")
+        elif side == "right" and index < len(self.model.right_raw_pts):
+            self.model.right_raw_pts[index] = new_pos
+            self.logger.debug(f"Updated right point {index} to {new_pos}")
+            
+        # Emit signal that calibration data has changed
+        self.calibration_updated.emit()
+    
+    def is_ready_for_tuning(self) -> bool:
+        """
+        Check if controller has enough data for tuning.
+        
+        Returns:
+            bool: True if controller has images and sufficient raw points
+        """
+        return self.model.is_ready_for_tuning() 

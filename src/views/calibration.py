@@ -2,58 +2,215 @@ import logging
 import cv2
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-    QFileDialog, QMessageBox, QGroupBox, QRadioButton, QProgressBar
+    QFileDialog, QMessageBox, QGroupBox, QRadioButton, QProgressBar,
+    QGraphicsScene, QGraphicsView, QGraphicsItem, QGraphicsEllipseItem, QGraphicsSimpleTextItem
 )
-from PyQt5.QtGui import QImage, QPixmap, QMouseEvent
-from PyQt5.QtCore import Qt, pyqtSignal, QPoint
+from PyQt5.QtGui import QImage, QPixmap, QMouseEvent, QColor, QPen, QBrush
+from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QPointF, QRectF
 
 from src.controllers.calibration import CourtCalibrationController
 
 
-class ClickableImageLabel(QLabel):
+class DraggablePointItem(QGraphicsEllipseItem):
     """
-    Custom QLabel that emits a signal when clicked with the click position.
+    A draggable point for representing calibration points.
     """
-    clicked = pyqtSignal(QPoint)
     
-    def __init__(self, text="", parent=None):
+    def __init__(self, x, y, radius=5, color=Qt.red):
         """
-        Initialize the clickable image label.
+        Initialize a draggable point.
         
         Args:
-            text (str, optional): Label text
+            x (float): X coordinate
+            y (float): Y coordinate
+            radius (int): Point radius
+            color (QColor): Point color
+        """
+        super(DraggablePointItem, self).__init__(0, 0, radius*2, radius*2)
+        
+        # Set position (centered at x,y)
+        self.setPos(x - radius, y - radius)
+        
+        # Set appearance
+        self.setPen(QPen(color, 2))
+        self.setBrush(QBrush(color, Qt.SolidPattern))
+        
+        # Make item draggable
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        
+        # Store radius for reference
+        self.radius = radius
+        
+    def get_center(self):
+        """Get the center point of this item."""
+        return QPointF(self.pos().x() + self.radius, self.pos().y() + self.radius)
+        
+    def itemChange(self, change, value):
+        """
+        Handle item changes for position tracking.
+        
+        Args:
+            change: The type of change
+            value: The new value
+            
+        Returns:
+            The modified value
+        """
+        if change == QGraphicsItem.ItemPositionChange and self.scene():
+            # Ensure the point stays within the image bounds
+            if self.scene().sceneRect().contains(value + QPointF(self.radius, self.radius)):
+                return value
+            else:
+                # Constrain to the scene rect
+                rect = self.scene().sceneRect()
+                new_pos = QPointF(value)
+                
+                if value.x() < rect.left():
+                    new_pos.setX(rect.left())
+                elif value.x() + self.radius*2 > rect.right():
+                    new_pos.setX(rect.right() - self.radius*2)
+                    
+                if value.y() < rect.top():
+                    new_pos.setY(rect.top())
+                elif value.y() + self.radius*2 > rect.bottom():
+                    new_pos.setY(rect.bottom() - self.radius*2)
+                    
+                return new_pos
+        
+        return super(DraggablePointItem, self).itemChange(change, value)
+
+
+class ClickableImageView(QGraphicsView):
+    """
+    A graphics view that captures clicks and hosts draggable points.
+    """
+    clicked = pyqtSignal(QPoint)
+    point_moved = pyqtSignal(int, QPointF)  # Index, new position
+    
+    def __init__(self, parent=None):
+        """
+        Initialize a graphics view for holding calibration points.
+        
+        Args:
             parent (QWidget, optional): Parent widget
         """
-        super(ClickableImageLabel, self).__init__(text, parent)
-        self.setAlignment(Qt.AlignCenter)
+        super(ClickableImageView, self).__init__(parent)
+        
+        # Create scene
+        self.scene = QGraphicsScene(self)
+        self.setScene(self.scene)
+        
+        # Set appearance
         self.setMinimumSize(400, 300)
         self.setStyleSheet("border: 1px solid #cccccc; background-color: #f5f5f5;")
         
-    def mousePressEvent(self, event: QMouseEvent):
+        # Fit in view
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setRenderHint(1)  # Antialiasing
+        
+        # Store points
+        self.points = []
+        
+    def set_image(self, pixmap):
+        """
+        Set the background image.
+        
+        Args:
+            pixmap (QPixmap): Image to display
+        """
+        self.scene.clear()
+        self.points.clear()
+        
+        # Add pixmap to scene
+        self.scene.addPixmap(pixmap)
+        self.scene.setSceneRect(QRectF(pixmap.rect()))
+        
+        # Fit view to image
+        self.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        
+    def add_point(self, point, color=Qt.red):
+        """
+        Add a point to the scene.
+        
+        Args:
+            point (QPoint): Point coordinates
+            color (QColor): Point color
+            
+        Returns:
+            DraggablePointItem: The created point item
+        """
+        # Create point item
+        point_item = DraggablePointItem(point.x(), point.y(), color=color)
+        
+        # Add to scene and store
+        self.scene.addItem(point_item)
+        self.points.append(point_item)
+        
+        return point_item
+        
+    def clear_points(self):
+        """Remove all points from the scene."""
+        for point in self.points:
+            self.scene.removeItem(point)
+        self.points.clear()
+        
+    def get_points(self):
+        """
+        Get the current point positions.
+        
+        Returns:
+            List[QPoint]: List of point positions
+        """
+        return [point.get_center().toPoint() for point in self.points]
+        
+    def mousePressEvent(self, event):
         """
         Handle mouse press events.
         
         Args:
             event (QMouseEvent): Mouse event
         """
-        if event.button() == Qt.LeftButton and self.pixmap() is not None:
-            # Calculate position relative to the image, accounting for scaling
-            img_rect = self.pixmap().rect()
-            label_rect = self.rect()
+        if event.button() == Qt.LeftButton:
+            # Convert to scene coordinates
+            scene_pos = self.mapToScene(event.pos())
             
-            # Calculate scale factors
-            x_scale = img_rect.width() / label_rect.width()
-            y_scale = img_rect.height() / label_rect.height()
-            
-            # Calculate position within image
-            img_x = int(event.x() * x_scale)
-            img_y = int(event.y() * y_scale)
-            
-            # Emit signal with click position
-            self.clicked.emit(QPoint(img_x, img_y))
+            # Check if clicked on an item
+            items = self.scene.items(scene_pos)
+            if not any(isinstance(item, DraggablePointItem) for item in items):
+                # No point clicked, emit signal for adding a new point
+                self.clicked.emit(scene_pos.toPoint())
+                
+        # Process the event
+        super(ClickableImageView, self).mousePressEvent(event)
         
-        # Call the parent class implementation
-        super(ClickableImageLabel, self).mousePressEvent(event)
+    def mouseReleaseEvent(self, event):
+        """
+        Handle mouse release events.
+        
+        Args:
+            event (QMouseEvent): Mouse event
+        """
+        # Emit signal for moved points
+        for i, point in enumerate(self.points):
+            if point.isSelected():
+                self.point_moved.emit(i, point.get_center())
+                
+        super(ClickableImageView, self).mouseReleaseEvent(event)
+        
+    def resizeEvent(self, event):
+        """
+        Handle resize events to maintain proper scaling.
+        
+        Args:
+            event: Resize event
+        """
+        if not self.scene.sceneRect().isEmpty():
+            self.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        super(ClickableImageView, self).resizeEvent(event)
+
 
 class CourtCalibrationView(QWidget):
     """
@@ -100,15 +257,15 @@ class CourtCalibrationView(QWidget):
         # Left image container
         left_group = QGroupBox("Left Camera")
         left_layout = QVBoxLayout()
-        self.left_image_label = ClickableImageLabel("Load Left Image")
-        left_layout.addWidget(self.left_image_label)
+        self.left_image_view = ClickableImageView()
+        left_layout.addWidget(self.left_image_view)
         left_group.setLayout(left_layout)
         
         # Right image container
         right_group = QGroupBox("Right Camera")
         right_layout = QVBoxLayout()
-        self.right_image_label = ClickableImageLabel("Load Right Image")
-        right_layout.addWidget(self.right_image_label)
+        self.right_image_view = ClickableImageView()
+        right_layout.addWidget(self.right_image_view)
         right_group.setLayout(right_layout)
         
         # Add image groups to layout
@@ -193,9 +350,11 @@ class CourtCalibrationView(QWidget):
         self.load_left_btn.clicked.connect(self._on_load_left_image)
         self.load_right_btn.clicked.connect(self._on_load_right_image)
         
-        # Image clicking
-        self.left_image_label.clicked.connect(lambda pos: self._on_image_clicked(pos, "left"))
-        self.right_image_label.clicked.connect(lambda pos: self._on_image_clicked(pos, "right"))
+        # Image clicking and point dragging
+        self.left_image_view.clicked.connect(lambda pos: self._on_image_clicked(pos, "left"))
+        self.right_image_view.clicked.connect(lambda pos: self._on_image_clicked(pos, "right"))
+        self.left_image_view.point_moved.connect(lambda idx, pos: self._on_point_moved(idx, pos, "left"))
+        self.right_image_view.point_moved.connect(lambda idx, pos: self._on_point_moved(idx, pos, "right"))
         
         # Side selection
         self.left_radio.toggled.connect(lambda checked: self._set_active_side("left") if checked else None)
@@ -210,6 +369,11 @@ class CourtCalibrationView(QWidget):
         # Controller signals
         self.controller.calibration_status_changed.connect(self._on_calibration_status_changed)
         self.controller.calibration_progress.connect(self._on_calibration_progress)
+        self.controller.points_updated.connect(self._on_points_updated)
+        
+        # 중요: calibration_updated 시그널이 발생할 때마다 포인트 재구성
+        self.controller.calibration_updated.connect(lambda: self._rebuild_points("left"))
+        self.controller.calibration_updated.connect(lambda: self._rebuild_points("right"))
         
     def _update_ui(self):
         """Update UI based on current state."""
@@ -256,187 +420,302 @@ class CourtCalibrationView(QWidget):
                 QMessageBox.critical(self, "Image Load Error", f"An error occurred while loading the image: {str(e)}")
     
     def _update_left_image(self):
-        """Update the left image display with current points."""
-        if self.controller.has_left_image():
-            image = self.controller.get_left_image().copy()
+        """Update the left image display."""
+        img = self.controller.get_left_image()
+        if img is not None:
+            # Convert OpenCV image to QPixmap
+            rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb_img.shape
+            bytes_per_line = ch * w
+            qt_img = QImage(rgb_img.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qt_img)
             
-            # Draw points on the image
-            for idx, point in enumerate(self.left_points):
-                cv2.circle(image, (point.x(), point.y()), 5, (0, 255, 0), -1)
-                cv2.putText(image, str(idx + 1), (point.x() + 10, point.y()), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            
-            # Convert to QImage and display
-            height, width, channel = image.shape
-            bytes_per_line = 3 * width
-            q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
-            self.left_image_label.setPixmap(QPixmap.fromImage(q_image))
+            # Update image and rebuild points
+            self.left_image_view.set_image(pixmap)
+            self._rebuild_points("left")
     
     def _update_right_image(self):
-        """Update the right image display with current points."""
-        if self.controller.has_right_image():
-            image = self.controller.get_right_image().copy()
+        """Update the right image display."""
+        img = self.controller.get_right_image()
+        if img is not None:
+            # Convert OpenCV image to QPixmap
+            rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb_img.shape
+            bytes_per_line = ch * w
+            qt_img = QImage(rgb_img.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qt_img)
             
-            # Draw points on the image
-            for idx, point in enumerate(self.right_points):
-                cv2.circle(image, (point.x(), point.y()), 5, (0, 255, 0), -1)
-                cv2.putText(image, str(idx + 1), (point.x() + 10, point.y()), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            # Update image and rebuild points
+            self.right_image_view.set_image(pixmap)
+            self._rebuild_points("right")
+    
+    def _rebuild_points(self, side):
+        """
+        Rebuild the points display for the specified side.
+        포인트 표시를 재구성하고 모든 드래그 가능한 아이템의 플래그를 올바르게 설정합니다.
+        
+        Args:
+            side (str): The side to rebuild ('left' or 'right')
+        """
+        # Get the view for the specified side
+        view = self.left_image_view if side == "left" else self.right_image_view
+        
+        # Clear existing points
+        view.clear_points()
+        
+        # Get points based on side
+        if side == "left":
+            raw_points = self.controller.model.left_raw_pts
+            fine_points = self.controller.get_fine_points("left")
+        else:
+            raw_points = self.controller.model.right_raw_pts
+            fine_points = self.controller.get_fine_points("right")
+        
+        # Add raw points with proper flags (red)
+        for idx, point in enumerate(raw_points):
+            point_item = view.add_point(QPoint(point[0], point[1]), Qt.red)
             
-            # Convert to QImage and display
-            height, width, channel = image.shape
-            bytes_per_line = 3 * width
-            q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
-            self.right_image_label.setPixmap(QPixmap.fromImage(q_image))
+            # 중요: 반드시 플래그 설정 (드래그 가능하도록)
+            point_item.setFlag(QGraphicsItem.ItemIsMovable, True)
+            point_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+            point_item.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+            
+            # 번호 라벨 추가 및 부모-자식 관계 설정
+            label = QGraphicsSimpleTextItem(str(idx+1))
+            label.setPos(point[0]+10, point[1]+10)
+            label.setParentItem(point_item)  # 부모-자식 관계로 연결하여 함께 이동
+        
+        # Add fine-tuned points if available (green)
+        if fine_points:
+            for idx, point in enumerate(fine_points):
+                point_item = view.add_point(QPoint(point[0], point[1]), Qt.green)
+                
+                # Fine-tuned points shouldn't be movable
+                point_item.setFlag(QGraphicsItem.ItemIsMovable, False)
+                point_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+                
+                # 번호 라벨 추가
+                label = QGraphicsSimpleTextItem(str(idx+1))
+                label.setPos(point[0]+10, point[1]+10)
+                label.setParentItem(point_item)
     
     def _on_image_clicked(self, pos, side):
-        """
-        Handle clicking on an image to add calibration points.
+        """Handle image clicks for adding points."""
+        self.logger.debug(f"Image click at {pos.x()}, {pos.y()} on {side} side")
         
-        Args:
-            pos (QPoint): Clicked position
-            side (str): Side of the image ("left" or "right")
-        """
-        # Only add point if active side matches
+        # Only add points on the active side
         if side != self.active_side:
+            self.logger.debug(f"Ignoring click on inactive {side} side")
             return
             
-        # Check max points (14 per side)
-        if side == "left" and len(self.left_points) >= 14:
-            self.status_label.setText("Maximum number of points reached (Left: 14)")
-            return
-        elif side == "right" and len(self.right_points) >= 14:
-            self.status_label.setText("Maximum number of points reached (Right: 14)")
-            return
+        # Add point through controller
+        self.controller.add_point((pos.x(), pos.y()), side)
         
-        # Add point
+        # Update local points list
         if side == "left":
-            self.left_points.append(pos)
-            self._update_left_image()
-            self.logger.info(f"Added left point {len(self.left_points)}: ({pos.x()}, {pos.y()})")
+            self.left_points.append((pos.x(), pos.y()))
+            self.left_image_view.add_point(pos, color=Qt.green)
         else:
-            self.right_points.append(pos)
-            self._update_right_image()
-            self.logger.info(f"Added right point {len(self.right_points)}: ({pos.x()}, {pos.y()})")
+            self.right_points.append((pos.x(), pos.y()))
+            self.right_image_view.add_point(pos, color=Qt.green)
+            
+        # Update UI
+        self._update_ui()
+    
+    def _on_point_moved(self, index, pos, side):
+        """
+        Handle point movement.
+        
+        Args:
+            index (int): Point index
+            pos (QPointF): New position
+            side (str): Side ("left" or "right")
+        """
+        self.logger.debug(f"Point {index} moved to {pos.x()}, {pos.y()} on {side} side")
+        
+        # Update the points list
+        if side == "left" and index < len(self.left_points):
+            self.left_points[index] = (int(pos.x()), int(pos.y()))
+            self.controller.update_point(index, (int(pos.x()), int(pos.y())), side)
+        elif side == "right" and index < len(self.right_points):
+            self.right_points[index] = (int(pos.x()), int(pos.y()))
+            self.controller.update_point(index, (int(pos.x()), int(pos.y())), side)
+    
+    def _on_points_updated(self, left_points, right_points):
+        """
+        Handle updated points from the controller.
+        
+        Args:
+            left_points (List[Tuple[int, int]]): Updated left points
+            right_points (List[Tuple[int, int]]): Updated right points
+        """
+        self.logger.debug("Points updated from controller")
+        
+        # Update local points
+        self.left_points = left_points
+        self.right_points = right_points
+        
+        # Rebuild displays
+        self._rebuild_points("left")
+        self._rebuild_points("right")
         
         # Update UI
         self._update_ui()
-        self.status_label.setText(f"Point added to {side.capitalize()} image: ({pos.x()}, {pos.y()})")
     
     def _set_active_side(self, side):
-        """
-        Set the active side for point selection.
-        
-        Args:
-            side (str): Side to set as active ("left" or "right")
-        """
+        """Set the active side for point placement."""
+        self.logger.debug(f"Setting active side to {side}")
         self.active_side = side
-        self.logger.info(f"Active side set to: {side}")
         
-        # Update radio buttons
+        # Update point colors
         if side == "left":
-            self.left_radio.setChecked(True)
+            self._rebuild_points("left")
+            self._rebuild_points("right")
         else:
-            self.right_radio.setChecked(True)
+            self._rebuild_points("right")
+            self._rebuild_points("left")
             
-        # Update status
-        self.status_label.setText(f"Active side: {side}")
-    
     def _on_clear_points(self):
-        """Clear all selected calibration points."""
-        active_side = self.active_side
+        """Clear all calibration points."""
+        self.logger.info("Clearing all calibration points")
         
-        if active_side == "left":
-            self.left_points.clear()
-            self._update_left_image()
-            self.logger.info("Cleared left points")
-        else:
-            self.right_points.clear()
-            self._update_right_image()
-            self.logger.info("Cleared right points")
+        # Clear points through controller
+        self.controller.clear_points()
+        
+        # Clear local points
+        self.left_points.clear()
+        self.right_points.clear()
+        
+        # Clear displays
+        self.left_image_view.clear_points()
+        self.right_image_view.clear_points()
         
         # Update UI
         self._update_ui()
-        self.status_label.setText(f"{active_side.capitalize()} points cleared")
+        
+        # Update status
+        self.status_label.setText("All points cleared")
     
     def _on_calibrate(self):
-        """Handle calibration button click."""
+        """Run the court calibration."""
+        self.logger.info("Starting court calibration")
+        
+        # Check if we have enough points
         if len(self.left_points) < 4 or len(self.right_points) < 4:
-            QMessageBox.warning(self, "Insufficient Points", "At least 4 points per side are required for calibration.")
+            QMessageBox.warning(self, "Insufficient Points", 
+                             "At least 4 corresponding points are required on both images")
             return
-        
-        # Convert QPoint to (x, y) tuples
-        left_points = [(p.x(), p.y()) for p in self.left_points]
-        right_points = [(p.x(), p.y()) for p in self.right_points]
-        
-        try:
-            # Show progress bar
-            self.progress_bar.setVisible(True)
-            self.progress_bar.setValue(0)
             
-            # Start calibration
-            self.controller.calibrate(left_points, right_points)
+        # Disable UI elements
+        self._set_ui_enabled(False)
+        
+        # Show progress bar
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
+        self.status_label.setText("Calibrating...")
+        
+        # Run calibration in controller
+        success = self.controller.run_calibration()
+        
+        # Hide progress bar
+        self.progress_bar.setVisible(False)
+        
+        # Re-enable UI
+        self._set_ui_enabled(True)
+        
+        # Show result
+        if success:
+            self.status_label.setText("Calibration completed successfully")
+            QMessageBox.information(self, "Calibration Success", 
+                                 "Court calibration completed successfully")
+        else:
+            self.status_label.setText("Calibration failed")
+            QMessageBox.critical(self, "Calibration Failed", 
+                              "Court calibration failed. Please check the logs for details.")
             
-            # Update UI
-            self._update_ui()
-            self.status_label.setText("Calibration completed")
-        except Exception as e:
-            self.logger.error(f"Calibration error: {str(e)}")
-            QMessageBox.critical(self, "Calibration Error", f"An error occurred during calibration: {str(e)}")
-            self.progress_bar.setVisible(False)
+        # Update UI state
+        self._update_ui()
     
     def _on_tune_calibration(self):
-        """Handle tune calibration button click."""
-        if not self.controller.has_calibration():
-            QMessageBox.warning(self, "No Calibration", "You must run calibration first.")
-            return
+        """Tune the court calibration with automatic intersection detection."""
+        self.logger.info("Starting calibration tuning")
         
-        try:
-            # Show progress bar
-            self.progress_bar.setVisible(True)
-            self.progress_bar.setValue(0)
-            
-            # Start tuning
-            self.controller.tune_calibration()
-            
-            # Update UI
-            self._update_ui()
+        # Disable UI elements
+        self._set_ui_enabled(False)
+        
+        # Show progress bar
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
+        self.status_label.setText("Tuning calibration...")
+        
+        # Run tuning in controller
+        success = self.controller.tune_calibration()
+        
+        # Hide progress bar
+        self.progress_bar.setVisible(False)
+        
+        # Re-enable UI
+        self._set_ui_enabled(True)
+        
+        # Show result
+        if success:
             self.status_label.setText("Calibration tuning completed")
-        except Exception as e:
-            self.logger.error(f"Calibration tuning error: {str(e)}")
-            QMessageBox.critical(self, "Tuning Error", f"An error occurred during calibration tuning: {str(e)}")
-            self.progress_bar.setVisible(False)
+            QMessageBox.information(self, "Tuning Success", 
+                                 "Calibration tuning completed successfully")
+        else:
+            self.status_label.setText("Calibration tuning failed")
+            QMessageBox.warning(self, "Tuning Failed", 
+                             "Calibration tuning did not find sufficient intersection points.")
+            
+        # Update UI
+        self._update_ui()
     
     def _on_save_config(self):
-        """Save calibration configuration to config.json."""
+        """Save the current calibration to a configuration file."""
+        self.logger.info("Saving calibration configuration")
+        
+        # Check if we have a calibration
         if not self.controller.has_calibration():
-            QMessageBox.warning(self, "No Calibration", "No calibration data to save.")
+            QMessageBox.warning(self, "No Calibration", 
+                             "No calibration available to save")
             return
             
-        try:
-            # Save calibration data
-            self.controller.save_calibration()
-            self.status_label.setText("Calibration settings saved")
-        except Exception as e:
-            self.logger.error(f"Config save error: {str(e)}")
-            QMessageBox.critical(self, "Save Error", f"An error occurred while saving settings: {str(e)}")
+        # Get save file path
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Calibration Configuration", 
+                                                "court_config.json", "JSON Files (*.json)")
+        
+        if file_path:
+            try:
+                # Save through controller
+                self.controller.save_config(file_path)
+                self.status_label.setText(f"Configuration saved to: {file_path}")
+                QMessageBox.information(self, "Save Success", 
+                                     f"Calibration configuration saved to: {file_path}")
+            except Exception as e:
+                self.logger.error(f"Error saving configuration: {str(e)}")
+                QMessageBox.critical(self, "Save Error", 
+                                  f"An error occurred while saving the configuration: {str(e)}")
     
     def _on_calibration_status_changed(self, status):
-        """
-        Handle calibration status change from controller.
-        
-        Args:
-            status (str): New status
-        """
+        """Handle calibration status changes."""
         self.status_label.setText(status)
-        
+    
     def _on_calibration_progress(self, value):
-        """
-        Handle calibration progress update from controller.
-        
-        Args:
-            value (int): Progress value (0-100)
-        """
+        """Handle calibration progress updates."""
         self.progress_bar.setValue(value)
-        if value >= 100:
-            self.progress_bar.setVisible(False) 
+    
+    def _set_ui_enabled(self, enabled):
+        """Enable or disable UI elements during operations."""
+        # Points UI
+        self.left_radio.setEnabled(enabled)
+        self.right_radio.setEnabled(enabled)
+        
+        # Image controls
+        self.load_left_btn.setEnabled(enabled)
+        self.load_right_btn.setEnabled(enabled)
+        self.clear_points_btn.setEnabled(enabled)
+        
+        # Calibration controls
+        self.calibrate_btn.setEnabled(enabled and len(self.left_points) >= 4 and len(self.right_points) >= 4)
+        self.tune_calibration_btn.setEnabled(enabled and self.controller.has_calibration())
+        self.save_config_btn.setEnabled(enabled and self.controller.has_calibration()) 
