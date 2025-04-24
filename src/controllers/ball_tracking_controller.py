@@ -1306,11 +1306,10 @@ class BallTrackingController(QObject):
             frame_index: Index of the current frame
             frame: Frame object (optional)
         """
-        # Process images if not already processed and tracking is enabled
+        # Process images if tracking is enabled and we have images
         if self.is_enabled and (self.left_image is not None and self.right_image is not None):
-            # Process images if needed
-            if not self._processed:
-                self._process_images()
+            # Always process images when this method is called
+            self._process_images()
                 
             # Log to XML if tracking data exists
             if hasattr(self, 'data_saver') and self.data_saver is not None:
