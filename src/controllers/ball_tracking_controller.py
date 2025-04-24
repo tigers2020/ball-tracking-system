@@ -43,6 +43,7 @@ class BallTrackingController(QObject):
     detection_updated = Signal(float, tuple, tuple)  # detection_rate, left_coords, right_coords
     circles_processed = Signal(np.ndarray, np.ndarray)  # left_circle_image, right_circle_image
     tracking_updated = Signal(float, float, float)  # x, y, z
+    prediction_updated = Signal(str, float, float, float, float)  # camera, x, y, vx, vy
     
     def __init__(self, model: Any, config_manager: ConfigManager):
         """
@@ -761,9 +762,19 @@ class BallTrackingController(QObject):
                 dt=dt
             )
             
+            # Emit prediction updated signal
+            if left_prediction is not None:
+                self.prediction_updated.emit("left", left_prediction[0], left_prediction[1], 
+                                            left_prediction[2], left_prediction[3])
+            
         else:
             # If no circle detected, just get prediction based on previous state
             left_prediction = self.kalman_processor.get_prediction("left")
+            
+            # Emit prediction updated signal if available
+            if left_prediction is not None:
+                self.prediction_updated.emit("left", left_prediction[0], left_prediction[1], 
+                                            left_prediction[2], left_prediction[3])
             
         # Process right prediction
         right_prediction = None
@@ -795,9 +806,19 @@ class BallTrackingController(QObject):
                 y=float(y),
                 dt=dt
             )
+            
+            # Emit prediction updated signal
+            if right_prediction is not None:
+                self.prediction_updated.emit("right", right_prediction[0], right_prediction[1], 
+                                            right_prediction[2], right_prediction[3])
         else:
             # If no circle detected, just get prediction based on previous state
             right_prediction = self.kalman_processor.get_prediction("right")
+            
+            # Emit prediction updated signal if available
+            if right_prediction is not None:
+                self.prediction_updated.emit("right", right_prediction[0], right_prediction[1], 
+                                            right_prediction[2], right_prediction[3])
         
         return left_prediction, right_prediction
     
@@ -1246,6 +1267,13 @@ class BallTrackingController(QObject):
             
             # Reset timestamp tracking
             self.last_update_time = {"left": None, "right": None}
+            
+            # Reset detection counters and emit signal
+            self._detection_counter = 0
+            self._frame_counter = 0
+            
+            # Emit detection_updated signal with 0.0 detection rate
+            self.detection_updated.emit(0.0, None, None)
             
             logging.info("Ball tracking reset complete")
             

@@ -379,49 +379,25 @@ class KalmanProcessor:
                 logging.error(f"Invalid camera identifier: {camera}")
                 return None
             
-            # Check if kalman is properly initialized
+            # 필터가 아직 없으면 None 반환
             if kalman is None:
-                logging.error(f"Kalman filter for {camera} camera is None")
+                logging.debug(f"Kalman filter for {camera} camera is None")
                 return None
                 
-            # Make a copy of the current filter to avoid affecting its state
-            kalman_copy = cv2.KalmanFilter(4, 2)
-            
-            # Safely copy kalman filter attributes
-            kalman_copy.statePre = kalman.statePre.copy() if hasattr(kalman, 'statePre') and kalman.statePre is not None else np.zeros((4, 1), np.float32)
-            kalman_copy.statePost = kalman.statePost.copy() if hasattr(kalman, 'statePost') and kalman.statePost is not None else np.zeros((4, 1), np.float32)
-            kalman_copy.transitionMatrix = kalman.transitionMatrix.copy() if hasattr(kalman, 'transitionMatrix') and kalman.transitionMatrix is not None else np.eye(4, dtype=np.float32)
-            kalman_copy.controlMatrix = kalman.controlMatrix.copy() if hasattr(kalman, 'controlMatrix') and kalman.controlMatrix is not None else np.zeros((4, 1), np.float32)
-            kalman_copy.measurementMatrix = kalman.measurementMatrix.copy() if hasattr(kalman, 'measurementMatrix') and kalman.measurementMatrix is not None else np.zeros((2, 4), np.float32)
-            kalman_copy.processNoiseCov = kalman.processNoiseCov.copy() if hasattr(kalman, 'processNoiseCov') and kalman.processNoiseCov is not None else np.eye(4, dtype=np.float32)
-            kalman_copy.measurementNoiseCov = kalman.measurementNoiseCov.copy() if hasattr(kalman, 'measurementNoiseCov') and kalman.measurementNoiseCov is not None else np.eye(2, dtype=np.float32)
-            kalman_copy.errorCovPre = kalman.errorCovPre.copy() if hasattr(kalman, 'errorCovPre') and kalman.errorCovPre is not None else np.eye(4, dtype=np.float32)
-            kalman_copy.errorCovPost = kalman.errorCovPost.copy() if hasattr(kalman, 'errorCovPost') and kalman.errorCovPost is not None else np.eye(4, dtype=np.float32)
-            kalman_copy.gain = kalman.gain.copy() if hasattr(kalman, 'gain') and kalman.gain is not None else np.zeros((4, 2), np.float32)
-            
-            # Predict with the copy
-            prediction = kalman_copy.predict()
-            
-            # Apply position memory blending if enabled
-            if self.position_memory_factor > 0.0 and last_state is not None:
-                try:
-                    # Blend prediction with last state
-                    blended_prediction = prediction.copy()
-                    blended_prediction[0] = (1 - self.position_memory_factor) * prediction[0] + self.position_memory_factor * last_state[0]
-                    blended_prediction[1] = (1 - self.position_memory_factor) * prediction[1] + self.position_memory_factor * last_state[1]
-                    prediction = blended_prediction
-                except Exception as blend_error:
-                    logging.warning(f"Error during position blending for prediction in {camera} camera: {blend_error}")
-                    # Continue with original prediction if blending fails
-            
-            # Extract predicted position and velocity
-            predicted_x, predicted_y = prediction[0, 0], prediction[1, 0]
-            velocity_x, velocity_y = prediction[2, 0], prediction[3, 0]
-            
-            logging.debug(f"Kalman prediction for {camera} camera: pos=({predicted_x:.2f}, {predicted_y:.2f}), "
-                        f"vel=({velocity_x:.2f}, {velocity_y:.2f})")
-            
-            return (predicted_x, predicted_y, velocity_x, velocity_y)
+            # statePre 직접 접근 - 예측 전 상태
+            state = getattr(kalman, "statePre", None)
+            if state is None:
+                logging.debug(f"statePre not available for {camera} camera")
+                return None
+                
+            # statePre는 cv2-Mat - numpy 배열로 변환
+            state_arr = np.array(state, dtype=float).flatten()
+            if state_arr.size < 4:  # pos(x,y) + vel(vx,vy)
+                logging.debug(f"State array too small for {camera} camera: {state_arr.size}")
+                return None
+                
+            # 처음 4개 요소만 튜플로 반환
+            return tuple(state_arr[:4])
             
         except Exception as e:
             logging.error(f"Error getting Kalman prediction for {camera} camera: {e}")

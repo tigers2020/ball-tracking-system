@@ -47,6 +47,7 @@ class DataSaver:
         self._last_xml_save_time = 0
         self._xml_save_time_interval = 5.0  # 최소 5초 간격으로 XML 저장
         self._xml_modified = False  # XML이 변경되었는지 여부
+        self._last_frame = -1  # 마지막으로 처리된 프레임 번호 초기화
     
     def enqueue_frame(self, frame_number: int, frame_data: Dict[str, Any], 
                       folder_path: Optional[str] = None, auto_flush: bool = True):
@@ -305,6 +306,9 @@ class DataSaver:
             image_elem.set("timestamp", time.strftime("%Y-%m-%d %H:%M:%S"))
             image_elem.set("tracking_active", str(frame_data.get("tracking_active", False)))
             
+            # 평균 좌표 계산을 위한 모든 좌표 저장
+            all_points = []
+            
             # Process left camera data
             left_elem = ET.SubElement(image_elem, "Left")
             left_data = frame_data.get("left", {})
@@ -312,25 +316,34 @@ class DataSaver:
             # HSV mask centroid
             if left_data.get("hsv_center"):
                 hsv_elem = ET.SubElement(left_elem, "HSV")
-                hsv_elem.set("x", str(float(left_data["hsv_center"]["x"])))
-                hsv_elem.set("y", str(float(left_data["hsv_center"]["y"])))
+                hsv_x = float(left_data["hsv_center"]["x"])
+                hsv_y = float(left_data["hsv_center"]["y"])
+                hsv_elem.set("x", str(hsv_x))
+                hsv_elem.set("y", str(hsv_y))
+                all_points.append((hsv_x, hsv_y))
             
             # Hough circle
             if left_data.get("hough_center"):
                 hough_elem = ET.SubElement(left_elem, "Hough")
-                hough_elem.set("x", str(float(left_data["hough_center"]["x"])))
-                hough_elem.set("y", str(float(left_data["hough_center"]["y"])))
+                hough_x = float(left_data["hough_center"]["x"])
+                hough_y = float(left_data["hough_center"]["y"])
+                hough_elem.set("x", str(hough_x))
+                hough_elem.set("y", str(hough_y))
                 if "radius" in left_data["hough_center"]:
                     hough_elem.set("radius", str(float(left_data["hough_center"]["radius"])))
+                all_points.append((hough_x, hough_y))
             
             # Kalman prediction
             if left_data.get("kalman_prediction"):
                 kalman_elem = ET.SubElement(left_elem, "Kalman")
-                kalman_elem.set("x", str(left_data["kalman_prediction"]["x"]))
-                kalman_elem.set("y", str(left_data["kalman_prediction"]["y"]))
+                kalman_x = float(left_data["kalman_prediction"]["x"])
+                kalman_y = float(left_data["kalman_prediction"]["y"])
+                kalman_elem.set("x", str(kalman_x))
+                kalman_elem.set("y", str(kalman_y))
                 if "vx" in left_data["kalman_prediction"]:
                     kalman_elem.set("vx", str(left_data["kalman_prediction"]["vx"]))
                     kalman_elem.set("vy", str(left_data["kalman_prediction"]["vy"]))
+                all_points.append((kalman_x, kalman_y))
             
             # Fused coordinate
             if left_data.get("fused_center"):
@@ -345,25 +358,34 @@ class DataSaver:
             # HSV mask centroid
             if right_data.get("hsv_center"):
                 hsv_elem = ET.SubElement(right_elem, "HSV")
-                hsv_elem.set("x", str(float(right_data["hsv_center"]["x"])))
-                hsv_elem.set("y", str(float(right_data["hsv_center"]["y"])))
+                hsv_x = float(right_data["hsv_center"]["x"])
+                hsv_y = float(right_data["hsv_center"]["y"])
+                hsv_elem.set("x", str(hsv_x))
+                hsv_elem.set("y", str(hsv_y))
+                all_points.append((hsv_x, hsv_y))
             
             # Hough circle
             if right_data.get("hough_center"):
                 hough_elem = ET.SubElement(right_elem, "Hough")
-                hough_elem.set("x", str(float(right_data["hough_center"]["x"])))
-                hough_elem.set("y", str(float(right_data["hough_center"]["y"])))
+                hough_x = float(right_data["hough_center"]["x"])
+                hough_y = float(right_data["hough_center"]["y"])
+                hough_elem.set("x", str(hough_x))
+                hough_elem.set("y", str(hough_y))
                 if "radius" in right_data["hough_center"]:
                     hough_elem.set("radius", str(float(right_data["hough_center"]["radius"])))
+                all_points.append((hough_x, hough_y))
             
             # Kalman prediction
             if right_data.get("kalman_prediction"):
                 kalman_elem = ET.SubElement(right_elem, "Kalman")
-                kalman_elem.set("x", str(right_data["kalman_prediction"]["x"]))
-                kalman_elem.set("y", str(right_data["kalman_prediction"]["y"]))
+                kalman_x = float(right_data["kalman_prediction"]["x"])
+                kalman_y = float(right_data["kalman_prediction"]["y"])
+                kalman_elem.set("x", str(kalman_x))
+                kalman_elem.set("y", str(kalman_y))
                 if "vx" in right_data["kalman_prediction"]:
                     kalman_elem.set("vx", str(right_data["kalman_prediction"]["vx"]))
                     kalman_elem.set("vy", str(right_data["kalman_prediction"]["vy"]))
+                all_points.append((kalman_x, kalman_y))
             
             # Fused coordinate
             if right_data.get("fused_center"):
@@ -371,30 +393,29 @@ class DataSaver:
                 fused_elem.set("x", str(float(right_data["fused_center"]["x"])))
                 fused_elem.set("y", str(float(right_data["fused_center"]["y"])))
             
-            logging.debug(f"Added frame {frame_number} to XML tracking data")
-            
-            # XML이 변경되었음을 표시
-            self._xml_modified = True
-            
-            # 프레임 카운터 증가
-            self._frames_since_xml_save += 1
-            
-            # XML 파일을 일정 간격으로만 저장 (매 프레임이 아닌 배치로 저장)
-            current_time = time.time()
-            should_save_by_frames = self._frames_since_xml_save >= self._xml_save_interval
-            should_save_by_time = (current_time - self._last_xml_save_time) >= self._xml_save_time_interval
-            
-            if (should_save_by_frames or should_save_by_time) and self._xml_modified:
-                self._frames_since_xml_save = 0
-                self._last_xml_save_time = current_time
-                self._xml_modified = False
+            # World coordinate
+            if "world" in frame_data:
+                world_elem = ET.SubElement(image_elem, "World")
+                world_data = frame_data["world"]
+                for key, value in world_data.items():
+                    world_elem.set(key, str(value))
+                    
+            # 평균 좌표 계산 및 추가
+            if all_points:
+                mean_x = sum(p[0] for p in all_points) / len(all_points)
+                mean_y = sum(p[1] for p in all_points) / len(all_points)
                 
-                # 비동기 저장을 위해 별도 스레드에서 XML 저장
-                save_thread = threading.Thread(target=self.save_xml_tracking_data)
-                save_thread.daemon = True
-                save_thread.start()
-                logging.debug(f"XML save thread started after {self._frames_since_xml_save} frames")
+                # Mean 요소 추가
+                mean_elem = ET.SubElement(image_elem, "Mean")
+                mean_elem.set("x", f"{mean_x:.1f}")
+                mean_elem.set("y", f"{mean_y:.1f}")
+                
+                logging.debug(f"Added Mean coordinates ({mean_x:.1f}, {mean_y:.1f}) from {len(all_points)} points")
             
+            # 마지막 프레임 번호 업데이트
+            self._last_frame = max(self._last_frame, frame_number)
+            
+            logging.debug(f"Added frame {frame_number} to XML tracking data stream")
             return True
             
         except Exception as e:

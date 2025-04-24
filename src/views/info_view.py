@@ -282,6 +282,9 @@ class InfoView(QWidget):
             # Connect tracking update signal for 3D position
             controller.tracking_updated.connect(self._on_tracking_updated)
             
+            # Connect prediction update signal for Kalman state
+            controller.prediction_updated.connect(self._on_kalman_predicted)
+            
             # Set up visualizers with controller
             self._setup_visualizers_with_controller(controller)
             
@@ -379,6 +382,25 @@ class InfoView(QWidget):
                 self.set_right_state(right_pred[0], right_pred[1], right_pred[2], right_pred[3])
         
         logging.debug(f"3D position updated: ({x:.3f}, {y:.3f}, {z:.3f})")
+    
+    def _on_kalman_predicted(self, camera, x, y, vx, vy):
+        """
+        Handle Kalman prediction update signal from ball tracking controller.
+        
+        Args:
+            camera (str): Camera identifier ('left' or 'right')
+            x (float): Position X coordinate
+            y (float): Position Y coordinate
+            vx (float): Velocity X component
+            vy (float): Velocity Y component
+        """
+        # Update the appropriate state label based on camera
+        if camera.lower() == "left":
+            self.set_left_state(x, y, vx, vy)
+        elif camera.lower() == "right":
+            self.set_right_state(x, y, vx, vy)
+            
+        logging.debug(f"Kalman state updated for {camera} camera: pos=({x:.1f}, {y:.1f}), vel=({vx:.1f}, {vy:.1f})")
     
     def get_visualizers(self):
         """
