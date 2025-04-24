@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from src.utils.ui_constants import WindowSize, Messages, Layout, FileDialog, Icons
 from src.views.image_view import ImageView
 from src.views.setting_view import SettingView
+from src.views.calibration_tab import CourtCalibrationView
 
 
 class MainWindow(QMainWindow):
@@ -70,6 +71,10 @@ class MainWindow(QMainWindow):
         # Create settings tab
         self.setting_view = SettingView()
         self.tab_widget.addTab(self.setting_view, "Settings")
+        
+        # Create court calibration tab
+        self.calibration_view = CourtCalibrationView()
+        self.tab_widget.addTab(self.calibration_view, "Court Calibration")
         
         # Connect signals from settings view
         self.setting_view.settings_changed.connect(self._on_settings_changed)
