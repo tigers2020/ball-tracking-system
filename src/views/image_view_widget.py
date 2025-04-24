@@ -221,61 +221,39 @@ class ImageViewWidget(QWidget):
             # Make a copy to avoid modifying the original
             result = image.copy()
             
-            # Get image dimensions for defaults and bounds checking
-            img_h, img_w = image.shape[:2]
-            
-            # Extract ROI information with fallback defaults
-            required_keys = ["x", "y", "width", "height", "center_x", "center_y"]
-            roi_data = {}
-            
-            # Check for missing keys and use defaults if needed
-            missing_keys = []
-            for key in required_keys:
-                if key not in roi:
-                    missing_keys.append(key)
-            
-            if missing_keys:
-                logging.warning(f"Missing ROI keys: {', '.join(missing_keys)}. Using defaults.")
-            
-            # Set defaults for missing keys
-            roi_data["width"] = roi.get("width", min(100, img_w // 4))
-            roi_data["height"] = roi.get("height", min(100, img_h // 4))
-            
-            # If center coordinates are provided but x,y are missing, calculate x,y from center
-            if "center_x" in roi and "center_y" in roi and ("x" not in roi or "y" not in roi):
-                center_x = roi["center_x"]
-                center_y = roi["center_y"]
-                roi_data["center_x"] = center_x
-                roi_data["center_y"] = center_y
-                roi_data["x"] = max(0, center_x - roi_data["width"] // 2)
-                roi_data["y"] = max(0, center_y - roi_data["height"] // 2)
-            # If x,y are provided but center is missing, calculate center from x,y
-            elif "x" in roi and "y" in roi and ("center_x" not in roi or "center_y" not in roi):
-                roi_data["x"] = roi["x"]
-                roi_data["y"] = roi["y"]
-                roi_data["center_x"] = roi_data["x"] + roi_data["width"] // 2
-                roi_data["center_y"] = roi_data["y"] + roi_data["height"] // 2
-            # Use defaults if both center and x,y are missing
-            else:
-                # Use provided values or defaults
-                roi_data["x"] = roi.get("x", img_w // 2 - roi_data["width"] // 2)
-                roi_data["y"] = roi.get("y", img_h // 2 - roi_data["height"] // 2)
-                roi_data["center_x"] = roi.get("center_x", img_w // 2)
-                roi_data["center_y"] = roi.get("center_y", img_h // 2)
-            
-            # Validate coordinates are within image bounds
-            roi_data["x"] = max(0, min(roi_data["x"], img_w - 1))
-            roi_data["y"] = max(0, min(roi_data["y"], img_h - 1))
-            roi_data["width"] = min(roi_data["width"], img_w - roi_data["x"])
-            roi_data["height"] = min(roi_data["height"], img_h - roi_data["y"])
-            roi_data["center_x"] = max(0, min(roi_data["center_x"], img_w - 1))
-            roi_data["center_y"] = max(0, min(roi_data["center_y"], img_h - 1))
+            # Safely extract ROI information with default values
+            try:
+                x = int(roi.get("x", 0))
+                y = int(roi.get("y", 0))
+                w = int(roi.get("width", 100))
+                h = int(roi.get("height", 100))
+                center_x = int(roi.get("center_x", x + w // 2))
+                center_y = int(roi.get("center_y", y + h // 2))
+                
+                # Ensure all values are valid
+                if w <= 0 or h <= 0:
+                    logging.warning(f"Invalid ROI dimensions: w={w}, h={h}, using defaults")
+                    w = max(1, w)
+                    h = max(1, h)
+                
+                # Ensure coordinates are within image bounds
+                img_h, img_w = image.shape[:2]
+                x = max(0, min(x, img_w - 1))
+                y = max(0, min(y, img_h - 1))
+                w = min(w, img_w - x)
+                h = min(h, img_h - y)
+                center_x = max(0, min(center_x, img_w - 1))
+                center_y = max(0, min(center_y, img_h - 1))
+                
+            except (ValueError, TypeError) as e:
+                logging.error(f"ROI value conversion error: {e}")
+                return image
             
             # Draw ROI rectangle
             cv2.rectangle(
                 result,
-                (int(roi_data["x"]), int(roi_data["y"])),
-                (int(roi_data["x"] + roi_data["width"]), int(roi_data["y"] + roi_data["height"])),
+                (x, y),
+                (x + w, y + h),
                 ROI.BORDER_COLOR,
                 ROI.BORDER_THICKNESS
             )
@@ -283,13 +261,14 @@ class ImageViewWidget(QWidget):
             # Draw center marker
             cv2.drawMarker(
                 result,
-                (int(roi_data["center_x"]), int(roi_data["center_y"])),
+                (center_x, center_y),
                 ROI.CENTER_MARKER_COLOR,
                 cv2.MARKER_CROSS,
                 ROI.CENTER_MARKER_SIZE * 2,
                 ROI.BORDER_THICKNESS
             )
             
+            logging.debug(f"ROI drawn: x={x}, y={y}, w={w}, h={h}, center=({center_x}, {center_y})")
             return result
             
         except Exception as e:

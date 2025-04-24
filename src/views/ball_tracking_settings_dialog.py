@@ -47,6 +47,20 @@ class BallTrackingSettingsDialog(QDialog):
         # HSV values - load from configuration
         self.hsv_values = self.config_manager.get_hsv_settings()
         
+        # Check for missing HSV parameters and set defaults if needed
+        hsv_defaults = {
+            "h_min": 0, "h_max": 179,
+            "s_min": 0, "s_max": 255,
+            "v_min": 0, "v_max": 255,
+            "blur_size": 3,
+            "morph_iterations": 2,
+            "dilation_iterations": 1
+        }
+        
+        for key, default_value in hsv_defaults.items():
+            if key not in self.hsv_values:
+                self.hsv_values[key] = default_value
+        
         # ROI settings - load from configuration
         self.roi_settings = self.config_manager.get_roi_settings()
         
@@ -65,6 +79,19 @@ class BallTrackingSettingsDialog(QDialog):
             "process_noise": 0.03, # Process noise covariance
             "measurement_noise": 1.0 # Measurement noise covariance
         }
+        
+        # Check for missing Kalman parameters and set defaults if needed
+        kalman_defaults = {
+            "process_noise": 0.03,
+            "measurement_noise": 1.0,
+            "max_lost_frames": 20,
+            "dynamic_process_noise": True,
+            "adaptive_measurement_noise": True
+        }
+        
+        for key, default_value in kalman_defaults.items():
+            if key not in self.kalman_params:
+                self.kalman_params[key] = default_value
         
         # Set up UI
         self._setup_ui()
@@ -118,7 +145,13 @@ class BallTrackingSettingsDialog(QDialog):
         self.v_max_slider.valueChanged.connect(
             lambda v: self._update_hsv_value("v_max", v))
         
-        # Add widgets to grid layout
+        # Blur size slider
+        blur_size_label = QLabel("Blur Size:")
+        self.blur_size_slider = self._create_slider(1, 15, self.hsv_values.get("blur_size", 3))
+        self.blur_size_value_label = QLabel(str(self.hsv_values.get("blur_size", 3)))
+        self.blur_size_slider.valueChanged.connect(
+            lambda v: self._update_hsv_value("blur_size", v))
+        
         hsv_layout.addWidget(h_min_label, 0, 0)
         hsv_layout.addWidget(self.h_min_slider, 0, 1)
         hsv_layout.addWidget(self.h_min_value_label, 0, 2)
@@ -142,6 +175,39 @@ class BallTrackingSettingsDialog(QDialog):
         hsv_layout.addWidget(v_max_label, 5, 0)
         hsv_layout.addWidget(self.v_max_slider, 5, 1)
         hsv_layout.addWidget(self.v_max_value_label, 5, 2)
+        
+        # Blur size slider
+        blur_size_label = QLabel("Blur Size:")
+        self.blur_size_slider = self._create_slider(1, 15, self.hsv_values.get("blur_size", 3))
+        self.blur_size_value_label = QLabel(str(self.hsv_values.get("blur_size", 3)))
+        self.blur_size_slider.valueChanged.connect(
+            lambda v: self._update_hsv_value("blur_size", v))
+        
+        hsv_layout.addWidget(blur_size_label, 6, 0)
+        hsv_layout.addWidget(self.blur_size_slider, 6, 1)
+        hsv_layout.addWidget(self.blur_size_value_label, 6, 2)
+        
+        # Morph iterations slider
+        morph_label = QLabel("Morph Iterations:")
+        self.morph_slider = self._create_slider(0, 10, self.hsv_values.get("morph_iterations", 2))
+        self.morph_value_label = QLabel(str(self.hsv_values.get("morph_iterations", 2)))
+        self.morph_slider.valueChanged.connect(
+            lambda v: self._update_hsv_value("morph_iterations", v))
+        
+        hsv_layout.addWidget(morph_label, 7, 0)
+        hsv_layout.addWidget(self.morph_slider, 7, 1)
+        hsv_layout.addWidget(self.morph_value_label, 7, 2)
+        
+        # Dilation iterations slider
+        dilation_label = QLabel("Dilation Iterations:")
+        self.dilation_slider = self._create_slider(0, 10, self.hsv_values.get("dilation_iterations", 1))
+        self.dilation_value_label = QLabel(str(self.hsv_values.get("dilation_iterations", 1)))
+        self.dilation_slider.valueChanged.connect(
+            lambda v: self._update_hsv_value("dilation_iterations", v))
+        
+        hsv_layout.addWidget(dilation_label, 8, 0)
+        hsv_layout.addWidget(self.dilation_slider, 8, 1)
+        hsv_layout.addWidget(self.dilation_value_label, 8, 2)
         
         hsv_group.setLayout(hsv_layout)
         main_layout.addWidget(hsv_group)
@@ -281,6 +347,25 @@ class BallTrackingSettingsDialog(QDialog):
         self.measurement_noise_slider.valueChanged.connect(
             lambda v: self._update_kalman_value("measurement_noise", v / 10.0))
             
+        # Max lost frames parameter
+        max_lost_frames_label = QLabel("Max Lost Frames:")
+        self.max_lost_frames_slider = self._create_slider(1, 50, self.kalman_params.get("max_lost_frames", 20))
+        self.max_lost_frames_value_label = QLabel(str(self.kalman_params.get("max_lost_frames", 20)))
+        self.max_lost_frames_slider.valueChanged.connect(
+            lambda v: self._update_kalman_value("max_lost_frames", v))
+        
+        # Dynamic process noise checkbox
+        self.dynamic_noise_checkbox = QCheckBox("Dynamic Process Noise")
+        self.dynamic_noise_checkbox.setChecked(self.kalman_params.get("dynamic_process_noise", True))
+        self.dynamic_noise_checkbox.stateChanged.connect(
+            lambda state: self._update_kalman_value("dynamic_process_noise", state == Qt.Checked))
+        
+        # Adaptive measurement noise checkbox
+        self.adaptive_measurement_checkbox = QCheckBox("Adaptive Measurement Noise")
+        self.adaptive_measurement_checkbox.setChecked(self.kalman_params.get("adaptive_measurement_noise", True))
+        self.adaptive_measurement_checkbox.stateChanged.connect(
+            lambda state: self._update_kalman_value("adaptive_measurement_noise", state == Qt.Checked))
+        
         # Add widgets to grid layout
         kalman_layout.addWidget(process_noise_label, 0, 0)
         kalman_layout.addWidget(self.process_noise_slider, 0, 1)
@@ -289,6 +374,13 @@ class BallTrackingSettingsDialog(QDialog):
         kalman_layout.addWidget(measurement_noise_label, 1, 0)
         kalman_layout.addWidget(self.measurement_noise_slider, 1, 1)
         kalman_layout.addWidget(self.measurement_noise_value_label, 1, 2)
+        
+        kalman_layout.addWidget(max_lost_frames_label, 2, 0)
+        kalman_layout.addWidget(self.max_lost_frames_slider, 2, 1)
+        kalman_layout.addWidget(self.max_lost_frames_value_label, 2, 2)
+        
+        kalman_layout.addWidget(self.dynamic_noise_checkbox, 3, 0, 1, 3)
+        kalman_layout.addWidget(self.adaptive_measurement_checkbox, 4, 0, 1, 3)
         
         kalman_group.setLayout(kalman_layout)
         main_layout.addWidget(kalman_group)
@@ -346,6 +438,12 @@ class BallTrackingSettingsDialog(QDialog):
             self.v_min_value_label.setText(str(value))
         elif key == "v_max":
             self.v_max_value_label.setText(str(value))
+        elif key == "blur_size":
+            self.blur_size_value_label.setText(str(value))
+        elif key == "morph_iterations":
+            self.morph_value_label.setText(str(value))
+        elif key == "dilation_iterations":
+            self.dilation_value_label.setText(str(value))
         
         # Emit signal with updated HSV values
         self.hsv_changed.emit(self.hsv_values)
@@ -417,6 +515,12 @@ class BallTrackingSettingsDialog(QDialog):
             self.process_noise_value_label.setText(str(value))
         elif key == "measurement_noise":
             self.measurement_noise_value_label.setText(str(value))
+        elif key == "max_lost_frames":
+            self.max_lost_frames_value_label.setText(str(value))
+        elif key == "dynamic_process_noise":
+            self.dynamic_noise_checkbox.setChecked(value)
+        elif key == "adaptive_measurement_noise":
+            self.adaptive_measurement_checkbox.setChecked(value)
         
         # Emit signal with updated Kalman filter parameters
         self.kalman_changed.emit(self.kalman_params)
@@ -487,6 +591,15 @@ class BallTrackingSettingsDialog(QDialog):
                 elif key == "v_max":
                     self.v_max_slider.setValue(value)
                     self.v_max_value_label.setText(str(value))
+                elif key == "blur_size":
+                    self.blur_size_slider.setValue(value)
+                    self.blur_size_value_label.setText(str(value))
+                elif key == "morph_iterations":
+                    self.morph_slider.setValue(value)
+                    self.morph_value_label.setText(str(value))
+                elif key == "dilation_iterations":
+                    self.dilation_slider.setValue(value)
+                    self.dilation_value_label.setText(str(value))
     
     def set_roi_settings(self, roi_settings):
         """

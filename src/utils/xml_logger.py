@@ -296,7 +296,14 @@ class XMLLogger:
             if self.root is not None:
                 self.root.set("closed", str(time.time()))
                 self.root.set("close_time", time.strftime("%Y-%m-%d %H:%M:%S"))
-                self.root.set("total_frames", str(self.frame_count))
+                
+                # Ensure frame_count is an integer and set it as a string
+                try:
+                    frame_count = int(self.frame_count)
+                    self.root.set("total_frames", str(frame_count))
+                except (ValueError, TypeError):
+                    logging.warning("Invalid frame count, setting total_frames to 0")
+                    self.root.set("total_frames", "0")
             
             # Flush to disk
             result = self.flush()
