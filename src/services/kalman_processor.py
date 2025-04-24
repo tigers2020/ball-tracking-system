@@ -378,19 +378,26 @@ class KalmanProcessor:
             else:
                 logging.error(f"Invalid camera identifier: {camera}")
                 return None
+            
+            # Check if kalman is properly initialized
+            if kalman is None:
+                logging.error(f"Kalman filter for {camera} camera is None")
+                return None
                 
             # Make a copy of the current filter to avoid affecting its state
             kalman_copy = cv2.KalmanFilter(4, 2)
-            kalman_copy.statePre = kalman.statePre.copy()
-            kalman_copy.statePost = kalman.statePost.copy()
-            kalman_copy.transitionMatrix = kalman.transitionMatrix.copy()
-            kalman_copy.controlMatrix = kalman.controlMatrix.copy()
-            kalman_copy.measurementMatrix = kalman.measurementMatrix.copy()
-            kalman_copy.processNoiseCov = kalman.processNoiseCov.copy()
-            kalman_copy.measurementNoiseCov = kalman.measurementNoiseCov.copy()
-            kalman_copy.errorCovPre = kalman.errorCovPre.copy()
-            kalman_copy.errorCovPost = kalman.errorCovPost.copy()
-            kalman_copy.gain = kalman.gain.copy()
+            
+            # Safely copy kalman filter attributes
+            kalman_copy.statePre = kalman.statePre.copy() if hasattr(kalman, 'statePre') and kalman.statePre is not None else np.zeros((4, 1), np.float32)
+            kalman_copy.statePost = kalman.statePost.copy() if hasattr(kalman, 'statePost') and kalman.statePost is not None else np.zeros((4, 1), np.float32)
+            kalman_copy.transitionMatrix = kalman.transitionMatrix.copy() if hasattr(kalman, 'transitionMatrix') and kalman.transitionMatrix is not None else np.eye(4, dtype=np.float32)
+            kalman_copy.controlMatrix = kalman.controlMatrix.copy() if hasattr(kalman, 'controlMatrix') and kalman.controlMatrix is not None else np.zeros((4, 1), np.float32)
+            kalman_copy.measurementMatrix = kalman.measurementMatrix.copy() if hasattr(kalman, 'measurementMatrix') and kalman.measurementMatrix is not None else np.zeros((2, 4), np.float32)
+            kalman_copy.processNoiseCov = kalman.processNoiseCov.copy() if hasattr(kalman, 'processNoiseCov') and kalman.processNoiseCov is not None else np.eye(4, dtype=np.float32)
+            kalman_copy.measurementNoiseCov = kalman.measurementNoiseCov.copy() if hasattr(kalman, 'measurementNoiseCov') and kalman.measurementNoiseCov is not None else np.eye(2, dtype=np.float32)
+            kalman_copy.errorCovPre = kalman.errorCovPre.copy() if hasattr(kalman, 'errorCovPre') and kalman.errorCovPre is not None else np.eye(4, dtype=np.float32)
+            kalman_copy.errorCovPost = kalman.errorCovPost.copy() if hasattr(kalman, 'errorCovPost') and kalman.errorCovPost is not None else np.eye(4, dtype=np.float32)
+            kalman_copy.gain = kalman.gain.copy() if hasattr(kalman, 'gain') and kalman.gain is not None else np.zeros((4, 2), np.float32)
             
             # Predict with the copy
             prediction = kalman_copy.predict()

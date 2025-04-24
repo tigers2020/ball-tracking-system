@@ -351,13 +351,74 @@ class BallTrackingController(QObject):
             self.model.left_roi = self.left_roi
             self.model.right_roi = self.right_roi
             
-            # Apply ROI masks only if ROI is enabled for detection
-            if roi_settings.get('enabled', False):
-                self.left_mask = self._apply_roi_mask(self.left_mask, self.left_roi)
-                self.right_mask = self._apply_roi_mask(self.right_mask, self.right_roi)
+            # Create cropped images and masks based on ROI if enabled
+            left_cropped_image = None
+            right_cropped_image = None
+            left_cropped_mask = None
+            right_cropped_mask = None
             
-            # Detect circles
-            left_circles, right_circles = self._detect_circles(left_image, right_image, left_mask, right_mask, roi_settings)
+            if roi_settings.get('enabled', False):
+                # Crop left image and mask to ROI
+                if self.left_roi and left_image is not None:
+                    x = self.left_roi.get('x', 0)
+                    y = self.left_roi.get('y', 0)
+                    w = self.left_roi.get('width', left_image.shape[1])
+                    h = self.left_roi.get('height', left_image.shape[0])
+                    
+                    # Ensure coordinates are within image bounds
+                    x = max(0, min(x, left_image.shape[1] - 1))
+                    y = max(0, min(y, left_image.shape[0] - 1))
+                    w = max(1, min(w, left_image.shape[1] - x))
+                    h = max(1, min(h, left_image.shape[0] - y))
+                    
+                    # Crop image and mask
+                    left_cropped_image = left_image[y:y+h, x:x+w]
+                    left_cropped_mask = self.left_mask[y:y+h, x:x+w] if self.left_mask is not None else None
+                    
+                    # Store cropped images for later use
+                    self.model.cropped_images["left"] = left_cropped_image
+                
+                # Crop right image and mask to ROI
+                if self.right_roi and right_image is not None:
+                    x = self.right_roi.get('x', 0)
+                    y = self.right_roi.get('y', 0)
+                    w = self.right_roi.get('width', right_image.shape[1])
+                    h = self.right_roi.get('height', right_image.shape[0])
+                    
+                    # Ensure coordinates are within image bounds
+                    x = max(0, min(x, right_image.shape[1] - 1))
+                    y = max(0, min(y, right_image.shape[0] - 1))
+                    w = max(1, min(w, right_image.shape[1] - x))
+                    h = max(1, min(h, right_image.shape[0] - y))
+                    
+                    # Crop image and mask
+                    right_cropped_image = right_image[y:y+h, x:x+w]
+                    right_cropped_mask = self.right_mask[y:y+h, x:x+w] if self.right_mask is not None else None
+                    
+                    # Store cropped images for later use
+                    self.model.cropped_images["right"] = right_cropped_image
+            else:
+                # If ROI is disabled, use full images
+                self.model.cropped_images["left"] = None
+                self.model.cropped_images["right"] = None
+            
+            # Detect circles - use cropped images if available, otherwise use full images
+            if roi_settings.get('enabled', False) and left_cropped_image is not None and right_cropped_image is not None:
+                # Detect circles in cropped images within ROIs
+                left_circles, right_circles = self._detect_circles_in_cropped_images(
+                    left_cropped_image, right_cropped_image, 
+                    left_cropped_mask, right_cropped_mask, 
+                    self.left_roi, self.right_roi
+                )
+            else:
+                # Fall back to original approach for full-image detection
+                left_circles, right_circles = self._detect_circles(
+                    left_image, right_image, left_mask, right_mask, roi_settings
+                )
+            
+            # Ensure we have at least empty lists, not None
+            left_circles = [] if left_circles is None else left_circles  
+            right_circles = [] if right_circles is None else right_circles
             
             # Set the detected circles to the model
             self.model.left_circles = left_circles
@@ -427,7 +488,7 @@ class BallTrackingController(QObject):
             # 3. Draw Kalman prediction and trajectory on images if available
             if left_prediction:
                 # Extract current position from circles and predicted position from Kalman
-                current_pos = (int(left_circles[0][0]), int(left_circles[0][1])) if left_circles else None
+                current_pos = (int(left_circles[0][0]), int(left_circles[0][1])) if left_circles and len(left_circles) > 0 else None
                 pred_pos = (int(left_prediction[0]), int(left_prediction[1]))
                 
                 # Draw prediction arrow with thicker line
@@ -455,7 +516,7 @@ class BallTrackingController(QObject):
             
             if right_prediction:
                 # Extract current position from circles and predicted position from Kalman
-                current_pos = (int(right_circles[0][0]), int(right_circles[0][1])) if right_circles else None
+                current_pos = (int(right_circles[0][0]), int(right_circles[0][1])) if right_circles and len(right_circles) > 0 else None
                 pred_pos = (int(right_prediction[0]), int(right_prediction[1]))
                 
                 # Draw prediction arrow with thicker line
@@ -508,9 +569,9 @@ class BallTrackingController(QObject):
                 self.image_processed.emit()
             
         except Exception as e:
-            logging.error(f"Error processing images: {str(e)}")
+            logging.error(f"Error in _process_images: {e}")
             import traceback
-            logging.error(f"Error details: {traceback.format_exc()}")
+            logging.error(traceback.format_exc())
     
     def _apply_hsv_threshold(self, left_image, right_image, hsv_values):
         """
@@ -625,60 +686,138 @@ class BallTrackingController(QObject):
             self._hough_settings = current_hough_settings.copy()
         
         # Detect circles using the existing detector instance
-        left_circles = self.circle_detector.detect_circles(
+        left_result = self.circle_detector.detect_circles(
             img=left_image, 
             mask=left_mask, 
             roi=self.left_roi if roi_settings.get("enabled", False) else None,
             side="left"  # Add side parameter for better logging
         )
         
-        right_circles = self.circle_detector.detect_circles(
+        right_result = self.circle_detector.detect_circles(
             img=right_image, 
             mask=right_mask, 
             roi=self.right_roi if roi_settings.get("enabled", False) else None,
             side="right"  # Add side parameter for better logging
         )
         
-        return left_circles['circles'], right_circles['circles']
+        # Extract circles from results and ensure they are not None
+        left_circles = left_result['circles'] if left_result['circles'] is not None else []
+        right_circles = right_result['circles'] if right_result['circles'] is not None else []
+        
+        return left_circles, right_circles
     
     def _process_predictions(self, left_circles, right_circles):
         """
-        Process detected circles through Kalman filter.
+        Process detected circles through Kalman filter to generate predictions for current frame.
         
         Args:
-            left_circles (list): List of detected left circles
-            right_circles (list): List of detected right circles
+            left_circles (list): List of circles detected in left image
+            right_circles (list): List of circles detected in right image
             
         Returns:
-            tuple: (left_prediction, right_prediction)
+            tuple: (left_prediction, right_prediction) - Updated Kalman predictions
         """
+        # Skip if Kalman processor is disabled
+        if not self.kalman_settings.get('enabled', True):
+            # Return None for predictions
+            return None, None
+        
+        # Get adaptive detection settings
+        confidence_threshold = self.kalman_settings.get('confidence_threshold', 0.7)
+        distance_threshold = self.kalman_settings.get('distance_threshold', 100)
+        
+        # Get the best circle from each image
+        left_best = self._get_best_circle(left_circles, "left")
+        right_best = self._get_best_circle(right_circles, "right")
+        
+        # Process left prediction
         left_prediction = None
+        if left_best:
+            # Extract coordinates and radius
+            x, y, r = left_best
+            
+            # Check if ROI is enabled and if we have valid ROI coordinates
+            if self.get_roi_settings().get('enabled', False) and self.left_roi:
+                # If circles are already in full-image coordinates (from _detect_circles_in_cropped_images),
+                # we don't need to adjust them further
+                pass
+                
+            # Calculate time since last update for this camera
+            current_time = time.time()
+            if self.last_update_time["left"] is None:
+                dt = 1/30.0  # Default 30 FPS if first update
+            else:
+                dt = current_time - self.last_update_time["left"]
+                dt = max(0.01, min(dt, 0.5))  # Limit dt to reasonable range
+
+            # Update last update time
+            self.last_update_time["left"] = current_time
+                
+            # Update Kalman filter with new measurement
+            left_prediction = self.kalman_processor.update(
+                camera="left",
+                x=float(x),
+                y=float(y),
+                dt=dt
+            )
+            
+        else:
+            # If no circle detected, just get prediction based on previous state
+            left_prediction = self.kalman_processor.get_prediction("left")
+            
+        # Process right prediction
         right_prediction = None
-        
-        if left_circles:
-            x, y, r = left_circles[0]
-            left_prediction = self.kalman_processor.update("left", x, y)
-        
-            if right_circles:
-                x, y, r = right_circles[0]
-            right_prediction = self.kalman_processor.update("right", x, y)
+        if right_best:
+            # Extract coordinates and radius
+            x, y, r = right_best
+            
+            # Check if ROI is enabled and if we have valid ROI coordinates
+            if self.get_roi_settings().get('enabled', False) and self.right_roi:
+                # If circles are already in full-image coordinates (from _detect_circles_in_cropped_images),
+                # we don't need to adjust them further
+                pass
+                
+            # Calculate time since last update for this camera
+            current_time = time.time()
+            if self.last_update_time["right"] is None:
+                dt = 1/30.0  # Default 30 FPS if first update
+            else:
+                dt = current_time - self.last_update_time["right"]
+                dt = max(0.01, min(dt, 0.5))  # Limit dt to reasonable range
+                
+            # Update last update time
+            self.last_update_time["right"] = current_time
+                
+            # Update Kalman filter with new measurement
+            right_prediction = self.kalman_processor.update(
+                camera="right",
+                x=float(x),
+                y=float(y),
+                dt=dt
+            )
+        else:
+            # If no circle detected, just get prediction based on previous state
+            right_prediction = self.kalman_processor.get_prediction("right")
         
         return left_prediction, right_prediction
     
-    def _get_best_circle(self, circles):
+    def _get_best_circle(self, circles, side):
         """
         Get the best circle from a list of detected circles.
         
         Args:
             circles: List of detected circles
+            side: Side identifier (e.g., "left" or "right")
             
         Returns:
-            tuple: Best circle (x, y, r) or None if no circles are detected
+            tuple: Best circle (x, y, r) or None if no circles
         """
-        if circles:
-            return circles[0]
-        else:
+        if not circles or len(circles) == 0:
             return None
+            
+        # For now, simply return the first circle
+        # TODO: Implement more sophisticated selection based on confidence scores
+        return circles[0]
     
     def _fuse_coordinates(self):
         """
@@ -1358,10 +1497,10 @@ class BallTrackingController(QObject):
                 # Get HSV mask centroid
                 right_hsv_center = self.roi_computer.compute_mask_centroid(self.model.right_mask)
                 if right_hsv_center:
-                    frame_data["right"]["hsv_center"] = {
-                        "x": float(right_hsv_center[0]),
-                        "y": float(right_hsv_center[1])
-                    }
+                        frame_data["right"]["hsv_center"] = {
+                            "x": float(right_hsv_center[0]),
+                            "y": float(right_hsv_center[1])
+                        }
                 
                 # Get latest Hough circle center if available
                 right_hough_center = None
@@ -1737,3 +1876,77 @@ class BallTrackingController(QObject):
         }
         
         return summary 
+
+    def _detect_circles_in_cropped_images(self, left_image, right_image, left_mask, right_mask, left_roi, right_roi):
+        """
+        Detect circles in cropped images within ROIs.
+        This ensures Hough circles are only detected within the ROI region.
+        
+        Args:
+            left_image (numpy.ndarray): Cropped left input image
+            right_image (numpy.ndarray): Cropped right input image
+            left_mask (numpy.ndarray): Cropped left binary mask
+            right_mask (numpy.ndarray): Cropped right binary mask
+            left_roi (dict): Left ROI dictionary
+            right_roi (dict): Right ROI dictionary
+            
+        Returns:
+            tuple: (left_circles, right_circles) - Lists of detected circles
+        """
+        # Use existing CircleDetector instance
+        current_hough_settings = self._hough_settings.copy()
+        
+        # If adaptive is enabled in settings
+        adaptive_enabled = current_hough_settings.get('adaptive', False)
+        
+        # Ensure min_radius is small enough for tennis ball detection
+        if adaptive_enabled:
+            if 'min_radius' in current_hough_settings:
+                current_hough_settings['min_radius'] = max(8, min(current_hough_settings['min_radius'], 14))
+            
+            if 'param2' in current_hough_settings:
+                current_hough_settings['param2'] = min(current_hough_settings['param2'], 25)
+        
+        # Update detector with modified settings if needed
+        if current_hough_settings != self._hough_settings:
+            self.circle_detector.update_settings(current_hough_settings)
+            logging.debug(f"Updated circle detector settings for cropped images: {current_hough_settings}")
+            # Store the updated settings
+            self._hough_settings = current_hough_settings.copy()
+        
+        # Detect circles in cropped ROI images directly (no need to pass ROI parameter)
+        # We're already working with cropped images
+        left_result = self.circle_detector.detect_circles(
+            img=left_image,
+            mask=left_mask,
+            roi=None,  # No need for ROI as image is already cropped
+            side="left"
+        )
+        
+        right_result = self.circle_detector.detect_circles(
+            img=right_image,
+            mask=right_mask,
+            roi=None,  # No need for ROI as image is already cropped
+            side="right"
+        )
+        
+        # Create new circle lists with coordinates adjusted back to full image coordinates
+        left_circles = left_result['circles']
+        right_circles = right_result['circles']
+        
+        # Ensure we have lists, not None values
+        left_circles = [] if left_circles is None else left_circles
+        right_circles = [] if right_circles is None else right_circles
+        
+        # Convert coordinates from ROI-relative to full-image coordinates
+        if left_circles and left_roi is not None:
+            left_x = left_roi.get('x', 0)
+            left_y = left_roi.get('y', 0)
+            left_circles = [(x + left_x, y + left_y, r) for x, y, r in left_circles]
+        
+        if right_circles and right_roi is not None:
+            right_x = right_roi.get('x', 0)
+            right_y = right_roi.get('y', 0)
+            right_circles = [(x + right_x, y + right_y, r) for x, y, r in right_circles]
+        
+        return left_circles, right_circles

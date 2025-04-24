@@ -368,6 +368,10 @@ class AppController(QObject):
         # Reset ball tracking data
         self.ball_tracking_controller.reset_tracking()
         
+        # Reset detection rate and clear info view
+        if hasattr(self.view, 'info_view'):
+            self.view.info_view.clear_info()
+        
         # Refresh ball tracking display if enabled
         if self.ball_tracking_controller.is_enabled:
             frame = self.model.get_current_frame()

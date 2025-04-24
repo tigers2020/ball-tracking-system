@@ -370,17 +370,13 @@ class InfoView(QWidget):
         
         # Also update Kalman state if predictions are available
         if self.controller and hasattr(self.controller, 'get_predictions'):
-            predictions = self.controller.get_predictions()
+            left_pred, right_pred = self.controller.get_predictions()
             
-            if predictions and 'left' in predictions and predictions['left']:
-                left_pred = predictions['left']
-                if len(left_pred) >= 4:
-                    self.set_left_state(left_pred[0], left_pred[1], left_pred[2], left_pred[3])
+            if left_pred is not None and len(left_pred) >= 4:
+                self.set_left_state(left_pred[0], left_pred[1], left_pred[2], left_pred[3])
             
-            if predictions and 'right' in predictions and predictions['right']:
-                right_pred = predictions['right']
-                if len(right_pred) >= 4:
-                    self.set_right_state(right_pred[0], right_pred[1], right_pred[2], right_pred[3])
+            if right_pred is not None and len(right_pred) >= 4:
+                self.set_right_state(right_pred[0], right_pred[1], right_pred[2], right_pred[3])
         
         logging.debug(f"3D position updated: ({x:.3f}, {y:.3f}, {z:.3f})")
     

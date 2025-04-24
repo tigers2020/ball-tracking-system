@@ -28,9 +28,9 @@
         "adaptive": true
     },
     "kalman_settings": {
-        "process_noise": 0.036,
-        "measurement_noise": 0.7,
-        "max_lost_frames": 20,
+        "process_noise": 0.1,
+        "measurement_noise": 0.3,
+        "max_lost_frames": 10,
         "dynamic_process_noise": false,
         "adaptive_measurement_noise": false
     },
