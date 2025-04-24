@@ -32,12 +32,39 @@ class HSVMaskGenerator:
         """
         self.hsv_settings = hsv_settings.copy()
         
+        # Normalize HSV parameter keys to ensure compatibility
+        self._normalize_hsv_keys()
+        
         # Log missing HSV parameters
         for param in ["h_min", "h_max", "s_min", "s_max", "v_min", "v_max"]:
             if param not in self.hsv_settings:
                 logging.warning(f"Missing HSV parameter: {param}, using default")
         
         logging.info(f"HSV mask generator initialized with settings: {self.hsv_settings}")
+
+    def _normalize_hsv_keys(self) -> None:
+        """
+        Normalize HSV parameter keys to ensure compatibility with different naming conventions.
+        Maps legacy keys to standardized format (h_min, h_max, s_min, s_max, v_min, v_max).
+        """
+        # Map of legacy keys to standardized keys
+        key_mapping = {
+            # Legacy hue keys
+            'hMin': 'h_min', 'hMax': 'h_max',
+            'lower_h': 'h_min', 'upper_h': 'h_max',
+            # Legacy saturation keys
+            'sMin': 's_min', 'sMax': 's_max',
+            'lower_s': 's_min', 'upper_s': 's_max',
+            # Legacy value keys
+            'vMin': 'v_min', 'vMax': 'v_max',
+            'lower_v': 'v_min', 'upper_v': 'v_max'
+        }
+        
+        # Map legacy keys to standardized keys
+        for legacy_key, standard_key in key_mapping.items():
+            if legacy_key in self.hsv_settings and standard_key not in self.hsv_settings:
+                self.hsv_settings[standard_key] = self.hsv_settings[legacy_key]
+                logging.debug(f"Mapped legacy key '{legacy_key}' to standard key '{standard_key}'")
 
     def update_settings(self, hsv_settings: Dict[str, Any]) -> None:
         """
@@ -47,6 +74,8 @@ class HSVMaskGenerator:
             hsv_settings: Dictionary containing HSV ranges and parameters
         """
         self.hsv_settings.update(hsv_settings.copy())
+        # Apply key normalization after updating settings
+        self._normalize_hsv_keys()
         logging.info(f"HSV mask generator settings updated: {self.hsv_settings}")
 
     def update_hsv_values(self, hsv_values: Dict[str, Any]) -> None:

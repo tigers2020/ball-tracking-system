@@ -133,6 +133,11 @@ class AppController(QObject):
         # 볼 트래킹 버튼 비활성화 (초기 상태)
         self.view.image_view.playback_controls.ball_tracking_button.setEnabled(False)
         
+        # Connect ball_tracking signals to view
+        self.ball_tracking_controller.mask_updated.connect(self._on_mask_updated)
+        self.ball_tracking_controller.roi_updated.connect(self._on_roi_updated)
+        self.ball_tracking_controller.circles_processed.connect(self.view.image_view.set_images)
+        
         # Tracking data save settings
         self.tracking_data_save_enabled = True  # Enable/disable saving
         self.tracking_data_folder = os.path.join(os.getcwd(), "tracking_data")  # Default folder
@@ -482,16 +487,15 @@ class AppController(QObject):
         # Update the view with the new masks
         self.view.image_view.set_masks(left_mask, right_mask)
     
-    @Slot(np.ndarray, np.ndarray)
+    @Slot(dict, dict)
     def _on_roi_updated(self, left_roi, right_roi):
         """
         Handle ROI update from the ball tracking controller.
         
         Args:
-            left_roi (numpy.ndarray): Updated left ROI
-            right_roi (numpy.ndarray): Updated right ROI
+            left_roi (dict): Left ROI data
+            right_roi (dict): Right ROI data
         """
-        # Update the view with the new ROIs
         self.view.image_view.set_rois(left_roi, right_roi)
     
     @Slot()

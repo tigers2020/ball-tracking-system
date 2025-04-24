@@ -371,6 +371,27 @@ class BallTrackingController(QObject):
             self.model.left_prediction = left_prediction
             self.model.right_prediction = right_prediction
             
+            # Draw circles on images and emit circles_processed signal
+            left_circle_image = left_image.copy()
+            right_circle_image = right_image.copy()
+            
+            # Import hough visualizer to draw circles
+            from src.views.visualization.hough_visualizer import draw_circles
+            
+            # Draw circles on images if detected
+            if left_circles:
+                left_circle_image = draw_circles(left_circle_image, left_circles)
+            if right_circles:
+                right_circle_image = draw_circles(right_circle_image, right_circles)
+                
+            # Emit circles_processed signal with images that have circles drawn
+            self.circles_processed.emit(left_circle_image, right_circle_image)
+            
+            # Emit mask and ROI signals
+            self.mask_updated.emit(self.left_mask, self.right_mask)
+            if roi_settings.get('enabled', False):
+                self.roi_updated.emit(self.left_roi, self.right_roi)
+            
             # Update internal predictions
             self.left_prediction = left_prediction
             self.right_prediction = right_prediction

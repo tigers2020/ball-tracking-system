@@ -52,6 +52,7 @@ class ImageViewWidget(QWidget):
         self.current_cv_image = None
         self.current_mask = None
         self.current_roi = None
+        self.mask_enabled = True  # Default to True for backward compatibility
         
         # Empty pixmap as placeholder
         self.clear_image()
@@ -147,6 +148,10 @@ class ImageViewWidget(QWidget):
             numpy.ndarray: Image with mask overlay
         """
         if image is None or mask is None:
+            return image
+        
+        # If mask overlay is disabled, return original image
+        if hasattr(self, 'mask_enabled') and not self.mask_enabled:
             return image
         
         try:
@@ -280,16 +285,23 @@ class ImageViewWidget(QWidget):
         self.image_label.setPixmap(scaled_pixmap)
     
     def clear_image(self):
-        """Clear the image display."""
-        # Create an empty pixmap
-        empty_pixmap = QPixmap(640, 480)
+        """Clear the image by setting an empty pixmap."""
+        empty_pixmap = QPixmap(QSize(320, 240))
         empty_pixmap.fill(Qt.black)
         self.image_label.setPixmap(empty_pixmap)
-        
-        # Clear stored images and masks
         self.current_cv_image = None
-        self.current_mask = None
-        self.current_roi = None
+    
+    def enable_mask_overlay(self, enable: bool = True):
+        """
+        Enable or disable mask overlay on images.
+        
+        Args:
+            enable (bool): Whether to enable mask overlay
+        """
+        self.mask_enabled = enable
+        # Refresh display if we have an image
+        if self.current_cv_image is not None:
+            self.set_image_from_cv(self.current_cv_image)
     
     def set_title(self, title):
         """
@@ -401,15 +413,25 @@ class StereoImageViewWidget(QWidget):
     
     def set_titles(self, left_title="Left Image", right_title="Right Image"):
         """
-        Set the titles for the left and right image views.
+        Set titles for both image views.
         
         Args:
-            left_title (str): Left image title
-            right_title (str): Right image title
+            left_title (str): Title for left image
+            right_title (str): Title for right image
         """
         self.left_image_view.set_title(left_title)
         self.right_image_view.set_title(right_title)
+    
+    def enable_mask_overlay(self, enable: bool = True):
+        """
+        Enable or disable mask overlay on both images.
         
+        Args:
+            enable (bool): Whether to enable mask overlay
+        """
+        self.left_image_view.enable_mask_overlay(enable)
+        self.right_image_view.enable_mask_overlay(enable)
+    
     def display_roi_images(self, left_roi_image, right_roi_image):
         """
         Display cropped ROI images in separate windows.
