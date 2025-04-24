@@ -4,7 +4,7 @@ import logging
 from typing import Tuple, Optional
 
 def apply_mask_overlay(img: np.ndarray, mask: np.ndarray, 
-                      alpha: float = 0.5, 
+                      alpha: float = 0.4, 
                       mask_color: Tuple[int, int, int] = (0, 255, 0)) -> np.ndarray:
     """
     Apply HSV mask overlay on the original image
@@ -35,7 +35,7 @@ def apply_mask_overlay(img: np.ndarray, mask: np.ndarray,
 
 def draw_centroid(img: np.ndarray, 
                  centroid: Optional[Tuple[int, int]], 
-                 radius: int = 5,
+                 radius: int = 7,
                  color: Tuple[int, int, int] = (255, 0, 255)) -> np.ndarray:
     """
     Draw centroid point on image

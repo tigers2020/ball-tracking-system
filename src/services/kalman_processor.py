@@ -54,6 +54,13 @@ class KalmanProcessor:
         self.last_left_state = None
         self.last_right_state = None
         
+        # Position history for trajectory visualization
+        self.position_history = {
+            "left": [],
+            "right": []
+        }
+        self.max_history_length = 30  # Maximum number of positions to store in history
+        
         # Initialize the filters
         self._init_kalman_filters()
         
@@ -81,6 +88,8 @@ class KalmanProcessor:
             self.velocity_decay_factor = settings["velocity_decay"]
         if "position_memory" in settings:
             self.position_memory_factor = settings["position_memory"]
+        if "max_history_length" in settings:
+            self.max_history_length = settings["max_history_length"]
             
         # Re-initialize the filters with updated parameters
         self._init_kalman_filters()
@@ -147,6 +156,12 @@ class KalmanProcessor:
         self.left_update_count = 0
         self.right_update_count = 0
         
+        # Clear position history
+        self.position_history = {
+            "left": [],
+            "right": []
+        }
+        
         logging.debug("Kalman filters initialized with process noise and measurement noise matrices")
 
     def set_initial_state(self, camera: str, x: float, y: float, vx: float = 0.0, vy: float = 0.0) -> None:
@@ -166,11 +181,17 @@ class KalmanProcessor:
                 self.left_filter_ready = False
                 self.left_update_count = 0
                 self.last_left_pos = np.array([x, y], dtype=np.float32)
+                # Add to position history
+                if not self.position_history["left"]:
+                    self.position_history["left"] = [(int(x), int(y))]
             elif camera.lower() == 'right':
                 kalman = self.kalman_right
                 self.right_filter_ready = False
                 self.right_update_count = 0
                 self.last_right_pos = np.array([x, y], dtype=np.float32)
+                # Add to position history
+                if not self.position_history["right"]:
+                    self.position_history["right"] = [(int(x), int(y))]
             else:
                 logging.error(f"Invalid camera identifier: {camera}")
                 return
@@ -219,84 +240,90 @@ class KalmanProcessor:
                     ], np.float32)
                     logging.debug(f"Updated right Kalman dt to {current_dt:.4f}")
             
-            # Determine which Kalman filter to use
+            # Select the appropriate Kalman filter
             if camera.lower() == 'left':
                 kalman = self.kalman_left
                 last_pos = self.last_left_pos
-                last_state = self.last_left_state
                 update_count = self.left_update_count
-                is_ready = self.left_filter_ready
             elif camera.lower() == 'right':
                 kalman = self.kalman_right
                 last_pos = self.last_right_pos
-                last_state = self.last_right_state
                 update_count = self.right_update_count
-                is_ready = self.right_filter_ready
             else:
                 logging.error(f"Invalid camera identifier: {camera}")
                 return (x, y, 0.0, 0.0)
+            
+            # Skip first prediction if initialization state
+            if update_count == 0:
+                kalman.statePost = np.array([x, y, 0, 0], dtype=np.float32).reshape(4, 1)
                 
-            # Create measurement array
-            measurement = np.array([x, y], dtype=np.float32).reshape(2, 1)
-            
-            # Check if we need to reset the filter
-            if is_ready and last_pos is not None:
-                distance = np.sqrt((x - last_pos[0])**2 + (y - last_pos[1])**2)
-                if distance > self.reset_threshold:
-                    logging.warning(f"Measurement jump detected ({distance:.2f}px > {self.reset_threshold}px). "
-                                  f"Resetting {camera} Kalman filter.")
-                    # Reset filter with current position and zero velocity
-                    self.set_initial_state(camera, x, y, 0.0, 0.0)
-                    
-                    # Update last position
-                    if camera.lower() == 'left':
-                        self.last_left_pos = np.array([x, y], dtype=np.float32)
-                    else:
-                        self.last_right_pos = np.array([x, y], dtype=np.float32)
-                    
+                # Add to position history
+                self.position_history[camera.lower()].append((int(x), int(y)))
+                
+                # Update counter and store last position
+                if camera.lower() == 'left':
+                    self.left_update_count = 1
+                    self.last_left_pos = np.array([x, y], dtype=np.float32)
+                    self.last_left_state = kalman.statePost.copy()
+                else:
+                    self.right_update_count = 1
+                    self.last_right_pos = np.array([x, y], dtype=np.float32)
+                    self.last_right_state = kalman.statePost.copy()
+                
+                return (x, y, 0.0, 0.0)
+                
+            # Check if measurement is too far from last position (indicates tracking jump)
+            if last_pos is not None:
+                dist = np.sqrt((x - last_pos[0])**2 + (y - last_pos[1])**2)
+                if dist > self.reset_threshold:
+                    logging.warning(f"Measurement jump detected for {camera} camera: dist={dist:.2f} > threshold={self.reset_threshold}")
+                    # Re-initialize the filter with current position
+                    self.set_initial_state(camera, x, y)
                     return (x, y, 0.0, 0.0)
-            
-            # Predict next state
+                
+            # Perform prediction and update
             prediction = kalman.predict()
             
-            # Add memory (position blending) if enabled
-            if self.position_memory_factor > 0.0 and last_state is not None:
-                try:
-                    # Blend prediction with last state for smoother transitions
-                    # Only blend positions (x, y), not velocities
-                    blended_prediction = prediction.copy()
-                    blended_prediction[0] = (1 - self.position_memory_factor) * prediction[0] + self.position_memory_factor * last_state[0]
-                    blended_prediction[1] = (1 - self.position_memory_factor) * prediction[1] + self.position_memory_factor * last_state[1]
-                    prediction = blended_prediction
-                    
-                    logging.debug(f"Applied position blending with factor {self.position_memory_factor} for {camera} camera")
-                except Exception as blend_error:
-                    logging.warning(f"Error during position blending for {camera} camera: {blend_error}")
-                    # Continue with original prediction if blending fails
+            # Create a measurement vector from actual coordinates
+            measurement = np.array([x, y], dtype=np.float32).reshape(2, 1)
             
-            # Update with new measurement
-            corrected_state = kalman.correct(measurement)
+            # Perform the correction phase
+            correction = kalman.correct(measurement)
             
-            # Extract corrected position and velocity
-            corrected_x, corrected_y = corrected_state[0, 0], corrected_state[1, 0]
-            velocity_x, velocity_y = corrected_state[2, 0], corrected_state[3, 0]
+            # Extract corrected state components
+            corrected_state = correction.copy()
+            corrected_x = corrected_state[0, 0]
+            corrected_y = corrected_state[1, 0]
+            velocity_x = corrected_state[2, 0]
+            velocity_y = corrected_state[3, 0]
             
-            # Increment update counter
+            # Add to position history
+            position_tuple = (int(corrected_x), int(corrected_y))
+            history_list = self.position_history[camera.lower()]
+            
+            # Only add if position is significantly different from last one
+            if not history_list or np.sqrt((position_tuple[0] - history_list[-1][0])**2 + 
+                                       (position_tuple[1] - history_list[-1][1])**2) > 1.0:
+                history_list.append(position_tuple)
+                # Trim history list if it exceeds maximum length
+                if len(history_list) > self.max_history_length:
+                    history_list = history_list[-self.max_history_length:]
+                self.position_history[camera.lower()] = history_list
+            
+            # Update counter and check if filter is ready
             if camera.lower() == 'left':
                 self.left_update_count += 1
-                # Check if filter is now ready
-                if self.left_update_count >= self.min_updates_required and not self.left_filter_ready:
+                if self.left_update_count >= self.min_updates_required:
                     self.left_filter_ready = True
-                    logging.info(f"Left Kalman filter is now ready after {self.left_update_count} updates")
+                
                 # Store last position and state
                 self.last_left_pos = np.array([corrected_x, corrected_y], dtype=np.float32)
                 self.last_left_state = corrected_state.copy()
-            else:
+            elif camera.lower() == 'right':
                 self.right_update_count += 1
-                # Check if filter is now ready
-                if self.right_update_count >= self.min_updates_required and not self.right_filter_ready:
+                if self.right_update_count >= self.min_updates_required:
                     self.right_filter_ready = True
-                    logging.info(f"Right Kalman filter is now ready after {self.right_update_count} updates")
+                
                 # Store last position and state
                 self.last_right_pos = np.array([corrected_x, corrected_y], dtype=np.float32)
                 self.last_right_state = corrected_state.copy()
@@ -309,6 +336,20 @@ class KalmanProcessor:
         except Exception as e:
             logging.error(f"Error updating Kalman filter for {camera} camera: {e}")
             return (x, y, 0.0, 0.0)
+
+    def get_position_history(self, camera: str) -> List[Tuple[int, int]]:
+        """
+        Get position history for the specified camera.
+        
+        Args:
+            camera: Camera identifier ('left' or 'right')
+            
+        Returns:
+            List of (x, y) position tuples or empty list if no history
+        """
+        if camera.lower() in self.position_history:
+            return self.position_history[camera.lower()]
+        return []
 
     def get_prediction(self, camera: str) -> Optional[Tuple[float, float, float, float]]:
         """
@@ -389,6 +430,11 @@ class KalmanProcessor:
             self.last_right_pos = None
             self.last_left_state = None
             self.last_right_state = None
+            # Clear position history
+            self.position_history = {
+                "left": [],
+                "right": []
+            }
             logging.info("Kalman filters have been reset")
         except Exception as e:
             logging.error(f"Error resetting Kalman filters: {e}")

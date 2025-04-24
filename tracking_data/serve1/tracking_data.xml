@@ -1,5 +1,5 @@
 <?xml version="1.0" ?>
-<TrackingData folder="serve1" timestamp="2025-04-24 06:48:20" created="1745491700.4509234" finalized="1745499671.6391854" finalized_time="2025-04-24 09:01:11" total_frames="136" duration_seconds="7971.19" duration_formatted="02:12:51" resumed="1745499630.2197838" resume_time="2025-04-24 09:00:30">
+<TrackingData folder="serve1" timestamp="2025-04-24 06:48:20" created="1745491700.4509234" finalized="1745500760.5285869" finalized_time="2025-04-24 09:19:20" total_frames="150" duration_seconds="9060.08" duration_formatted="02:31:00" resumed="1745500730.2249398" resume_time="2025-04-24 09:18:50">
   <ProcessingStats/>
   <ProcessingStats/>
   <Image number="16" name="frame_000016.png" timestamp="2025-04-24 07:55:34" tracking_active="True">
@@ -1443,6 +1443,120 @@
     </Right>
   </Image>
   <Image number="0" name="frame_000000.png" timestamp="2025-04-24 09:01:08" tracking_active="True">
+    <Left>
+      <HSV x="270.0" y="725.0"/>
+    </Left>
+    <Right>
+      <HSV x="1637.0" y="725.0"/>
+    </Right>
+  </Image>
+  <ProcessingStats/>
+  <ProcessingStats/>
+  <Image number="16" name="frame_000016.png" timestamp="2025-04-24 09:19:06" tracking_active="True">
+    <Left>
+      <HSV x="268.0" y="726.0"/>
+    </Left>
+    <Right>
+      <HSV x="1636.0" y="724.0"/>
+    </Right>
+  </Image>
+  <Image number="32" name="frame_000032.png" timestamp="2025-04-24 09:19:06" tracking_active="True">
+    <Left>
+      <HSV x="268.0" y="725.0"/>
+    </Left>
+    <Right>
+      <HSV x="1636.0" y="725.0"/>
+    </Right>
+  </Image>
+  <Image number="48" name="frame_000048.png" timestamp="2025-04-24 09:19:07" tracking_active="True">
+    <Left>
+      <HSV x="268.0" y="726.0"/>
+    </Left>
+    <Right>
+      <HSV x="1636.0" y="725.0"/>
+    </Right>
+  </Image>
+  <Image number="64" name="frame_000064.png" timestamp="2025-04-24 09:19:07" tracking_active="True">
+    <Left>
+      <HSV x="268.0" y="725.0"/>
+    </Left>
+    <Right>
+      <HSV x="1636.0" y="724.0"/>
+    </Right>
+  </Image>
+  <Image number="80" name="frame_000080.png" timestamp="2025-04-24 09:19:08" tracking_active="True">
+    <Left>
+      <HSV x="268.0" y="725.0"/>
+    </Left>
+    <Right>
+      <HSV x="1636.0" y="724.0"/>
+    </Right>
+  </Image>
+  <Image number="96" name="frame_000096.png" timestamp="2025-04-24 09:19:08" tracking_active="True">
+    <Left>
+      <HSV x="268.0" y="725.0"/>
+    </Left>
+    <Right>
+      <HSV x="1636.0" y="725.0"/>
+    </Right>
+  </Image>
+  <Image number="112" name="frame_000112.png" timestamp="2025-04-24 09:19:09" tracking_active="True">
+    <Left>
+      <HSV x="268.0" y="726.0"/>
+    </Left>
+    <Right>
+      <HSV x="1636.0" y="725.0"/>
+    </Right>
+  </Image>
+  <Image number="128" name="frame_000128.png" timestamp="2025-04-24 09:19:09" tracking_active="True">
+    <Left>
+      <HSV x="268.0" y="725.0"/>
+    </Left>
+    <Right>
+      <HSV x="1637.0" y="725.0"/>
+    </Right>
+  </Image>
+  <Image number="144" name="frame_000144.png" timestamp="2025-04-24 09:19:10" tracking_active="True">
+    <Left>
+      <HSV x="265.0" y="727.0"/>
+    </Left>
+    <Right>
+      <HSV x="1637.0" y="725.0"/>
+    </Right>
+  </Image>
+  <Image number="160" name="frame_000160.png" timestamp="2025-04-24 09:19:10" tracking_active="True">
+    <Left>
+      <HSV x="268.0" y="726.0"/>
+    </Left>
+    <Right>
+      <HSV x="1636.0" y="724.0"/>
+    </Right>
+  </Image>
+  <Image number="176" name="frame_000176.png" timestamp="2025-04-24 09:19:11" tracking_active="True">
+    <Left>
+      <HSV x="268.0" y="726.0"/>
+    </Left>
+    <Right>
+      <HSV x="1636.0" y="724.0"/>
+    </Right>
+  </Image>
+  <Image number="0" name="frame_000000.png" timestamp="2025-04-24 09:19:11" tracking_active="True">
+    <Left>
+      <HSV x="270.0" y="725.0"/>
+    </Left>
+    <Right>
+      <HSV x="1637.0" y="725.0"/>
+    </Right>
+  </Image>
+  <Image number="0" name="frame_000000.png" timestamp="2025-04-24 09:19:14" tracking_active="True">
+    <Left>
+      <HSV x="270.0" y="725.0"/>
+    </Left>
+    <Right>
+      <HSV x="1637.0" y="725.0"/>
+    </Right>
+  </Image>
+  <Image number="0" name="frame_000000.png" timestamp="2025-04-24 09:19:15" tracking_active="True">
     <Left>
       <HSV x="270.0" y="725.0"/>
     </Left>

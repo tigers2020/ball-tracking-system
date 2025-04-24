@@ -375,14 +375,44 @@ class BallTrackingController(QObject):
             left_circle_image = left_image.copy()
             right_circle_image = right_image.copy()
             
-            # Import hough visualizer to draw circles
+            # Import visualization modules
             from src.views.visualization.hough_visualizer import draw_circles
+            from src.views.visualization.kalman_visualizer import draw_prediction, draw_trajectory
+            
+            # Draw ROI on images if enabled
+            if roi_settings.get('enabled', False) and self.left_roi:
+                from src.views.visualization.roi_visualizer import draw_roi
+                left_circle_image = draw_roi(left_circle_image, self.left_roi)
+                right_circle_image = draw_roi(right_circle_image, self.right_roi)
             
             # Draw circles on images if detected
             if left_circles:
                 left_circle_image = draw_circles(left_circle_image, left_circles)
             if right_circles:
                 right_circle_image = draw_circles(right_circle_image, right_circles)
+                
+            # Draw Kalman prediction on images if available
+            if left_prediction:
+                # Extract current position from circles and predicted position from Kalman
+                current_pos = (int(left_circles[0][0]), int(left_circles[0][1])) if left_circles else None
+                pred_pos = (int(left_prediction[0]), int(left_prediction[1]))
+                left_circle_image = draw_prediction(left_circle_image, current_pos, pred_pos)
+                
+                # Draw trajectory if available
+                left_history = self.kalman_processor.get_position_history("left")
+                if left_history and len(left_history) > 1:
+                    left_circle_image = draw_trajectory(left_circle_image, left_history, max_points=10)
+                
+            if right_prediction:
+                # Extract current position from circles and predicted position from Kalman
+                current_pos = (int(right_circles[0][0]), int(right_circles[0][1])) if right_circles else None
+                pred_pos = (int(right_prediction[0]), int(right_prediction[1]))
+                right_circle_image = draw_prediction(right_circle_image, current_pos, pred_pos)
+                
+                # Draw trajectory if available
+                right_history = self.kalman_processor.get_position_history("right")
+                if right_history and len(right_history) > 1:
+                    right_circle_image = draw_trajectory(right_circle_image, right_history, max_points=10)
                 
             # Emit circles_processed signal with images that have circles drawn
             self.circles_processed.emit(left_circle_image, right_circle_image)

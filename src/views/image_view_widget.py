@@ -86,13 +86,13 @@ class ImageViewWidget(QWidget):
         # Create a working copy of the image
         display_image = cv_image.copy()
         
-        # Apply mask if available
-        if self.current_mask is not None:
-            display_image = self._apply_mask(display_image, self.current_mask)
-        
-        # Draw ROI if available
+        # Draw ROI first if available (so it's visible underneath the mask)
         if self.current_roi is not None:
             display_image = self._draw_roi(display_image, self.current_roi)
+        
+        # Apply mask last if available (with transparency so other elements show through)
+        if self.current_mask is not None:
+            display_image = self._apply_mask(display_image, self.current_mask)
         
         # Convert from BGR to RGB
         if len(display_image.shape) == 3 and display_image.shape[2] == 3:
@@ -181,7 +181,8 @@ class ImageViewWidget(QWidget):
                     logging.debug(f"Resizing mask from {mask.shape} to match image size {image.shape[:2]}")
                 mask = cv2.resize(mask, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_NEAREST)
             
-            # Apply mask using visualization module
+            # Apply mask using visualization module with low alpha for transparency
+            # Explicitly set alpha to 0.3 to ensure good visibility of other elements
             result = apply_mask_overlay(image, mask, alpha=0.3, mask_color=(0, 0, 255))
             
             # Only find contours and draw them if there are sufficient non-zero pixels
@@ -195,7 +196,8 @@ class ImageViewWidget(QWidget):
                 if len(contours) > 5:
                     contours = sorted(contours, key=cv2.contourArea, reverse=True)[:5]
                 
-                cv2.drawContours(result, contours, -1, (0, 0, 255), 2)
+                # Draw contours with thicker lines (3) for better visibility
+                cv2.drawContours(result, contours, -1, (0, 0, 255), 3)
                 
                 # Draw centroids for each contour (limited to largest contours)
                 for contour in contours:
@@ -204,8 +206,8 @@ class ImageViewWidget(QWidget):
                         if M["m00"] != 0:
                             cX = int(M["m10"] / M["m00"])
                             cY = int(M["m01"] / M["m00"])
-                            # Draw centroid
-                            result = draw_centroid(result, (cX, cY), radius=5, color=(255, 255, 255))
+                            # Draw centroid with larger radius (7) for better visibility
+                            result = draw_centroid(result, (cX, cY), radius=7, color=(255, 255, 255))
             
             # Only log occasionally to avoid log flooding
             if self._frame_id % self._log_sample_rate == 0 and logging.getLogger().isEnabledFor(logging.DEBUG):
