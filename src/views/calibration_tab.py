@@ -572,8 +572,8 @@ class CourtCalibrationView(QWidget):
             
             # Get calibration points from controller
             points = {
-                "left_points": self.controller.get_model().left_raw_pts,
-                "right_points": self.controller.get_model().right_raw_pts,
+                "left_points": self.controller.get_model().left_pts,
+                "right_points": self.controller.get_model().right_pts,
                 "left_fine_points": self.controller.get_model().left_fine_pts,
                 "right_fine_points": self.controller.get_model().right_fine_pts
             }
@@ -682,8 +682,8 @@ class CourtCalibrationView(QWidget):
         """Handle fine-tune button click."""
         # Check if we have enough points
         model = self.controller.get_model()
-        left_count = len(model.left_raw_pts)
-        right_count = len(model.right_raw_pts)
+        left_count = len(model.left_pts)
+        right_count = len(model.right_pts)
         
         if left_count < 4 or right_count < 4:
             self.show_warning("At least 4 points per side are required for calibration")
@@ -708,8 +708,8 @@ class CourtCalibrationView(QWidget):
         """
         # Get current point counts from the model
         model = self.controller.get_model()
-        left_count = len(model.left_raw_pts)
-        right_count = len(model.right_raw_pts)
+        left_count = len(model.left_pts)
+        right_count = len(model.right_pts)
         
         # Check if we've reached the max points
         if side == "left" and left_count >= 14:
@@ -742,10 +742,10 @@ class CourtCalibrationView(QWidget):
         model = self.controller.get_model()
         
         # Update the point in the model
-        if side == "left" and 0 <= index < len(model.left_raw_pts):
-            model.left_raw_pts[index] = new_pos
-        elif side == "right" and 0 <= index < len(model.right_raw_pts):
-            model.right_raw_pts[index] = new_pos
+        if side == "left" and 0 <= index < len(model.left_pts):
+            model.left_pts[index] = new_pos
+        elif side == "right" and 0 <= index < len(model.right_pts):
+            model.right_pts[index] = new_pos
         
         # Notify controller of the update
         self.controller.calibration_updated.emit()
@@ -771,27 +771,16 @@ class CourtCalibrationView(QWidget):
         self.left_image_view.clear_points()
         self.right_image_view.clear_points()
         
-        # Count raw points
-        left_count = len(model.left_raw_pts)
-        right_count = len(model.right_raw_pts)
+        # Count points
+        left_count = len(model.left_pts)
+        right_count = len(model.right_pts)
         
-        # Add raw points
-        for i, pt in enumerate(model.left_raw_pts):
+        # Add points
+        for i, pt in enumerate(model.left_pts):
             self.left_image_view.add_point_marker(pt, is_fine_point=False, index=i)
             
-        for i, pt in enumerate(model.right_raw_pts):
+        for i, pt in enumerate(model.right_pts):
             self.right_image_view.add_point_marker(pt, is_fine_point=False, index=i)
-            
-        # Add fine points if available
-        for i, pt in enumerate(model.left_fine_pts):
-            # Convert float to int for display
-            int_pt = (int(pt[0]), int(pt[1]))
-            self.left_image_view.add_point_marker(int_pt, is_fine_point=True, index=i)
-            
-        for i, pt in enumerate(model.right_fine_pts):
-            # Convert float to int for display
-            int_pt = (int(pt[0]), int(pt[1]))
-            self.right_image_view.add_point_marker(int_pt, is_fine_point=True, index=i)
             
         # Update point counters directly from model data
         self.left_count_label.setText(f"{left_count}/14")

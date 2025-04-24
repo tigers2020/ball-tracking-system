@@ -226,24 +226,23 @@ class CourtCalibrationView(QWidget):
         """
         super(CourtCalibrationView, self).__init__(parent)
         
-        # Initialize controller
-        self.controller = CourtCalibrationController()
-        
-        # Setup logging
+        # Setup logger
         self.logger = logging.getLogger(__name__)
+        self.logger.info("Initializing Court Calibration View")
         
-        # Initialize UI variables
-        self.left_points = []
-        self.right_points = []
-        self.active_side = "left"  # Default active side
+        # Initialize controller
+        self.controller = CourtCalibrationController(self)
         
-        # Setup UI components
+        # Setup the user interface
         self._setup_ui()
         
         # Connect signals
         self._connect_signals()
         
-        # Update UI based on initial state
+        # Set initial active side
+        self.active_side = "left"
+        
+        # Initialize UI state
         self._update_ui()
         
     def _setup_ui(self):
@@ -369,19 +368,23 @@ class CourtCalibrationView(QWidget):
         # Controller signals
         self.controller.calibration_status_changed.connect(self._on_calibration_status_changed)
         self.controller.calibration_progress.connect(self._on_calibration_progress)
-        self.controller.points_updated.connect(self._on_points_updated)
         
         # 중요: calibration_updated 시그널이 발생할 때마다 포인트 재구성
         self.controller.calibration_updated.connect(lambda: self._rebuild_points("left"))
         self.controller.calibration_updated.connect(lambda: self._rebuild_points("right"))
+        self.controller.calibration_updated.connect(self._update_ui)
         
     def _update_ui(self):
         """Update UI based on current state."""
+        # 모델에서 직접 포인트 정보 가져오기
+        left_count = len(self.controller.get_points("left"))
+        right_count = len(self.controller.get_points("right"))
+        
         # Update points info
-        self.points_info_label.setText(f"Left: {len(self.left_points)}/14 points, Right: {len(self.right_points)}/14 points")
+        self.points_info_label.setText(f"Left: {left_count}/14 points, Right: {right_count}/14 points")
         
         # Update calibrate button state
-        has_enough_points = len(self.left_points) >= 4 and len(self.right_points) >= 4
+        has_enough_points = left_count >= 4 and right_count >= 4
         self.calibrate_btn.setEnabled(has_enough_points)
         
         # Update tune button state
@@ -463,16 +466,12 @@ class CourtCalibrationView(QWidget):
         # Clear existing points
         view.clear_points()
         
-        # Get points based on side
-        if side == "left":
-            raw_points = self.controller.model.left_raw_pts
-            fine_points = self.controller.get_fine_points("left")
-        else:
-            raw_points = self.controller.model.right_raw_pts
-            fine_points = self.controller.get_fine_points("right")
+        # Get points for the specified side
+        points = self.controller.get_points(side)
         
-        # Add raw points with proper flags (red)
-        for idx, point in enumerate(raw_points):
+        # Add points with proper flags
+        for idx, point in enumerate(points):
+            # 새로운 포인트 아이템 생성
             point_item = view.add_point(QPoint(point[0], point[1]), Qt.red)
             
             # 중요: 반드시 플래그 설정 (드래그 가능하도록)
@@ -484,43 +483,27 @@ class CourtCalibrationView(QWidget):
             label = QGraphicsSimpleTextItem(str(idx+1))
             label.setPos(point[0]+10, point[1]+10)
             label.setParentItem(point_item)  # 부모-자식 관계로 연결하여 함께 이동
-        
-        # Add fine-tuned points if available (green)
-        if fine_points:
-            for idx, point in enumerate(fine_points):
-                point_item = view.add_point(QPoint(point[0], point[1]), Qt.green)
-                
-                # Fine-tuned points shouldn't be movable
-                point_item.setFlag(QGraphicsItem.ItemIsMovable, False)
-                point_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
-                
-                # 번호 라벨 추가
-                label = QGraphicsSimpleTextItem(str(idx+1))
-                label.setPos(point[0]+10, point[1]+10)
-                label.setParentItem(point_item)
-    
+            
     def _on_image_clicked(self, pos, side):
         """Handle image clicks for adding points."""
         self.logger.debug(f"Image click at {pos.x()}, {pos.y()} on {side} side")
+        
+        # 이미 존재하는 포인트를 클릭했는지 확인
+        view = self.left_image_view if side == "left" else self.right_image_view
+        items = view.scene.items(pos)
+        if any(isinstance(item, DraggablePointItem) for item in items):
+            # 이미 존재하는 포인트를 클릭한 경우 새 포인트 추가하지 않음
+            return
         
         # Only add points on the active side
         if side != self.active_side:
             self.logger.debug(f"Ignoring click on inactive {side} side")
             return
             
-        # Add point through controller
+        # 컨트롤러를 통해 포인트 추가 (모델에 바로 반영됨)
         self.controller.add_point((pos.x(), pos.y()), side)
         
-        # Update local points list
-        if side == "left":
-            self.left_points.append((pos.x(), pos.y()))
-            self.left_image_view.add_point(pos, color=Qt.green)
-        else:
-            self.right_points.append((pos.x(), pos.y()))
-            self.right_image_view.add_point(pos, color=Qt.green)
-            
-        # Update UI
-        self._update_ui()
+        # 포인트 재구성과 UI 업데이트는 모델 신호에 의해 자동으로 처리됨
     
     def _on_point_moved(self, index, pos, side):
         """
@@ -533,75 +516,36 @@ class CourtCalibrationView(QWidget):
         """
         self.logger.debug(f"Point {index} moved to {pos.x()}, {pos.y()} on {side} side")
         
-        # Update the points list
-        if side == "left" and index < len(self.left_points):
-            self.left_points[index] = (int(pos.x()), int(pos.y()))
-            self.controller.update_point(index, (int(pos.x()), int(pos.y())), side)
-        elif side == "right" and index < len(self.right_points):
-            self.right_points[index] = (int(pos.x()), int(pos.y()))
-            self.controller.update_point(index, (int(pos.x()), int(pos.y())), side)
-    
-    def _on_points_updated(self, left_points, right_points):
-        """
-        Handle updated points from the controller.
-        
-        Args:
-            left_points (List[Tuple[int, int]]): Updated left points
-            right_points (List[Tuple[int, int]]): Updated right points
-        """
-        self.logger.debug("Points updated from controller")
-        
-        # Update local points
-        self.left_points = left_points
-        self.right_points = right_points
-        
-        # Rebuild displays
-        self._rebuild_points("left")
-        self._rebuild_points("right")
-        
-        # Update UI
-        self._update_ui()
+        # 컨트롤러를 통해 모델 업데이트
+        self.controller.update_point(index, (int(pos.x()), int(pos.y())), side)
     
     def _set_active_side(self, side):
         """Set the active side for point placement."""
         self.logger.debug(f"Setting active side to {side}")
         self.active_side = side
         
-        # Update point colors
-        if side == "left":
-            self._rebuild_points("left")
-            self._rebuild_points("right")
-        else:
-            self._rebuild_points("right")
-            self._rebuild_points("left")
-            
+        # Update display for both sides
+        self._rebuild_points("left")
+        self._rebuild_points("right")
+    
     def _on_clear_points(self):
         """Clear all calibration points."""
         self.logger.info("Clearing all calibration points")
         
-        # Clear points through controller
+        # 컨트롤러를 통해 포인트 클리어 (모델에 바로 반영됨)
         self.controller.clear_points()
         
-        # Clear local points
-        self.left_points.clear()
-        self.right_points.clear()
-        
-        # Clear displays
-        self.left_image_view.clear_points()
-        self.right_image_view.clear_points()
-        
-        # Update UI
-        self._update_ui()
-        
-        # Update status
+        # 상태 메시지 업데이트
         self.status_label.setText("All points cleared")
+        
+        # 포인트 재구성과 UI 업데이트는 모델 신호에 의해 자동으로 처리됨
     
     def _on_calibrate(self):
         """Run the court calibration."""
         self.logger.info("Starting court calibration")
         
         # Check if we have enough points
-        if len(self.left_points) < 4 or len(self.right_points) < 4:
+        if len(self.controller.get_points("left")) < 4 or len(self.controller.get_points("right")) < 4:
             QMessageBox.warning(self, "Insufficient Points", 
                              "At least 4 corresponding points are required on both images")
             return
@@ -716,6 +660,6 @@ class CourtCalibrationView(QWidget):
         self.clear_points_btn.setEnabled(enabled)
         
         # Calibration controls
-        self.calibrate_btn.setEnabled(enabled and len(self.left_points) >= 4 and len(self.right_points) >= 4)
+        self.calibrate_btn.setEnabled(enabled and len(self.controller.get_points("left")) >= 4 and len(self.controller.get_points("right")) >= 4)
         self.tune_calibration_btn.setEnabled(enabled and self.controller.has_calibration())
         self.save_config_btn.setEnabled(enabled and self.controller.has_calibration()) 

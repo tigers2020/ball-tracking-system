@@ -48,6 +48,9 @@ class CourtCalibrationController(QObject):
         # ROI size (half-width of the region)
         self.roi_size = 60  # Changed from 20 to 60 to improve intersection detection
         
+        # 모델의 시그널 연결
+        self.model.calibration_updated.connect(self._on_model_updated)
+        
         # Load calibration data from config
         self._load_from_config()
     
@@ -110,14 +113,26 @@ class CourtCalibrationController(QObject):
             point (tuple): (x, y) coordinates of the point
             side (str): "left" or "right" indicating which image the point belongs to
         """
-        self.model.add_raw_point(point, side)
+        self.model.add_point(point, side)
         self.calibration_updated.emit()
     
     @Slot()
     def clear_points(self) -> None:
         """Clear all calibration points."""
-        self.model.clear_raw_points()
+        self.model.clear_points()
         self.calibration_updated.emit()
+    
+    @Slot(int, tuple, str)
+    def update_point(self, index: int, point: tuple, side: str = "left") -> None:
+        """
+        Update a specific point after dragging.
+        
+        Args:
+            index (int): Index of the point to update
+            point (tuple): New (x, y) coordinates
+            side (str): "left" or "right" side
+        """
+        self.model.update_point(side, index, point)
     
     @Slot()
     def request_tuning(self) -> None:
@@ -125,14 +140,8 @@ class CourtCalibrationController(QObject):
         Request fine-tuning of calibration points.
         This will process each point to find the exact intersection.
         """
-        # Check if we have enough data - reduce minimum points to 4 per side
-        has_left_image = self.model.left_img is not None
-        has_right_image = self.model.right_img is not None
-        enough_left_points = len(self.model.left_raw_pts) >= 4
-        enough_right_points = len(self.model.right_raw_pts) >= 4
-        
-        # Need at least one image with 4 points
-        if not ((has_left_image and enough_left_points) or (has_right_image and enough_right_points)):
+        # Check if we have enough data
+        if not self.model.is_ready_for_tuning():
             self.error_occurred.emit("Insufficient data for tuning. Need images and at least 4 points per side.")
             return
             
@@ -140,30 +149,29 @@ class CourtCalibrationController(QObject):
         
         try:
             # Process left image points if available
-            left_fine_pts = None
-            if self.model.left_img is not None and self.model.left_raw_pts:
-                # For demonstration purposes, create simulated fine points
-                # In a real implementation, this would call the actual processing algorithm
-                left_fine_pts = self._process_image_points(self.model.left_img, self.model.left_raw_pts)
+            left_tuned_pts = None
+            if self.model.left_img is not None and self.model.left_pts:
+                left_tuned_pts = self._process_image_points(self.model.left_img, self.model.left_pts)
                 
             # Process right image points if available
-            right_fine_pts = None
-            if self.model.right_img is not None and self.model.right_raw_pts:
-                # For demonstration purposes, create simulated fine points
-                right_fine_pts = self._process_image_points(self.model.right_img, self.model.right_raw_pts)
+            right_tuned_pts = None
+            if self.model.right_img is not None and self.model.right_pts:
+                right_tuned_pts = self._process_image_points(self.model.right_img, self.model.right_pts)
             
-            # Update the model
-            self.model.update_fine_points(left_fine_pts, right_fine_pts)
+            # Update the model with the fine-tuned points
+            if left_tuned_pts:
+                self.model.update_points("left", left_tuned_pts)
+                
+            if right_tuned_pts:
+                self.model.update_points("right", right_tuned_pts)
             
             # Notify completion
             self.processing_completed.emit()
             
             # Emit signal with points (prefer left if available, otherwise right)
-            points_to_emit = left_fine_pts if left_fine_pts else right_fine_pts
+            points_to_emit = left_tuned_pts if left_tuned_pts else right_tuned_pts
             if points_to_emit:
                 self.tuning_completed.emit(points_to_emit)
-                
-            self.calibration_updated.emit()
             
             # Save to config
             self._save_to_config()
@@ -173,19 +181,19 @@ class CourtCalibrationController(QObject):
             self.error_occurred.emit(f"Error during fine-tuning: {str(e)}")
             self.logger.error(f"Error during fine-tuning: {str(e)}", exc_info=True)
     
-    def _process_image_points(self, img, raw_pts):
+    def _process_image_points(self, img, points):
         """
         Process calibration points for a single image.
         
         Args:
             img (np.ndarray): Image to process
-            raw_pts (list): List of raw points to process
+            points (list): List of points to process
             
         Returns:
             list: Fine-tuned points
         """
         # Set default result to return in case of failure
-        fine_pts = []
+        tuned_pts = []
         
         # Check if RoiCropper, Skeletonizer, and IntersectionFinder are available
         try:
@@ -194,7 +202,7 @@ class CourtCalibrationController(QObject):
             # Create an instance of IntersectionFinder
             intersection_finder = IntersectionFinder()
             
-            for pt in raw_pts:
+            for pt in points:
                 # Crop ROI around the point
                 roi = RoiCropper.crop(img, pt, self.roi_size)
                 
@@ -207,10 +215,9 @@ class CourtCalibrationController(QObject):
                 skeleton = Skeletonizer.run(preprocessed)
                 
                 # Find intersections
-                # Updated to use the instance method with correct parameters
                 roi_intersections = intersection_finder.find_intersections(
                     skeleton,
-                    roi_padding=self.roi_size//5  # Use roi_padding parameter instead
+                    roi_padding=self.roi_size//5
                 )
                 
                 # Convert ROI coordinates to image coordinates
@@ -224,12 +231,12 @@ class CourtCalibrationController(QObject):
             
             if all_intersections:
                 # Match raw points to fine intersections
-                result = IntersectionFinder.match_raw_to_fine(raw_pts, all_intersections)
+                result = IntersectionFinder.match_raw_to_fine(points, all_intersections)
                 if result:
-                    fine_pts = result
-                    return fine_pts
+                    tuned_pts = result
+                    return tuned_pts
                 else:
-                    self.logger.warning("Failed to match raw points to intersections")
+                    self.logger.warning("Failed to match points to intersections")
             else:
                 self.logger.warning("No intersections found in any ROI")
                 raise RuntimeError("No intersections found in image ROIs")
@@ -243,12 +250,12 @@ class CourtCalibrationController(QObject):
             
         # Fallback: Add small random offset to simulate fine-tuning
         import random
-        for x, y in raw_pts:
+        for x, y in points:
             offset_x = random.uniform(-2, 2)
             offset_y = random.uniform(-2, 2)
-            fine_pts.append((x + offset_x, y + offset_y))
+            tuned_pts.append((x + offset_x, y + offset_y))
             
-        return fine_pts
+        return tuned_pts
     
     @Slot(int)
     def set_roi_size(self, size: int) -> None:
@@ -275,41 +282,17 @@ class CourtCalibrationController(QObject):
         """
         return self.model
     
-    def get_active_points(self, side="left") -> list:
+    def get_points(self, side="left") -> list:
         """
-        Get the active calibration points.
+        Get the calibration points.
         
         Args:
             side (str): 'left' or 'right' to specify which side's points to return
             
         Returns:
-            list: List of active points (fine-tuned or raw)
+            list: List of calibration points
         """
-        if side == "left":
-            if self.model.left_fine_pts:
-                return self.model.left_fine_pts
-            else:
-                return self.model.left_raw_pts
-        else:
-            if self.model.right_fine_pts:
-                return self.model.right_fine_pts
-            else:
-                return self.model.right_raw_pts
-    
-    def get_fine_points(self, side="left") -> list:
-        """
-        Get only the fine-tuned calibration points.
-        
-        Args:
-            side (str): 'left' or 'right' to specify which side's points to return
-            
-        Returns:
-            list: List of fine-tuned points or empty list if none available
-        """
-        if side == "left":
-            return self.model.left_fine_pts if self.model.left_fine_pts else []
-        else:
-            return self.model.right_fine_pts if self.model.right_fine_pts else []
+        return self.model.get_points(side)
     
     def get_left_image(self) -> np.ndarray:
         """
@@ -341,7 +324,6 @@ class CourtCalibrationController(QObject):
             if calibration_data:
                 self.model.load_from_config(calibration_data)
                 self.logger.info("Loaded calibration data from config")
-                self.calibration_updated.emit()
             
         except Exception as e:
             self.logger.error(f"Error loading calibration data from config: {e}")
@@ -352,12 +334,12 @@ class CourtCalibrationController(QObject):
             from src.utils.config_manager import ConfigManager
             config_manager = ConfigManager()
             
-            # Prepare calibration data
+            # 새 형식으로 보정 데이터 준비
             calibration_data = {
-                "left_points": self.model.left_raw_pts,
-                "right_points": self.model.right_raw_pts,
-                "left_fine_points": self.model.left_fine_pts,
-                "right_fine_points": self.model.right_fine_pts
+                "points": {
+                    "left": self.model.left_pts,
+                    "right": self.model.right_pts
+                }
             }
             
             # Save to config
@@ -474,41 +456,16 @@ class CourtCalibrationController(QObject):
         try:
             # Validate inputs
             if len(left_points) < 4 or len(right_points) < 4:
-                raise ValueError("Need at least 4 points per side for calibration")
-            
-            # Update model with points
-            self.model.left_raw_pts = left_points
-            self.model.right_raw_pts = right_points
-            
-            # Start calibration process
-            self.calibration_status_changed.emit("Calibration in progress...")
-            
-            # Process the points (simulate progress)
-            for i in range(1, 101):
-                self.calibration_progress.emit(i)
-                # Simulate processing time (would be removed in production)
-                import time
-                time.sleep(0.01)
-            
-            # Process left image points if available
-            left_fine_pts = None
-            if self.model.left_img is not None and self.model.left_raw_pts:
-                left_fine_pts = self._process_image_points(self.model.left_img, self.model.left_raw_pts)
+                raise ValueError("At least 4 calibration points are required for each image")
                 
-            # Process right image points if available
-            right_fine_pts = None
-            if self.model.right_img is not None and self.model.right_raw_pts:
-                right_fine_pts = self._process_image_points(self.model.right_img, self.model.right_raw_pts)
-            
-            # Update the model
-            self.model.update_fine_points(left_fine_pts, right_fine_pts)
-            
-            # Notify completion
-            self.calibration_status_changed.emit("Calibration completed")
+            # Set points in model directly (replacing all existing points)
+            self.model.update_points("left", left_points)
+            self.model.update_points("right", right_points)
+                
+            self.logger.info("Calibration completed with manual points")
             
         except Exception as e:
-            self.logger.error(f"Calibration error: {str(e)}", exc_info=True)
-            self.calibration_status_changed.emit(f"Calibration error: {str(e)}")
+            self.logger.error(f"Calibration failed: {str(e)}", exc_info=True)
             raise
     
     def tune_calibration(self) -> bool:
@@ -532,21 +489,32 @@ class CourtCalibrationController(QObject):
             self.logger.error(f"Tuning failed: {str(e)}", exc_info=True)
             return False
     
-    def has_calibration(self) -> bool:
+    def is_ready_for_tuning(self) -> bool:
         """
-        Check if calibration data exists.
+        Check if controller has enough data for tuning.
         
         Returns:
-            bool: True if calibration data exists
+            bool: True if controller has images and sufficient raw points
         """
-        left_has_data = self.model.left_fine_pts is not None and len(self.model.left_fine_pts) > 0
-        right_has_data = self.model.right_fine_pts is not None and len(self.model.right_fine_pts) > 0
+        return self.model.is_ready_for_tuning()
+    
+    def has_calibration(self) -> bool:
+        """
+        Check if we have a valid calibration.
         
-        return left_has_data or right_has_data
+        Returns:
+            bool: True if calibration data is available
+        """
+        # Check if we have points
+        has_left_pts = len(self.model.left_pts) >= 4
+        has_right_pts = len(self.model.right_pts) >= 4
+        
+        # Need points on both sides
+        return has_left_pts and has_right_pts
     
     def save_calibration(self):
         """
-        Save calibration data to config.
+        Save the current calibration data to config file.
         
         Raises:
             Exception: If saving fails
@@ -558,31 +526,6 @@ class CourtCalibrationController(QObject):
             self.logger.error(f"Error saving calibration: {str(e)}", exc_info=True)
             raise
     
-    def update_point(self, index: int, new_pos: tuple, side: str = "left") -> None:
-        """
-        Update the position of a calibration point after it has been dragged.
-        
-        Args:
-            index (int): Index of the point to update
-            new_pos (tuple): New (x, y) coordinates
-            side (str): 'left' or 'right' to specify which side to update
-        """
-        # Update the raw points (fine points will be recalculated during tuning)
-        if side == "left" and index < len(self.model.left_raw_pts):
-            self.model.left_raw_pts[index] = new_pos
-            self.logger.debug(f"Updated left point {index} to {new_pos}")
-        elif side == "right" and index < len(self.model.right_raw_pts):
-            self.model.right_raw_pts[index] = new_pos
-            self.logger.debug(f"Updated right point {index} to {new_pos}")
-            
-        # Emit signal that calibration data has changed
-        self.calibration_updated.emit()
-    
-    def is_ready_for_tuning(self) -> bool:
-        """
-        Check if controller has enough data for tuning.
-        
-        Returns:
-            bool: True if controller has images and sufficient raw points
-        """
-        return self.model.is_ready_for_tuning() 
+    def _on_model_updated(self):
+        """모델 데이터가 변경되면 컨트롤러 시그널 발생"""
+        self.calibration_updated.emit() 
