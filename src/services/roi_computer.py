@@ -63,9 +63,15 @@ class ROIComputer:
                 # Use mask centroid
                 center_x, center_y = self.compute_mask_centroid(mask)
             else:
-                # Use image center
-                center_x = img_width // 2
-                center_y = img_height // 2
+                # Use manual center if provided, otherwise use image center
+                center_x = self.roi_settings.get("center_x")
+                center_y = self.roi_settings.get("center_y")
+                
+                # If center coordinates not provided, use image center
+                if center_x is None or center_y is None:
+                    logging.warning("ROI missing required center_x/center_y keys, using image center")
+                    center_x = img_width // 2
+                    center_y = img_height // 2
             
             # Calculate ROI coordinates with boundary checking
             x = np.clip(center_x - roi_width // 2, 0, img_width - roi_width)

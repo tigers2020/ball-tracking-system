@@ -46,7 +46,7 @@ class CircleDetector:
         self.adaptive = hough_settings.get('adaptive', False)
         logging.info(f"Circle detector settings updated: {self.hough_settings}")
 
-    def detect_circles(self, img: np.ndarray, roi: Optional[Dict[str, int]] = None, 
+    def detect_circles(self, img: np.ndarray, mask: Optional[np.ndarray] = None, roi: Optional[Dict[str, int]] = None, 
                     hsv_center: Optional[Tuple[int, int]] = None, 
                     kalman_pred: Optional[Tuple[float, float, float, float]] = None, 
                     reset_mode: bool = False, 
@@ -57,6 +57,7 @@ class CircleDetector:
         
         Args:
             img: Input grayscale or BGR image
+            mask: Binary mask to apply to the image before processing
             roi: Region of interest dict with 'x', 'y', 'width', 'height' or None for the whole image
             hsv_center: Optional HSV mask centroid (x, y)
             kalman_pred: Optional Kalman filter prediction (x, y, vx, vy)
@@ -108,6 +109,13 @@ class CircleDetector:
                 
                 roi_img = gray[y:y+h, x:x+w]
                 
+                # Apply mask to ROI if provided
+                if mask is not None:
+                    # Extract the corresponding part of the mask
+                    roi_mask = mask[y:y+h, x:x+w]
+                    # Apply mask to ROI
+                    roi_img = cv2.bitwise_and(roi_img, roi_img, mask=roi_mask)
+                
                 # Store adjusted ROI in results
                 result['roi'] = {'x': x, 'y': y, 'width': w, 'height': h}
                 logging.debug(f"Using ROI at x={x}, y={y}, w={w}, h={h}")
@@ -115,6 +123,10 @@ class CircleDetector:
                 roi_img = gray
                 x, y = 0, 0
                 w, h = gray.shape[1], gray.shape[0]
+                
+                # Apply mask to the entire image if provided
+                if mask is not None:
+                    roi_img = cv2.bitwise_and(roi_img, roi_img, mask=mask)
             
             # Copy current settings to avoid modifying the original
             settings = self.hough_settings.copy()

@@ -119,7 +119,7 @@ class AppController(QObject):
         self.progress_dialog = None
         
         # Initialize ball tracking controller with the same config manager
-        self.ball_tracking_controller = BallTrackingController()
+        self.ball_tracking_controller = BallTrackingController(self.model, self.config_manager)
         
         # Connect image_view to ball_tracking_controller
         self.view.image_view.connect_ball_tracking_controller(self.ball_tracking_controller)

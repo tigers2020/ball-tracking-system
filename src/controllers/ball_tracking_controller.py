@@ -520,8 +520,8 @@ class BallTrackingController(QObject):
             x, y, r = left_circles[0]
             left_prediction = self.kalman_processor.update("left", x, y)
         
-        if right_circles:
-            x, y, r = right_circles[0]
+            if right_circles:
+                x, y, r = right_circles[0]
             right_prediction = self.kalman_processor.update("right", x, y)
         
         return left_prediction, right_prediction
@@ -677,7 +677,7 @@ class BallTrackingController(QObject):
             
         # Get coordinates with compatibility check
         if hasattr(self.model, 'get_latest_coordinates'):
-            left_coords, right_coords = self.model.get_latest_coordinates()
+           left_coords, right_coords = self.model.get_latest_coordinates()
         else:
             # Default to None for StereoImageModel
             left_coords, right_coords = None, None
@@ -1373,7 +1373,7 @@ class BallTrackingController(QObject):
         if hasattr(self, 'hsv_mask_generator') and self.hsv_mask_generator:
             if self.model.left_mask is not None:
                 left_hsv_center = self.roi_computer.compute_mask_centroid(self.model.left_mask)
-                if left_hsv_center:
+            if left_hsv_center:
                     data["left"]["hsv_center"] = {
                         "x": left_hsv_center[0],
                         "y": left_hsv_center[1]
@@ -1402,11 +1402,11 @@ class BallTrackingController(QObject):
             if self.model.right_mask is not None:
                 right_hsv_center = self.roi_computer.compute_mask_centroid(self.model.right_mask)
                 if right_hsv_center:
-                    data["right"]["hsv_center"] = {
-                        "x": right_hsv_center[0],
-                        "y": right_hsv_center[1]
-                    }
-        
+                        data["right"]["hsv_center"] = {
+                            "x": right_hsv_center[0],
+                            "y": right_hsv_center[1]
+                        }
+            
         # Add right Kalman prediction
         if self.model.right_prediction is not None:
             data["right"]["kalman_prediction"] = {

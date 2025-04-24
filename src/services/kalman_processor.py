@@ -261,15 +261,19 @@ class KalmanProcessor:
             
             # Add memory (position blending) if enabled
             if self.position_memory_factor > 0.0 and last_state is not None:
-                # Blend prediction with last state for smoother transitions
-                # Only blend positions (x, y), not velocities
-                blended_prediction = prediction.copy()
-                blended_prediction[0] = (1 - self.position_memory_factor) * prediction[0] + self.position_memory_factor * last_state[0]
-                blended_prediction[1] = (1 - self.position_memory_factor) * prediction[1] + self.position_memory_factor * last_state[1]
-                prediction = blended_prediction
-                
-                logging.debug(f"Applied position blending with factor {self.position_memory_factor} for {camera} camera")
-                
+                try:
+                    # Blend prediction with last state for smoother transitions
+                    # Only blend positions (x, y), not velocities
+                    blended_prediction = prediction.copy()
+                    blended_prediction[0] = (1 - self.position_memory_factor) * prediction[0] + self.position_memory_factor * last_state[0]
+                    blended_prediction[1] = (1 - self.position_memory_factor) * prediction[1] + self.position_memory_factor * last_state[1]
+                    prediction = blended_prediction
+                    
+                    logging.debug(f"Applied position blending with factor {self.position_memory_factor} for {camera} camera")
+                except Exception as blend_error:
+                    logging.warning(f"Error during position blending for {camera} camera: {blend_error}")
+                    # Continue with original prediction if blending fails
+            
             # Update with new measurement
             corrected_state = kalman.correct(measurement)
             
@@ -352,11 +356,15 @@ class KalmanProcessor:
             
             # Apply position memory blending if enabled
             if self.position_memory_factor > 0.0 and last_state is not None:
-                # Blend prediction with last state
-                blended_prediction = prediction.copy()
-                blended_prediction[0] = (1 - self.position_memory_factor) * prediction[0] + self.position_memory_factor * last_state[0]
-                blended_prediction[1] = (1 - self.position_memory_factor) * prediction[1] + self.position_memory_factor * last_state[1]
-                prediction = blended_prediction
+                try:
+                    # Blend prediction with last state
+                    blended_prediction = prediction.copy()
+                    blended_prediction[0] = (1 - self.position_memory_factor) * prediction[0] + self.position_memory_factor * last_state[0]
+                    blended_prediction[1] = (1 - self.position_memory_factor) * prediction[1] + self.position_memory_factor * last_state[1]
+                    prediction = blended_prediction
+                except Exception as blend_error:
+                    logging.warning(f"Error during position blending for prediction in {camera} camera: {blend_error}")
+                    # Continue with original prediction if blending fails
             
             # Extract predicted position and velocity
             predicted_x, predicted_y = prediction[0, 0], prediction[1, 0]
