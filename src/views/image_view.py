@@ -112,20 +112,21 @@ class ImageView(QWidget):
         """
         return self.playback_controls.is_skipping_frames()
         
-    def set_masks(self, left_mask, right_mask):
+    def set_masks(self, left_mask, right_mask, hsv_settings=None):
         """
         Set the HSV masks for left and right images.
         
         Args:
             left_mask (numpy.ndarray): Binary mask for left image
             right_mask (numpy.ndarray): Binary mask for right image
+            hsv_settings (dict, optional): HSV settings for dynamic color visualization
         """
         self.left_mask = left_mask
         self.right_mask = right_mask
         
         # Apply masks to current images if enabled
         if self.show_mask:
-            self.stereo_view.set_masks(left_mask, right_mask)
+            self.stereo_view.set_masks(left_mask, right_mask, hsv_settings)
     
     def set_rois(self, left_roi, right_roi):
         """
@@ -148,11 +149,16 @@ class ImageView(QWidget):
         self.show_mask = enabled
         
         if enabled:
-            # Apply current masks
+            # Apply current masks with current HSV settings
+            # We need to pass the hsv_settings from the controller
+            # Use the stored HSV settings from the most recent mask_updated signal
             self.stereo_view.set_masks(self.left_mask, self.right_mask)
         else:
             # Clear masks
             self.stereo_view.set_masks(None, None)
+            
+        # Also update the stereo view mask enabled state
+        self.stereo_view.enable_mask_overlay(enabled)
             
     def set_circle_images(self, left_circle_image, right_circle_image):
         """

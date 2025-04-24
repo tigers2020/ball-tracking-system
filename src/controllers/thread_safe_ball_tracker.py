@@ -25,7 +25,7 @@ class ThreadSafeBallTracker(QObject):
     """
     
     # Forward all signals from the wrapped controller
-    mask_updated = Signal(np.ndarray, np.ndarray)
+    mask_updated = Signal(np.ndarray, np.ndarray, dict)
     roi_updated = Signal(dict, dict)
     detection_updated = Signal(float, tuple, tuple)
     circles_processed = Signal(np.ndarray, np.ndarray)

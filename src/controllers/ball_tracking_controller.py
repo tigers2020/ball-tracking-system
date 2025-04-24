@@ -37,7 +37,7 @@ class BallTrackingController(QObject):
     """
     
     # Signals
-    mask_updated = Signal(np.ndarray, np.ndarray)  # left_mask, right_mask
+    mask_updated = Signal(np.ndarray, np.ndarray, dict)  # left_mask, right_mask, hsv_settings
     roi_updated = Signal(dict, dict)  # left_roi, right_roi
     detection_updated = Signal(float, tuple, tuple)  # detection_rate, left_coords, right_coords
     circles_processed = Signal(np.ndarray, np.ndarray)  # left_circle_image, right_circle_image
@@ -294,7 +294,7 @@ class BallTrackingController(QObject):
             if hasattr(self.model, 'right_mask'):
                 self.model.right_mask = None
             if hasattr(self, 'mask_updated'):
-                self.mask_updated.emit(None, None)
+                self.mask_updated.emit(None, None, None)
     
     def _process_images(self):
         """
@@ -481,7 +481,8 @@ class BallTrackingController(QObject):
             self.circles_processed.emit(left_viz_image, right_viz_image)
             
             # 5. Emit mask and ROI signals (these will be drawn by the ImageViewWidget)
-            self.mask_updated.emit(self.left_mask, self.right_mask)
+            # Include HSV settings for dynamic color visualization
+            self.mask_updated.emit(self.left_mask, self.right_mask, hsv_values)
             
             # 6. Always emit ROI signal regardless of whether it's enabled for detection
             self.roi_updated.emit(self.left_roi, self.right_roi)
@@ -494,6 +495,9 @@ class BallTrackingController(QObject):
             self._frame_counter += 1
             if left_circles is not None and len(left_circles) > 0:
                 self._detection_counter += 1
+            
+            # Update detection information to be displayed in the UI
+            self._update_detection_signal()
             
             # Emit signal for image processing complete
             if hasattr(self, 'image_processed') and self.image_processed is not None:
@@ -763,16 +767,28 @@ class BallTrackingController(QObject):
         if hasattr(self.model, 'get_detection_rate'):
             detection_rate = self.model.get_detection_rate()
         else:
-            # Default to 0.0 for StereoImageModel
-            detection_rate = 0.0
+            # Default to calculated detection rate
+            detection_rate = self._detection_counter / self._frame_counter if self._frame_counter > 0 else 0.0
             
-        # Get coordinates with compatibility check
-        if hasattr(self.model, 'get_latest_coordinates'):
-           left_coords, right_coords = self.model.get_latest_coordinates()
-        else:
-            # Default to None for StereoImageModel
-            left_coords, right_coords = None, None
+        # Prepare coordinates for signal
+        left_coords = None
+        right_coords = None
+        
+        # Get coordinates from the detected circles
+        if hasattr(self, 'left_circles') and self.left_circles and len(self.left_circles) > 0:
+            # Extract (x, y, r) from the first detected circle
+            left_circle = self.left_circles[0]
+            left_coords = (int(left_circle[0]), int(left_circle[1]), int(left_circle[2]))
+            logging.debug(f"Left circle coordinates: {left_coords}")
             
+        if hasattr(self, 'right_circles') and self.right_circles and len(self.right_circles) > 0:
+            # Extract (x, y, r) from the first detected circle
+            right_circle = self.right_circles[0]
+            right_coords = (int(right_circle[0]), int(right_circle[1]), int(right_circle[2]))
+            logging.debug(f"Right circle coordinates: {right_coords}")
+            
+        # Emit the signal with detection information
+        logging.debug(f"Emitting detection_updated signal: rate={detection_rate:.2f}, left={left_coords}, right={right_coords}")
         self.detection_updated.emit(detection_rate, left_coords, right_coords)
     
     def detect_circles_in_roi(self):

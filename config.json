@@ -1,15 +1,15 @@
 {
     "last_image_folder": "C:/Users/hyper/PycharmProjects/CPET_Final_Project/data files/hawk_eye_serve_volley/serve1",
     "hsv_settings": {
-        "h_min": 12,
-        "h_max": 179,
-        "s_min": 0,
-        "s_max": 255,
-        "v_min": 0,
+        "h_min": 10,
+        "h_max": 83,
+        "s_min": 110,
+        "s_max": 193,
+        "v_min": 114,
         "v_max": 255,
-        "blur_size": 1,
-        "morph_iterations": 1,
-        "dilation_iterations": 1
+        "blur_size": 3,
+        "morph_iterations": 3,
+        "dilation_iterations": 3
     },
     "roi_settings": {
         "enabled": false,
