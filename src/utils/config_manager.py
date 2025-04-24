@@ -90,10 +90,12 @@ class ConfigManager:
         # Configuration file path
         self.config_file = Path(config_file)
         
-        # Add throttling for save operations
+        # Add throttling for save operations - increase interval to reduce I/O
         self._last_save_time = 0
-        self._save_debounce_interval = 1.0  # minimum seconds between saves
+        self._save_debounce_interval = 5.0  # Increase from 1.0 to 5.0 seconds (5x less frequent)
         self._pending_save = False
+        self._change_count = 0  # Track number of changes since last save
+        self._max_changes_before_save = 10  # Force save after this many changes
         
         # Load configuration from file if it exists
         self.load_config()
@@ -126,10 +128,18 @@ class ConfigManager:
         # Mark that we have a pending save
         self._pending_save = True
         
+        # Increment change counter
+        self._change_count += 1
+        
         # Check if we should throttle the save
         if not force and (current_time - self._last_save_time) < self._save_debounce_interval:
-            logging.debug("Throttling config save, will save soon")
-            return
+            # Only force save if we've accumulated many changes
+            if self._change_count < self._max_changes_before_save:
+                logging.debug(f"Throttling config save, will save soon (change {self._change_count}/{self._max_changes_before_save})")
+                return
+            else:
+                logging.debug(f"Forcing save after {self._change_count} accumulated changes")
+                force = True
             
         try:
             # Only save if we have pending changes
@@ -139,6 +149,7 @@ class ConfigManager:
                 
                 self._last_save_time = current_time
                 self._pending_save = False
+                self._change_count = 0  # Reset change counter
                 logging.info(f"Configuration saved to {self.config_file}")
         except Exception as e:
             logging.error(f"Error saving configuration: {e}")
@@ -264,7 +275,7 @@ class ConfigManager:
         current_settings = self.get_roi_settings().copy()
         current_settings.update(roi_settings)
         self.set("roi_settings", current_settings)
-        # Don't save immediately, allow bundling of changes
+        # Don't save immediately, allow throttling
         self.save_config(force=False)
     
     def get_hough_circle_settings(self):
@@ -287,7 +298,7 @@ class ConfigManager:
         current_settings = self.get_hough_circle_settings().copy()
         current_settings.update(hough_circle_settings)
         self.set("hough_circle_settings", current_settings)
-        # Don't save immediately, allow bundling of changes
+        # Don't save immediately, allow throttling
         self.save_config(force=False)
     
     def get_kalman_settings(self):
@@ -309,7 +320,7 @@ class ConfigManager:
         current_settings = self.get_kalman_settings().copy()
         current_settings.update(kalman_settings)
         self.set("kalman_settings", current_settings)
-        # Don't save immediately, allow bundling of changes
+        # Don't save immediately, allow throttling
         self.save_config(force=False)
     
     def get_camera_settings(self):
@@ -331,6 +342,7 @@ class ConfigManager:
         current_settings = self.get_camera_settings().copy()
         current_settings.update(camera_settings)
         self.set("camera_settings", current_settings)
+        # Don't save immediately, allow throttling
         self.save_config(force=False)
 
     def validate_roi(self, roi_settings=None, image_width=None, image_height=None):

@@ -119,6 +119,9 @@ class BallTrackingController(QObject):
         # Create services with proper configuration
         self.hsv_mask_generator = HSVMaskGenerator(hsv_values)
         self.roi_computer = ROIComputer(roi_settings)
+        
+        # Initialize CircleDetector with original settings from config_manager
+        # This ensures we don't create a new detector for each frame
         self.circle_detector = CircleDetector(hough_settings)
         
         # Get Kalman settings and initialize processor
@@ -594,16 +597,48 @@ class BallTrackingController(QObject):
         Returns:
             tuple: (left_circles, right_circles) - Lists of detected circles
         """
+        # Use existing CircleDetector instance - Never recreate for each frame
+        # Only update settings if roi_settings changed
+        current_hough_settings = self._hough_settings.copy()
+        
+        # If adaptive is enabled in settings, let the CircleDetector handle it
+        # but don't create a new detector instance each time
+        adaptive_enabled = current_hough_settings.get('adaptive', False)
+        
+        # Ensure min_radius is small enough for tennis ball detection
+        # This fixes the problem where calculated min_radius is too large (16px)
+        # and excludes real tennis balls (13-15px)
+        if adaptive_enabled:
+            # Keep user-defined min_radius as lower bound, don't let adaptive override entirely
+            if 'min_radius' in current_hough_settings:
+                current_hough_settings['min_radius'] = max(8, min(current_hough_settings['min_radius'], 14))
+            
+            # Ensure param2 (accumulator threshold) isn't too high
+            if 'param2' in current_hough_settings:
+                current_hough_settings['param2'] = min(current_hough_settings['param2'], 25)
+        
+        # Update detector with modified settings if needed
+        if current_hough_settings != self._hough_settings:
+            self.circle_detector.update_settings(current_hough_settings)
+            logging.debug(f"Updated circle detector settings: {current_hough_settings}")
+            # Store the updated settings
+            self._hough_settings = current_hough_settings.copy()
+        
+        # Detect circles using the existing detector instance
         left_circles = self.circle_detector.detect_circles(
             img=left_image, 
             mask=left_mask, 
-            roi=self.left_roi if roi_settings.get("enabled", False) else None
+            roi=self.left_roi if roi_settings.get("enabled", False) else None,
+            side="left"  # Add side parameter for better logging
         )
+        
         right_circles = self.circle_detector.detect_circles(
             img=right_image, 
             mask=right_mask, 
-            roi=self.right_roi if roi_settings.get("enabled", False) else None
+            roi=self.right_roi if roi_settings.get("enabled", False) else None,
+            side="right"  # Add side parameter for better logging
         )
+        
         return left_circles['circles'], right_circles['circles']
     
     def _process_predictions(self, left_circles, right_circles):
@@ -1589,11 +1624,14 @@ class BallTrackingController(QObject):
         
         # Process images if tracking is enabled and we have images
         if is_tracking_enabled and (has_left_image or has_right_image):
-            # Always process images when this method is called
+            # Process images using existing instances - don't create new ones
             self._process_images()
                 
-            # Log to XML if tracking data exists
-            if hasattr(self, 'data_saver') and self.data_saver is not None:
+            # Log to XML if tracking data exists - throttle I/O to reduce overhead
+            # Only log every 5 frames to reduce I/O overhead
+            should_log_xml = frame_index % 5 == 0
+            
+            if should_log_xml and hasattr(self, 'data_saver') and self.data_saver is not None:
                 # Get frame data dictionary
                 frame_data = self.get_frame_data_dict(frame_index)
                 
@@ -1624,4 +1662,78 @@ class BallTrackingController(QObject):
             logging.info("Camera settings updated for triangulation")
             
         # Save settings to configuration
-        self.config_manager.set_camera_settings(camera_settings) 
+        self.config_manager.set_camera_settings(camera_settings)
+
+    def set_hough_circle_settings(self, hough_settings):
+        """
+        Update Hough Circle settings for circle detection.
+        
+        Args:
+            hough_settings (dict): Dictionary containing Hough Circle parameters
+        """
+        # Store internally
+        self._hough_settings = hough_settings.copy()
+        
+        # Update configuration
+        self.config_manager.set_hough_circle_settings(hough_settings)
+        
+        # Update detector with new settings
+        if hasattr(self, 'circle_detector') and self.circle_detector is not None:
+            self.circle_detector.update_settings(hough_settings)
+            logging.info(f"Hough circle settings updated: {hough_settings}")
+        
+        # Reprocess images if enabled
+        if self.is_enabled and (self.model.left_image is not None or self.model.right_image is not None):
+            self._process_images() 
+
+    def get_current_hough_settings(self):
+        """
+        Get the current Hough Circle settings used by the detector.
+        This is useful for debugging to verify what parameters are actually being used.
+        
+        Returns:
+            dict: Current active Hough Circle settings
+        """
+        # Return a copy of the current settings to avoid accidental modification
+        if hasattr(self, 'circle_detector') and self.circle_detector is not None:
+            # Get settings directly from the detector instance for the most accurate values
+            if hasattr(self.circle_detector, 'hough_settings'):
+                return self.circle_detector.hough_settings.copy()
+        
+        # Fall back to internal settings
+        return self._hough_settings.copy() if hasattr(self, '_hough_settings') else {}
+
+    def get_detection_settings_summary(self):
+        """
+        Get a summary of all detection settings for debugging purposes.
+        
+        Returns:
+            dict: Dictionary containing all detection settings
+        """
+        summary = {
+            "hsv": self.get_hsv_values(),
+            "roi": self.get_roi_settings(),
+            "hough": self.get_current_hough_settings(),
+            "detection_rate": self.get_detection_rate(),
+            "is_enabled": self.is_enabled
+        }
+        
+        # Add circle detector info if available
+        if hasattr(self, 'circle_detector') and self.circle_detector is not None:
+            if hasattr(self.circle_detector, 'adaptive'):
+                summary["hough"]["adaptive_enabled"] = self.circle_detector.adaptive
+        
+        # Add additional detection info
+        if hasattr(self.model, 'detection_stats'):
+            summary["detection_stats"] = self.model.detection_stats
+        
+        # Add circle counts
+        left_circles = getattr(self.model, 'left_circles', None)
+        right_circles = getattr(self.model, 'right_circles', None)
+        
+        summary["circle_counts"] = {
+            "left": len(left_circles) if left_circles is not None else 0,
+            "right": len(right_circles) if right_circles is not None else 0
+        }
+        
+        return summary 

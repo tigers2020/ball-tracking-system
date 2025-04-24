@@ -40,6 +40,13 @@ class DataSaver:
         self.save_thread = None
         self.is_saving = False
         self.exit_flag = False
+        
+        # XML 저장 최적화를 위한 변수
+        self._frames_since_xml_save = 0
+        self._xml_save_interval = 30  # 30 프레임마다 XML 파일 저장 (1초에 30 FPS 가정 시 1초마다 저장)
+        self._last_xml_save_time = 0
+        self._xml_save_time_interval = 5.0  # 최소 5초 간격으로 XML 저장
+        self._xml_modified = False  # XML이 변경되었는지 여부
     
     def enqueue_frame(self, frame_number: int, frame_data: Dict[str, Any], 
                       folder_path: Optional[str] = None, auto_flush: bool = True):
@@ -366,27 +373,54 @@ class DataSaver:
             
             logging.debug(f"Added frame {frame_number} to XML tracking data")
             
-            # Real-time update: write XML tracking data file after each frame
-            self.save_xml_tracking_data()
+            # XML이 변경되었음을 표시
+            self._xml_modified = True
+            
+            # 프레임 카운터 증가
+            self._frames_since_xml_save += 1
+            
+            # XML 파일을 일정 간격으로만 저장 (매 프레임이 아닌 배치로 저장)
+            current_time = time.time()
+            should_save_by_frames = self._frames_since_xml_save >= self._xml_save_interval
+            should_save_by_time = (current_time - self._last_xml_save_time) >= self._xml_save_time_interval
+            
+            if (should_save_by_frames or should_save_by_time) and self._xml_modified:
+                self._frames_since_xml_save = 0
+                self._last_xml_save_time = current_time
+                self._xml_modified = False
+                
+                # 비동기 저장을 위해 별도 스레드에서 XML 저장
+                save_thread = threading.Thread(target=self.save_xml_tracking_data)
+                save_thread.daemon = True
+                save_thread.start()
+                logging.debug(f"XML save thread started after {self._frames_since_xml_save} frames")
+            
             return True
             
         except Exception as e:
             logging.error(f"Error saving frame to XML: {e}")
             return False
     
-    def save_xml_tracking_data(self, folder_path: Optional[str] = None) -> Optional[str]:
+    def save_xml_tracking_data(self, folder_path: Optional[str] = None, force: bool = False) -> Optional[str]:
         """
         Save the XML tracking data to a file.
         
         Args:
             folder_path: Path to the output folder. 
                         Default is 'tracking_data/{current_folder}'.
+            force: Whether to force save even if throttling conditions aren't met
             
         Returns:
             Path to the saved file or None if failed
         """
         if self.xml_root is None:
             logging.error("XML tracking not initialized. Call initialize_xml_tracking first.")
+            return None
+            
+        # 강제 저장이 아니고 충분한 시간이 지나지 않은 경우 저장하지 않음
+        current_time = time.time()
+        if not force and (current_time - self._last_xml_save_time < 1.0):
+            logging.debug("Throttling XML save operation (too soon)")
             return None
             
         try:
@@ -428,6 +462,9 @@ class DataSaver:
             
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(pretty_xml)
+            
+            # 저장 완료 후 타임스탬프 업데이트
+            self._last_xml_save_time = current_time
             
             logging.info(f"Saved XML tracking data to {output_file}")
             return output_file
@@ -473,60 +510,36 @@ class DataSaver:
     
     def finalize_xml(self, processing_stats=None):
         """
-        Finalize the XML tracking data by adding summary statistics and timestamps.
-        This should be called before application exit to ensure proper XML closure.
+        Finalize the XML tracking data and save to file.
         
         Args:
-            processing_stats (dict, optional): Dictionary with processing statistics
-            
-        Returns:
-            bool: Success or failure
+            processing_stats: Optional processing statistics to add
         """
+        if self.xml_root is None:
+            logging.debug("No XML tracking data to finalize")
+            return
+            
         try:
-            if self.xml_root is None:
-                logging.warning("No XML tracking data to finalize")
-                return False
+            # If processing stats provided, add to XML
+            if processing_stats is not None and isinstance(processing_stats, dict):
+                stats_elem = ET.SubElement(self.xml_root, "Statistics")
+                
+                # Add each statistic as an attribute
+                for key, value in processing_stats.items():
+                    stats_elem.set(key, str(value))
+                    
+                logging.debug(f"Added processing statistics to XML: {processing_stats}")
             
-            # Calculate statistics
-            if not processing_stats:
-                processing_stats = {}
-                if hasattr(self, 'stats'):
-                    processing_stats = getattr(self, 'stats')
+            # Force save and update timestamp
+            self.xml_root.set("finalized", time.strftime("%Y-%m-%d %H:%M:%S"))
+            self.xml_root.set("total_frames", str(len(self.xml_root.findall("Image"))))
             
-            # Get total frames count
-            image_elements = self.xml_root.findall("Image")
-            total_frames = len(image_elements)
-            
-            # Add timestamps and metadata
-            self.xml_root.set("finalized", str(time.time()))
-            self.xml_root.set("finalized_time", time.strftime("%Y-%m-%d %H:%M:%S"))
-            self.xml_root.set("total_frames", str(total_frames))
-            
-            # Calculate duration if possible
-            if "created" in self.xml_root.attrib:
-                try:
-                    start_time = float(self.xml_root.attrib["created"])
-                    end_time = time.time()
-                    duration_seconds = end_time - start_time
-                    self.xml_root.set("duration_seconds", str(round(duration_seconds, 2)))
-                    self.xml_root.set("duration_formatted", 
-                                    time.strftime("%H:%M:%S", time.gmtime(duration_seconds)))
-                except (ValueError, TypeError):
-                    logging.warning("Could not calculate tracking duration")
-            
-            # Add processing statistics
-            stats_elem = ET.SubElement(self.xml_root, "ProcessingStats")
-            for key, value in processing_stats.items():
-                stats_elem.set(key, str(value))
-            
-            # Save the final XML
-            self.save_xml_tracking_data()
-            logging.info(f"XML tracking data finalized with {total_frames} frames")
-            return True
+            # 저장이 실패해도 강제로 한 번 더 시도
+            self.save_xml_tracking_data(force=True)
+            logging.info("XML tracking data finalized and saved")
             
         except Exception as e:
             logging.error(f"Error finalizing XML tracking data: {e}")
-            return False
             
         # Remove XML root from memory
         self.xml_root = None
