@@ -1,7 +1,7 @@
 {
     "last_image_folder": "C:/Users/hyper/PycharmProjects/CPET_Final_Project/data files/hawk_eye_serve_volley/serve1",
     "hsv_settings": {
-        "h_min": 10,
+        "h_min": 13,
         "h_max": 83,
         "s_min": 110,
         "s_max": 193,
@@ -18,12 +18,12 @@
         "auto_center": true
     },
     "hough_circle_settings": {
-        "dp": 1.3,
+        "dp": 2.3,
         "min_dist": 166,
-        "param1": 64,
-        "param2": 31,
-        "min_radius": 16,
-        "max_radius": 28,
+        "param1": 102,
+        "param2": 5,
+        "min_radius": 2,
+        "max_radius": 85,
         "enabled": true,
         "adaptive": true
     },

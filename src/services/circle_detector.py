@@ -11,6 +11,8 @@ import cv2
 import numpy as np
 from typing import Dict, Tuple, List, Optional, Any
 
+from src.utils.constants import HOUGH, COLOR, MORPHOLOGY
+
 
 class CircleDetector:
     """
@@ -154,7 +156,7 @@ class CircleDetector:
                              f"param2={settings['param2']}, roi_ratio={roi_area_ratio:.3f}")
             
             # Apply Gaussian blur to reduce noise
-            blurred = cv2.GaussianBlur(roi_img, (5, 5), 0)
+            blurred = cv2.GaussianBlur(roi_img, MORPHOLOGY.kernel_size, 0)
             
             # Detect circles using Hough Circle Transform
             circles = cv2.HoughCircles(
@@ -210,30 +212,30 @@ class CircleDetector:
                     cv2.rectangle(output_img, 
                                  (roi_dict['x'], roi_dict['y']), 
                                  (roi_dict['x'] + roi_dict['width'], roi_dict['y'] + roi_dict['height']), 
-                                 (255, 255, 0), 2)
+                                 COLOR.YELLOW, 2)
                 
                 if hsv_center is not None:
-                    cv2.circle(output_img, hsv_center, 5, (0, 255, 255), -1)
+                    cv2.circle(output_img, hsv_center, 5, COLOR.YELLOW, -1)
                 
                 if kalman_pred is not None:
                     pred_x, pred_y = int(kalman_pred[0]), int(kalman_pred[1])
                     if 0 <= pred_x < output_img.shape[1] and 0 <= pred_y < output_img.shape[0]:
-                        cv2.circle(output_img, (pred_x, pred_y), 5, (255, 0, 255), -1)
+                        cv2.circle(output_img, (pred_x, pred_y), 5, COLOR.MAGENTA, -1)
                         # Draw velocity vector
                         vel_length = np.sqrt(kalman_pred[2]**2 + kalman_pred[3]**2)
                         if vel_length > 0.5:  # Only draw if significant velocity
                             end_x = int(pred_x + kalman_pred[2] * 3)  # 3 frames prediction
                             end_y = int(pred_y + kalman_pred[3] * 3)
-                            cv2.arrowedLine(output_img, (pred_x, pred_y), (end_x, end_y), (255, 0, 255), 2)
+                            cv2.arrowedLine(output_img, (pred_x, pred_y), (end_x, end_y), COLOR.MAGENTA, 2)
                 
                 if circles_list:
                     for i, (center_x, center_y, radius) in enumerate(circles_list):
                         # Use different colors for the best circle (first one) and others
-                        color = (0, 255, 0) if i == 0 else (255, 0, 0)
+                        color = COLOR.GREEN if i == 0 else COLOR.BLUE
                         
                         # Draw the circle on the output image
                         cv2.circle(output_img, (center_x, center_y), radius, color, 2)
-                        cv2.circle(output_img, (center_x, center_y), 2, (0, 0, 255), 3)
+                        cv2.circle(output_img, (center_x, center_y), 2, COLOR.RED, 3)
                 
                 result['image'] = output_img
             

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton, QGroupBox, QGridLayout, QCheckBox
 )
 
-from src.utils.ui_constants import Layout, ROI
+from src.utils.constants import LAYOUT, ROI, HSV, HOUGH, KALMAN
 from src.utils.config_manager import ConfigManager
 import logging
 
@@ -50,12 +50,12 @@ class BallTrackingSettingsDialog(QDialog):
         
         # Check for missing HSV parameters and set defaults if needed
         hsv_defaults = {
-            "h_min": 0, "h_max": 179,
-            "s_min": 0, "s_max": 255,
-            "v_min": 0, "v_max": 255,
-            "blur_size": 3,
-            "morph_iterations": 2,
-            "dilation_iterations": 1
+            "h_min": HSV.h_min, "h_max": HSV.h_max,
+            "s_min": HSV.s_min, "s_max": HSV.s_max,
+            "v_min": HSV.v_min, "v_max": HSV.v_max,
+            "blur_size": HSV.blur_size,
+            "morph_iterations": HSV.morph_iterations,
+            "dilation_iterations": HSV.dilation_iterations
         }
         
         for key, default_value in hsv_defaults.items():
@@ -67,27 +67,27 @@ class BallTrackingSettingsDialog(QDialog):
         
         # Hough Circle parameters - create default values if not in config
         self.hough_circle_params = self.config_manager.get_hough_circle_settings() if hasattr(self.config_manager, 'get_hough_circle_settings') else {
-            "dp": 1,               # Resolution ratio
-            "min_dist": 50,        # Minimum distance between circles
-            "param1": 100,         # Higher threshold for edge detection (Canny)
-            "param2": 30,          # Threshold for center detection
-            "min_radius": 10,      # Minimum radius
-            "max_radius": 100      # Maximum radius
+            "dp": HOUGH.dp,             # Resolution ratio
+            "min_dist": HOUGH.min_dist, # Minimum distance between circles
+            "param1": HOUGH.param1,     # Higher threshold for edge detection (Canny)
+            "param2": HOUGH.param2,     # Threshold for center detection
+            "min_radius": HOUGH.min_radius, # Minimum radius
+            "max_radius": HOUGH.max_radius  # Maximum radius
         }
         
         # Kalman filter parameters - create default values if not in config
         self.kalman_params = self.config_manager.get_kalman_settings() if hasattr(self.config_manager, 'get_kalman_settings') else {
-            "process_noise": 0.03, # Process noise covariance
-            "measurement_noise": 1.0 # Measurement noise covariance
+            "process_noise": KALMAN.process_noise,
+            "measurement_noise": KALMAN.measurement_noise
         }
         
         # Check for missing Kalman parameters and set defaults if needed
         kalman_defaults = {
-            "process_noise": 0.03,
-            "measurement_noise": 1.0,
-            "max_lost_frames": 20,
-            "dynamic_process_noise": True,
-            "adaptive_measurement_noise": True
+            "process_noise": KALMAN.process_noise,
+            "measurement_noise": KALMAN.measurement_noise,
+            "max_lost_frames": KALMAN.max_lost_frames,
+            "dynamic_process_noise": KALMAN.dynamic_process_noise,
+            "adaptive_measurement_noise": KALMAN.adaptive_measurement_noise
         }
         
         for key, default_value in kalman_defaults.items():
@@ -111,8 +111,8 @@ class BallTrackingSettingsDialog(QDialog):
     def _setup_ui(self):
         """Set up the user interface."""
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(Layout.MARGIN, Layout.MARGIN, Layout.MARGIN, Layout.MARGIN)
-        main_layout.setSpacing(Layout.SPACING)
+        main_layout.setContentsMargins(LAYOUT.MARGIN, LAYOUT.MARGIN, LAYOUT.MARGIN, LAYOUT.MARGIN)
+        main_layout.setSpacing(LAYOUT.SPACING)
         
         # Create HSV sliders group
         hsv_group = QGroupBox("HSV Mask Settings")

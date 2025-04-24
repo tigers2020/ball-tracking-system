@@ -11,6 +11,8 @@ import numpy as np
 import logging
 from typing import Dict, Tuple, Optional, List, Any
 
+from src.utils.constants import HSV, MORPHOLOGY, COLOR
+
 
 class HSVMaskGenerator:
     """
@@ -147,22 +149,22 @@ class HSVMaskGenerator:
             # Apply combined morphological operations and blur
             if mask.any():
                 # Get morph parameters from settings
-                morph_iterations = self.hsv_settings.get('morph_iterations', 2)
-                blur_size = self.hsv_settings.get('blur_size', 5)
-                dilation_iterations = self.hsv_settings.get('dilation_iterations', 1)
+                morph_iterations = self.hsv_settings.get('morph_iterations', MORPHOLOGY.iterations)
+                blur_size = self.hsv_settings.get('blur_size', HSV.blur_size)
+                dilation_iterations = self.hsv_settings.get('dilation_iterations', HSV.dilation_iterations)
                 
                 # Ensure blur_size is a positive odd integer
                 if blur_size <= 0:
                     # If blur_size is invalid, use default value
-                    blur_size = 5
-                    logging.warning(f"Invalid blur_size {self.hsv_settings.get('blur_size')}, using default value 5")
+                    blur_size = HSV.blur_size
+                    logging.warning(f"Invalid blur_size {self.hsv_settings.get('blur_size')}, using default value {HSV.blur_size}")
                 elif blur_size % 2 == 0:
                     # If even, convert to nearest odd number
                     blur_size = blur_size + 1
                     logging.warning(f"Even blur_size {self.hsv_settings.get('blur_size')} converted to odd: {blur_size}")
                 
                 # Create kernel for morphological operations
-                kernel = np.ones((5, 5), np.uint8)
+                kernel = np.ones(MORPHOLOGY.kernel_size, np.uint8)
                 
                 # Apply morphological opening to remove small noise
                 if morph_iterations > 0:
@@ -224,10 +226,10 @@ class HSVMaskGenerator:
                     centroid = (cx, cy)
                     
                     # Draw all contours
-                    cv2.drawContours(output_img, [cv2.convexHull(largest_contour)], -1, (0, 255, 255), 2)
+                    cv2.drawContours(output_img, [cv2.convexHull(largest_contour)], -1, COLOR.YELLOW, 2)
                     
                     # Draw centroid point
-                    cv2.circle(output_img, (cx, cy), 5, (255, 0, 255), -1)
+                    cv2.circle(output_img, (cx, cy), 5, COLOR.MAGENTA, -1)
                     
                     logging.debug(f"Found HSV centroid at ({cx}, {cy})")
             else:
@@ -238,7 +240,7 @@ class HSVMaskGenerator:
             
             # Draw ROI rectangle if provided
             if roi is not None:
-                cv2.rectangle(output_img, (x, y), (x + w, y + h), (255, 255, 0), 2)
+                cv2.rectangle(output_img, (x, y), (x + w, y + h), COLOR.YELLOW, 2)
             
             return img, output_img, binary_mask, centroid, mask_too_narrow
             

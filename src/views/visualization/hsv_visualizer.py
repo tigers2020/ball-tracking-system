@@ -89,25 +89,34 @@ def apply_mask_overlay(img: np.ndarray, mask: np.ndarray,
     # Return the combined image
     return output_img
 
-
 def draw_centroid(img: np.ndarray, 
-                 centroid: Optional[Tuple[int, int]], 
-                 radius: int = 7,
-                 color: Tuple[int, int, int] = (255, 0, 255)) -> np.ndarray:
+                 point: Tuple[int, int], 
+                 color: Tuple[int, int, int] = (255, 0, 255),
+                 radius: int = 5,
+                 thickness: int = -1,
+                 cross_size: int = 10) -> np.ndarray:
     """
-    Draw centroid point on image
+    Draw centroid point with optional cross on image
     
     Args:
-        img: Image to draw on
-        centroid: (x, y) coordinates of centroid or None
-        radius: Size of centroid marker
+        img: Original BGR image
+        point: (x, y) coordinates of the centroid
         color: Color for centroid marker (BGR)
+        radius: Radius of the centroid circle
+        thickness: Thickness of the circle (-1 for filled)
+        cross_size: Size of the cross marker
         
     Returns:
         Image with centroid drawn
     """
     output_img = img.copy()
-    if centroid is not None:
-        cv2.circle(output_img, centroid, radius, color, -1)
-        logging.debug(f"HSV centroid drawn at {centroid}")
+    x, y = point
+    
+    # Draw filled circle for the centroid
+    cv2.circle(output_img, (x, y), radius, color, thickness)
+    
+    # Draw cross markers for better visibility
+    cv2.line(output_img, (x - cross_size, y), (x + cross_size, y), color, 2)
+    cv2.line(output_img, (x, y - cross_size), (x, y + cross_size), color, 2)
+    
     return output_img 

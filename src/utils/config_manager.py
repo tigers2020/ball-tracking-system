@@ -12,6 +12,8 @@ import logging
 import time
 from pathlib import Path
 
+from src.utils.constants import HSV, ROI, HOUGH, KALMAN
+
 
 class ConfigManager:
     """
@@ -30,31 +32,37 @@ class ConfigManager:
         self.default_config = {
             "last_image_folder": "",
             "hsv_settings": {
-                "h_min": 0,   # 0-179 in OpenCV
-                "h_max": 10,
-                "s_min": 100, # 0-255 in OpenCV
-                "s_max": 255,
-                "v_min": 100, # 0-255 in OpenCV
-                "v_max": 255
+                "h_min": HSV.h_min,   # 0-179 in OpenCV
+                "h_max": HSV.h_max,
+                "s_min": HSV.s_min,   # 0-255 in OpenCV
+                "s_max": HSV.s_max,
+                "v_min": HSV.v_min,   # 0-255 in OpenCV
+                "v_max": HSV.v_max,
+                "blur_size": HSV.blur_size,
+                "morph_iterations": HSV.morph_iterations,
+                "dilation_iterations": HSV.dilation_iterations
             },
             "roi_settings": {
-                "width": 100,  # ROI width in pixels
-                "height": 100, # ROI height in pixels
-                "enabled": True, # Whether ROI is enabled
-                "auto_center": True  # Whether to center ROI automatically on detected objects
+                "width": ROI.DEFAULT_WIDTH,  # ROI width in pixels
+                "height": ROI.DEFAULT_HEIGHT, # ROI height in pixels
+                "enabled": ROI.ENABLED, # Whether ROI is enabled
+                "auto_center": ROI.AUTO_CENTER  # Whether to center ROI automatically on detected objects
             },
             "hough_circle_settings": {
-                "dp": 1,               # Resolution ratio
-                "min_dist": 50,        # Minimum distance between circles
-                "param1": 100,         # Higher threshold for edge detection (Canny)
-                "param2": 30,          # Threshold for center detection
-                "min_radius": 10,      # Minimum radius
-                "max_radius": 100,     # Maximum radius
-                "adaptive": False       # Whether to adapt parameters based on ROI size
+                "dp": HOUGH.dp,               # Resolution ratio
+                "min_dist": HOUGH.min_dist,        # Minimum distance between circles
+                "param1": HOUGH.param1,         # Higher threshold for edge detection (Canny)
+                "param2": HOUGH.param2,          # Threshold for center detection
+                "min_radius": HOUGH.min_radius,      # Minimum radius
+                "max_radius": HOUGH.max_radius,     # Maximum radius
+                "adaptive": HOUGH.adaptive       # Whether to adapt parameters based on ROI size
             },
             "kalman_settings": {
-                "process_noise": 0.02,
-                "measurement_noise": 0.1,
+                "process_noise": KALMAN.process_noise,
+                "measurement_noise": KALMAN.measurement_noise,
+                "max_lost_frames": KALMAN.max_lost_frames,
+                "dynamic_process_noise": KALMAN.dynamic_process_noise,
+                "adaptive_measurement_noise": KALMAN.adaptive_measurement_noise,
                 "dt": 0.1,
                 "reset_threshold": 100.0,
                 "velocity_decay": 0.98,

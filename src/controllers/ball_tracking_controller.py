@@ -28,6 +28,7 @@ from src.services.data_saver import DataSaver
 from src.services.triangulation_service import TriangulationService
 from src.utils.config_manager import ConfigManager
 from src.utils.coord_utils import fuse_coordinates
+from src.utils.constants import HSV, ROI, COLOR
 
 
 class BallTrackingController(QObject):
@@ -523,14 +524,22 @@ class BallTrackingController(QObject):
         # Process left image
         left_hsv = cv2.cvtColor(left_image, cv2.COLOR_BGR2HSV)
         left_mask = cv2.inRange(left_hsv, 
-                              (hsv_values['h_min'], hsv_values['s_min'], hsv_values['v_min']),
-                              (hsv_values['h_max'], hsv_values['s_max'], hsv_values['v_max']))
+                              (hsv_values.get('h_min', HSV.h_min), 
+                               hsv_values.get('s_min', HSV.s_min), 
+                               hsv_values.get('v_min', HSV.v_min)),
+                              (hsv_values.get('h_max', HSV.h_max), 
+                               hsv_values.get('s_max', HSV.s_max), 
+                               hsv_values.get('v_max', HSV.v_max)))
         
         # Process right image
         right_hsv = cv2.cvtColor(right_image, cv2.COLOR_BGR2HSV)
         right_mask = cv2.inRange(right_hsv,
-                               (hsv_values['h_min'], hsv_values['s_min'], hsv_values['v_min']),
-                               (hsv_values['h_max'], hsv_values['s_max'], hsv_values['v_max']))
+                               (hsv_values.get('h_min', HSV.h_min), 
+                                hsv_values.get('s_min', HSV.s_min), 
+                                hsv_values.get('v_min', HSV.v_min)),
+                               (hsv_values.get('h_max', HSV.h_max), 
+                                hsv_values.get('s_max', HSV.s_max), 
+                                hsv_values.get('v_max', HSV.v_max)))
         
         return left_mask, right_mask
     
@@ -565,9 +574,9 @@ class BallTrackingController(QObject):
             # 직접 필요한 값만 추출
             x = roi.get("x", 0)
             y = roi.get("y", 0)
-            w = roi.get("width", 100)
-            h = roi.get("height", 100)
-            return cv2.rectangle(mask, (x, y), (x + w, y + h), (255), -1)
+            w = roi.get("width", ROI.DEFAULT_WIDTH)
+            h = roi.get("height", ROI.DEFAULT_HEIGHT)
+            return cv2.rectangle(mask, (x, y), (x + w, y + h), COLOR.WHITE, -1)
         else:
             return mask
     
