@@ -52,8 +52,12 @@ class ConfigManager:
                 "adaptive": False       # Whether to adapt parameters based on ROI size
             },
             "kalman_settings": {
-                "process_noise": 0.03, # Process noise covariance
-                "measurement_noise": 1.0 # Measurement noise covariance
+                "process_noise": 0.02,
+                "measurement_noise": 0.1,
+                "dt": 0.1,
+                "reset_threshold": 100.0,
+                "velocity_decay": 0.98,
+                "position_memory": 0.7
             },
             "camera_settings": {
                 "camera_location_x": 0.0,

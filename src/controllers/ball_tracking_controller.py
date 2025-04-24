@@ -56,7 +56,11 @@ class BallTrackingController(QObject):
         self.hsv_mask_generator = HSVMaskGenerator(self.model.hsv_values)
         self.roi_computer = ROIComputer(self.model.roi_settings)
         self.circle_detector = CircleDetector(self.model.hough_settings)
-        self.kalman_processor = KalmanProcessor()
+        
+        # Get Kalman settings and initialize processor
+        self.kalman_settings = self.config_manager.get_kalman_settings()
+        self.kalman_processor = KalmanProcessor(self.kalman_settings)
+        
         self.data_saver = DataSaver()
         
         # Register finalize_xml with atexit to ensure XML is properly closed at exit
@@ -1088,9 +1092,9 @@ class BallTrackingController(QObject):
             logging.error(f"Error initializing XML tracking: {e}")
             return False
             
-    def save_frame_to_xml(self, frame_number, frame_name=None):
+    def append_frame_xml(self, frame_number, frame_name=None):
         """
-        Save the current frame's tracking data to XML.
+        Append the current frame's tracking data to XML file.
         
         Args:
             frame_number: Current frame number

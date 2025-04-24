@@ -246,7 +246,7 @@ class AppController(QObject):
                     
                     # Save frame to XML (primary method)
                     frame_name = f"frame_{frame_index:06d}.png"
-                    success = self.ball_tracking_controller.save_frame_to_xml(frame_index, frame_name)
+                    success = self.ball_tracking_controller.append_frame_xml(frame_index, frame_name)
                     
                     # entire XML File specific Only at intervals save (Performance problem prevention and disk I/O decrease)
                     if frame_index % 10 == 0:  # 10 Every frame save

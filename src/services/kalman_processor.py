@@ -17,26 +17,24 @@ class KalmanProcessor:
     Service class for applying Kalman filtering to ball tracking data.
     """
 
-    def __init__(self, dt: float = 0.1, process_noise: float = 1e-4, measurement_noise: float = 1e-2, reset_threshold: float = 100.0, min_updates_required: int = 5):
+    def __init__(self, settings: dict = None):
         """
         Initialize Kalman filter processor for both left and right camera feed.
         
         Args:
-            dt: Time step between measurements (default: 0.1s)
-            process_noise: Process noise covariance scalar (default: 1e-4)
-            measurement_noise: Measurement noise covariance scalar (default: 1e-2)
-            reset_threshold: Threshold for resetting Kalman filter if measurement is too far (default: 100.0 pixels)
-            min_updates_required: Minimum number of updates before filter is considered ready (default: 5)
+            settings: Dictionary containing Kalman filter settings
         """
-        self.dt = dt
-        self.process_noise = process_noise
-        self.measurement_noise = measurement_noise
-        self.reset_threshold = reset_threshold
-        self.min_updates_required = min_updates_required
-        self.velocity_decay_factor = 0.98  # Velocity damping factor
+        # Set default values
+        settings = settings or {}
         
-        # Position preservation factor for blending with previous positions
-        self.position_memory_factor = 0.7  # Weight given to previous positions (0.0-1.0)
+        # Extract settings with defaults
+        self.dt = settings.get("dt", 0.1)
+        self.process_noise = settings.get("process_noise", 0.02)
+        self.measurement_noise = settings.get("measurement_noise", 0.1)
+        self.reset_threshold = settings.get("reset_threshold", 100.0)
+        self.velocity_decay_factor = settings.get("velocity_decay", 0.98)
+        self.position_memory_factor = settings.get("position_memory", 0.7)
+        self.min_updates_required = 5  # Keep this as a constant for now
         
         # Initialize Kalman filters for left and right cameras
         self.kalman_left = None
@@ -59,9 +57,37 @@ class KalmanProcessor:
         # Initialize the filters
         self._init_kalman_filters()
         
-        logging.info(f"Kalman processor initialized with dt={dt}, process_noise={process_noise}, "
-                    f"measurement_noise={measurement_noise}, reset_threshold={reset_threshold}, "
+        logging.info(f"Kalman processor initialized with dt={self.dt}, process_noise={self.process_noise}, "
+                    f"measurement_noise={self.measurement_noise}, reset_threshold={self.reset_threshold}, "
                     f"velocity_decay={self.velocity_decay_factor}, position_memory={self.position_memory_factor}")
+
+    def update_params(self, settings: dict) -> None:
+        """
+        Update Kalman filter parameters from settings dictionary.
+        
+        Args:
+            settings: Dictionary containing updated Kalman filter settings
+        """
+        # Update settings if provided
+        if "dt" in settings:
+            self.dt = settings["dt"]
+        if "process_noise" in settings:
+            self.process_noise = settings["process_noise"]
+        if "measurement_noise" in settings:
+            self.measurement_noise = settings["measurement_noise"]
+        if "reset_threshold" in settings:
+            self.reset_threshold = settings["reset_threshold"]
+        if "velocity_decay" in settings:
+            self.velocity_decay_factor = settings["velocity_decay"]
+        if "position_memory" in settings:
+            self.position_memory_factor = settings["position_memory"]
+            
+        # Re-initialize the filters with updated parameters
+        self._init_kalman_filters()
+        
+        logging.info(f"Kalman parameters updated: dt={self.dt}, process_noise={self.process_noise}, "
+                   f"measurement_noise={self.measurement_noise}, reset_threshold={self.reset_threshold}, "
+                   f"velocity_decay={self.velocity_decay_factor}, position_memory={self.position_memory_factor}")
 
     def _init_kalman_filters(self) -> None:
         """
