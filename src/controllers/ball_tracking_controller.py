@@ -17,6 +17,7 @@ import atexit
 from pathlib import Path
 from PySide6.QtCore import QObject, Signal, Slot
 from typing import Dict, List, Tuple, Optional, Any, Union
+import traceback
 
 from src.models.tracking_data_model import TrackingDataModel
 from src.services.hsv_mask_generator import HSVMaskGenerator
@@ -42,29 +43,97 @@ class BallTrackingController(QObject):
     circles_processed = Signal(np.ndarray, np.ndarray)  # left_circle_image, right_circle_image
     tracking_updated = Signal(float, float, float)  # x, y, z
     
-    def __init__(self, model: TrackingDataModel, config_manager: ConfigManager):
+    def __init__(self, model: Any, config_manager: ConfigManager):
         """
         Initialize BallTrackingController.
         
         Args:
-            model: Data model
+            model: Data model (TrackingDataModel or StereoImageModel)
             config_manager: Configuration manager
         """
         super().__init__()
         
         self.model = model
-        self.model.is_enabled = False
         self.config_manager = config_manager
         
+        # Initialize internal state variables for compatibility
+        self._enabled = False
+        self._detection_counter = 0
+        self._frame_counter = 0
+        self._coordinate_history = {"left": [], "right": []}
+        self._world_coordinate_history = []
+        
+        # Ensure model has required basic attributes
+        if not hasattr(self.model, 'left_image'):
+            self.model.left_image = None
+        if not hasattr(self.model, 'right_image'):
+            self.model.right_image = None
+        if not hasattr(self.model, 'left_mask'):
+            self.model.left_mask = None
+        if not hasattr(self.model, 'right_mask'):
+            self.model.right_mask = None
+        if not hasattr(self.model, 'left_roi'):
+            self.model.left_roi = None
+        if not hasattr(self.model, 'right_roi'):
+            self.model.right_roi = None
+        if not hasattr(self.model, 'left_circles'):
+            self.model.left_circles = None
+        if not hasattr(self.model, 'right_circles'):
+            self.model.right_circles = None
+        if not hasattr(self.model, 'left_prediction'):
+            self.model.left_prediction = None
+        if not hasattr(self.model, 'right_prediction'):
+            self.model.right_prediction = None
+        
+        # Set enabled state if model supports it
+        if hasattr(self.model, 'is_enabled'):
+            self.model.is_enabled = False
+        
         # Load settings from configuration
-        self.model.hsv_values = self.config_manager.get_hsv_settings()
-        self.model.roi_settings = self.config_manager.get_roi_settings()
-        self.model.hough_settings = self.config_manager.get_hough_circle_settings()
+        hsv_values = self.config_manager.get_hsv_settings()
+        roi_settings = self.config_manager.get_roi_settings()
+        hough_settings = self.config_manager.get_hough_circle_settings()
+        
+        # Add key mapping for HSV value compatibility (same as HSVMaskGenerator)
+        hsv_alias = {
+            "hMin": "lower_h", "sMin": "lower_s", "vMin": "lower_v",
+            "hMax": "upper_h", "sMax": "upper_s", "vMax": "upper_v",
+            "h_min": "lower_h", "h_max": "upper_h",
+            "s_min": "lower_s", "s_max": "upper_s",
+            "v_min": "lower_v", "v_max": "upper_v"
+        }
+        
+        # Map old keys to new keys if new keys are not present
+        for old, new in hsv_alias.items():
+            if old in hsv_values and new not in hsv_values:
+                hsv_values[new] = hsv_values[old]
+                logging.debug(f"Mapped HSV key {old} to {new}: {hsv_values[old]}")
+        
+        # Store settings internally for model compatibility
+        self._hsv_values = hsv_values
+        self._roi_settings = roi_settings
+        self._hough_settings = hough_settings
+        
+        # Update model if it supports these settings
+        if hasattr(self.model, 'set_hsv_values') and callable(getattr(self.model, 'set_hsv_values')):
+            self.model.set_hsv_values(hsv_values)
+        elif hasattr(self.model, 'hsv_values'):
+            self.model.hsv_values = hsv_values
+            
+        if hasattr(self.model, 'set_roi_settings') and callable(getattr(self.model, 'set_roi_settings')):
+            self.model.set_roi_settings(roi_settings)
+        elif hasattr(self.model, 'roi_settings'):
+            self.model.roi_settings = roi_settings
+            
+        if hasattr(self.model, 'set_hough_settings') and callable(getattr(self.model, 'set_hough_settings')):
+            self.model.set_hough_settings(hough_settings)
+        elif hasattr(self.model, 'hough_settings'):
+            self.model.hough_settings = hough_settings
         
         # Create services with proper configuration
-        self.hsv_mask_generator = HSVMaskGenerator(self.model.hsv_values)
-        self.roi_computer = ROIComputer(self.model.roi_settings)
-        self.circle_detector = CircleDetector(self.model.hough_settings)
+        self.hsv_mask_generator = HSVMaskGenerator(hsv_values)
+        self.roi_computer = ROIComputer(roi_settings)
+        self.circle_detector = CircleDetector(hough_settings)
         
         # Get Kalman settings and initialize processor
         self.kalman_settings = self.config_manager.get_kalman_settings()
@@ -82,13 +151,12 @@ class BallTrackingController(QObject):
         # Timestamp tracking for Kalman filter dt calculation
         self.last_update_time = {"left": None, "right": None}
         
-        # Tracking enabled flag
-        self._enabled = False
-        
-        # Flags and state variables
-        self.left_image = None
-        self.right_image = None
-        self._detection_counter = 0
+        # Initialize cropped_images if not present in model
+        if not hasattr(self.model, 'cropped_images'):
+            self.model.cropped_images = {
+                "left": None,
+                "right": None
+            }
     
     @property
     def is_enabled(self):
@@ -98,7 +166,12 @@ class BallTrackingController(QObject):
         Returns:
             bool: True if ball tracking is enabled, False otherwise
         """
-        return self.model.is_enabled
+        # Handle different model types
+        if hasattr(self.model, 'is_enabled'):
+            return self.model.is_enabled
+        else:
+            # Return our internal enabled flag
+            return self._enabled
     
     @property
     def detection_stats(self):
@@ -147,8 +220,31 @@ class BallTrackingController(QObject):
         Args:
             hsv_values (dict): Dictionary containing HSV min/max values
         """
-        # Update model and configuration
-        self.model.set_hsv_values(hsv_values)
+        # Apply key mapping for HSV value compatibility (same as HSVMaskGenerator)
+        hsv_alias = {
+            "hMin": "lower_h", "sMin": "lower_s", "vMin": "lower_v",
+            "hMax": "upper_h", "sMax": "upper_s", "vMax": "upper_v",
+            "h_min": "lower_h", "h_max": "upper_h",
+            "s_min": "lower_s", "s_max": "upper_s",
+            "v_min": "lower_v", "v_max": "upper_v"
+        }
+        
+        # Map old keys to new keys if new keys are not present
+        for old, new in hsv_alias.items():
+            if old in hsv_values and new not in hsv_values:
+                hsv_values[new] = hsv_values[old]
+                logging.debug(f"Mapped HSV key {old} to {new}: {hsv_values[old]}")
+        
+        # Store internally for model compatibility
+        self._hsv_values = hsv_values
+        
+        # Update model if it supports this method
+        if hasattr(self.model, 'set_hsv_values') and callable(getattr(self.model, 'set_hsv_values')):
+            self.model.set_hsv_values(hsv_values)
+        elif hasattr(self.model, 'hsv_values'):
+            self.model.hsv_values = hsv_values
+        
+        # Update configuration
         self.config_manager.set_hsv_settings(hsv_values)
         
         # Update service
@@ -157,7 +253,7 @@ class BallTrackingController(QObject):
         logging.info(f"HSV values updated and saved: {hsv_values}")
         
         # Apply updated HSV values if enabled
-        if self.model.is_enabled and (self.model.left_image is not None or self.model.right_image is not None):
+        if self.is_enabled and (self.model.left_image is not None or self.model.right_image is not None):
             self._process_images()
     
     def set_images(self, left_image, right_image):
@@ -168,199 +264,267 @@ class BallTrackingController(QObject):
             left_image (numpy.ndarray): Left OpenCV image
             right_image (numpy.ndarray): Right OpenCV image
         """
-        # Update model
-        self.model.set_images(left_image, right_image)
+        # Update model - handle both TrackingDataModel and StereoImageModel
+        if hasattr(self.model, 'set_images'):
+            # TrackingDataModel method
+            self.model.set_images(left_image, right_image)
+        else:
+            # Direct attribute access for StereoImageModel
+            self.model.left_image = left_image
+            self.model.right_image = right_image
         
         # Process images if enabled
-        if self.model.is_enabled:
+        if self.is_enabled:
             self._process_images()
     
-    def enable(self, enabled=True):
+    def enable(self, enabled: bool = True) -> None:
         """
         Enable or disable ball tracking.
         
         Args:
-            enabled (bool): True to enable, False to disable
+            enabled (bool): True to enable tracking, False to disable
         """
-        if self.model.is_enabled != enabled:
-            self.model.is_enabled = enabled
-            logging.info(f"Ball tracking {'enabled' if enabled else 'disabled'}")
+        # 모델 속성이 존재하는지 확인
+        if enabled:
+            has_left_image = hasattr(self.model, 'left_image')
+            has_right_image = hasattr(self.model, 'right_image')
             
-            if enabled and (self.model.left_image is not None or self.model.right_image is not None):
-                self._process_images()
-            else:
-                # Clear masks and emit signal
+            if not has_left_image or not has_right_image:
+                logging.warning("Cannot enable ball tracking: model missing image attributes")
+                return
+                
+            # 이미지가 존재하는지 확인
+            if self.model.left_image is None and self.model.right_image is None:
+                logging.warning("Cannot enable ball tracking: no images available")
+                return
+        
+        # 상태 업데이트
+        self._enabled = enabled
+        
+        # 모델 상태 업데이트
+        if hasattr(self.model, 'set_tracking_enabled'):
+            self.model.set_tracking_enabled(enabled)
+        else:
+            self.model.tracking_enabled = enabled
+        
+        # 버튼 상태 업데이트 신호 발생
+        if hasattr(self, 'tracking_enabled_changed'):
+            self.tracking_enabled_changed.emit(enabled)
+        
+        # 추적 활성화 시에만 이미지 처리 시작
+        if enabled:
+            logging.info(f"Ball tracking enabled")
+            # 이미지 처리 시작
+            self._process_images()
+        else:
+            logging.info("Ball tracking disabled")
+            # 마스크 초기화
+            if hasattr(self.model, 'left_mask'):
                 self.model.left_mask = None
+            if hasattr(self.model, 'right_mask'):
                 self.model.right_mask = None
+            if hasattr(self, 'mask_updated'):
                 self.mask_updated.emit(None, None)
     
     def _process_images(self):
-        """Process the current images to generate HSV masks, ROIs, and detect circles."""
-        # Create masks
-        left_result = self.hsv_mask_generator.generate_mask(self.model.left_image) if self.model.left_image is not None else None
-        right_result = self.hsv_mask_generator.generate_mask(self.model.right_image) if self.model.right_image is not None else None
-        
-        # Extract binary masks from results (original_img, masked_img, binary_mask, centroid, mask_too_narrow)
-        left_mask = None
-        right_mask = None
-        left_mask_too_narrow = False
-        right_mask_too_narrow = False
-        
-        if left_result is not None:
-            if len(left_result) >= 5:
-                _, _, left_mask, left_centroid, left_mask_too_narrow = left_result
-        
-        if right_result is not None:
-            if len(right_result) >= 5:
-                _, _, right_mask, right_centroid, right_mask_too_narrow = right_result
-        
-        # Store mask quality info in model for use in detection stats calculation
-        self.model.left_mask_too_narrow = left_mask_too_narrow
-        self.model.right_mask_too_narrow = right_mask_too_narrow
-        
-        # Update model with masks
-        self.model.set_masks(left_mask, right_mask)
-        
-        # Calculate ROIs if enabled
-        left_roi = None
-        right_roi = None
-        
-        if self.model.roi_settings.get("enabled", False):
-            left_roi = self.roi_computer.compute_roi(left_mask, self.model.left_image) if left_mask is not None else None
-            right_roi = self.roi_computer.compute_roi(right_mask, self.model.right_image) if right_mask is not None else None
+        """
+        Process images with the current ball tracking settings.
+        This includes:
+        1. Apply HSV threshold to create masks
+        2. Compute ROIs
+        3. Detect circles in ROIs
+        4. Process predictions through Kalman filter (if enabled)
+        """
+        try:
+            # Skip processing if model or images aren't available
+            if not hasattr(self.model, 'left_image') or not hasattr(self.model, 'right_image'):
+                logging.warning("Model missing image attributes, skipping image processing")
+                return
+                
+            # Extract properties
+            left_image = self.model.left_image
+            right_image = self.model.right_image
             
-            # Update model with ROIs
-            self.model.set_rois(left_roi, right_roi)
+            # Skip processing if either image is None
+            if left_image is None or right_image is None:
+                return
+                
+            # Get current values
+            hsv_values = self.get_hsv_values()
+            roi_settings = self.get_roi_settings()
             
-            # Emit ROI signal
-            self.roi_updated.emit(left_roi, right_roi)
-        else:
-            # Clear ROIs
-            self.model.set_rois(None, None)
-            self.roi_updated.emit(None, None)
-        
-        # Emit signal with masks
-        self.mask_updated.emit(left_mask, right_mask)
-        
-        # Crop ROI images
-        left_cropped = self.roi_computer.crop_roi_image(self.model.left_image, left_roi) if left_roi is not None else None
-        right_cropped = self.roi_computer.crop_roi_image(self.model.right_image, right_roi) if right_roi is not None else None
-        
-        # Store cropped images in model
-        self.model.cropped_images["left"] = left_cropped
-        self.model.cropped_images["right"] = right_cropped
-        
-        # Detect circles in the current ROIs
-        self._detect_circles()
-        
-        # Update detection stats
-        self.model.update_detection_stats()
-        
-        # Update detection rate signal
-        self._update_detection_signal()
+            # Apply HSV threshold to create masks
+            left_mask, right_mask = self._apply_hsv_threshold(left_image, right_image, hsv_values)
+            
+            # Set the masks to the model
+            self.model.left_mask = left_mask
+            self.model.right_mask = right_mask
+            
+            # Store original masks for internal use
+            self.left_mask = left_mask.copy()
+            self.right_mask = right_mask.copy()
+            
+            # Check if ROI is enabled
+            if roi_settings.get('enabled', False):
+                # Compute ROIs
+                self.left_roi, self.right_roi = self._compute_rois(left_image, right_image, roi_settings)
+                
+                # Set the ROIs to the model
+                self.model.left_roi = self.left_roi
+                self.model.right_roi = self.right_roi
+                
+                # Apply ROI masks
+                self.left_mask = self._apply_roi_mask(self.left_mask, self.left_roi)
+                self.right_mask = self._apply_roi_mask(self.right_mask, self.right_roi)
+            else:
+                # Clear ROIs
+                self.left_roi = None
+                self.right_roi = None
+                self.model.left_roi = None
+                self.model.right_roi = None
+            
+            # Detect circles
+            left_circles, right_circles = self._detect_circles(left_image, right_image, left_mask, right_mask, roi_settings)
+            
+            # Set the detected circles to the model
+            self.model.left_circles = left_circles
+            self.model.right_circles = right_circles
+            
+            # Update circle lists for internal use
+            self.left_circles = left_circles
+            self.right_circles = right_circles
+            
+            # Apply Kalman filtering (if enabled)
+            left_prediction, right_prediction = self._process_predictions(left_circles, right_circles)
+            
+            # Set the predictions to the model
+            self.model.left_prediction = left_prediction
+            self.model.right_prediction = right_prediction
+            
+            # Update internal predictions
+            self.left_prediction = left_prediction
+            self.right_prediction = right_prediction
+            
+            # Increment frame count for detection rate calculation
+            self._frame_counter += 1
+            if left_circles is not None and len(left_circles) > 0:
+                self._detection_counter += 1
+            
+            # Emit signal for image processing complete
+            if hasattr(self, 'image_processed') and self.image_processed is not None:
+                self.image_processed.emit()
+        except Exception as e:
+            logging.error(f"Error processing images: {str(e)}")
+            logging.error(f"Error details: {traceback.format_exc()}")
     
-    def _detect_circles(self) -> bool:
+    def _apply_hsv_threshold(self, left_image, right_image, hsv_values):
+        """
+        Apply HSV threshold to create binary masks from left and right images.
+        
+        Args:
+            left_image (numpy.ndarray): Left input image
+            right_image (numpy.ndarray): Right input image
+            hsv_values (dict): Dictionary containing HSV min/max values
+            
+        Returns:
+            tuple: (left_mask, right_mask) - Binary masks for both images
+        """
+        # Process left image
+        left_hsv = cv2.cvtColor(left_image, cv2.COLOR_BGR2HSV)
+        left_mask = cv2.inRange(left_hsv, 
+                              (hsv_values['lower_h'], hsv_values['lower_s'], hsv_values['lower_v']),
+                              (hsv_values['upper_h'], hsv_values['upper_s'], hsv_values['upper_v']))
+        
+        # Process right image
+        right_hsv = cv2.cvtColor(right_image, cv2.COLOR_BGR2HSV)
+        right_mask = cv2.inRange(right_hsv,
+                               (hsv_values['lower_h'], hsv_values['lower_s'], hsv_values['lower_v']),
+                               (hsv_values['upper_h'], hsv_values['upper_s'], hsv_values['upper_v']))
+        
+        return left_mask, right_mask
+    
+    def _compute_rois(self, left_image, right_image, roi_settings):
+        """
+        Compute ROIs based on the given images and ROI settings.
+        
+        Args:
+            left_image (numpy.ndarray): Left input image
+            right_image (numpy.ndarray): Right input image
+            roi_settings (dict): Dictionary containing ROI settings
+            
+        Returns:
+            tuple: (left_roi, right_roi) - ROI dictionaries for both images
+        """
+        left_roi = self.roi_computer.compute_roi(self.left_mask, left_image)
+        right_roi = self.roi_computer.compute_roi(self.right_mask, right_image)
+        return left_roi, right_roi
+    
+    def _apply_roi_mask(self, mask, roi):
+        """
+        Apply a ROI mask to an existing mask.
+        
+        Args:
+            mask (numpy.ndarray): Input mask
+            roi (dict): ROI dictionary
+            
+        Returns:
+            numpy.ndarray: Mask with ROI applied
+        """
+        if roi:
+            x, y, w, h = roi.values()
+            return cv2.rectangle(mask, (x, y), (x + w, y + h), (255), -1)
+        else:
+            return mask
+    
+    def _detect_circles(self, left_image, right_image, left_mask, right_mask, roi_settings):
         """
         Detect circles in the masked images within ROIs.
         
+        Args:
+            left_image (numpy.ndarray): Left input image
+            right_image (numpy.ndarray): Right input image
+            left_mask (numpy.ndarray): Left binary mask
+            right_mask (numpy.ndarray): Right binary mask
+            roi_settings (dict): Dictionary containing ROI settings
+            
         Returns:
-            bool: True if circles were detected, False otherwise
+            tuple: (left_circles, right_circles) - Lists of detected circles
         """
-        if self.model.left_mask is None or self.model.right_mask is None:
-            return False
-        
-        # Get ROIs
-        left_roi = self.model.left_roi
-        right_roi = self.model.right_roi
-        
-        # Apply ROIs to mask if enabled and ROIs exist
-        left_roi_enabled = self.model.roi_settings.get("enabled", False)
-        
-        if left_roi_enabled:
-            # Apply ROIs to masks
-            if left_roi:
-                left_mask_roi = self.roi_computer.apply_roi_to_mask(self.model.left_mask, left_roi)
-            else:
-                left_mask_roi = self.model.left_mask
-                
-            if right_roi:
-                right_mask_roi = self.roi_computer.apply_roi_to_mask(self.model.right_mask, right_roi)
-            else:
-                right_mask_roi = self.model.right_mask
-        else:
-            # Use full masks
-            left_mask_roi = self.model.left_mask
-            right_mask_roi = self.model.right_mask
-        
-        # Detect circles using Hough transform
         left_circles = self.circle_detector.detect_circles(
-            self.model.left_image, 
-            left_mask_roi, 
-            roi=left_roi if left_roi_enabled else None
+            img=left_image, 
+            mask=left_mask, 
+            roi=self.left_roi if roi_settings.get("enabled", False) else None
         )
-        
         right_circles = self.circle_detector.detect_circles(
-            self.model.right_image, 
-            right_mask_roi, 
-            roi=right_roi if left_roi_enabled else None
+            img=right_image, 
+            mask=right_mask, 
+            roi=self.right_roi if roi_settings.get("enabled", False) else None
         )
+        return left_circles['circles'], right_circles['circles']
+    
+    def _process_predictions(self, left_circles, right_circles):
+        """
+        Process detected circles through Kalman filter.
         
-        # Store the detected circles in the model
-        self.model.set_circles(left_circles, right_circles)
-        
-        # Get the best circles from left and right images
-        best_left_circle = self._get_best_circle(left_circles) if left_circles is not None else None
-        best_right_circle = self._get_best_circle(right_circles) if right_circles is not None else None
-        
-        # Apply Kalman filtering if circles were detected
+        Args:
+            left_circles (list): List of detected left circles
+            right_circles (list): List of detected right circles
+            
+        Returns:
+            tuple: (left_prediction, right_prediction)
+        """
         left_prediction = None
         right_prediction = None
         
-        # Update Kalman filter with left detection
-        if best_left_circle is not None:
-            x, y, r = best_left_circle
-            self.model.add_coordinate("left", x, y, r)
+        if left_circles:
+            x, y, r = left_circles[0]
             left_prediction = self.kalman_processor.update("left", x, y)
-        else:
-            # If no circle is detected, use prediction only
-            left_prediction = self.kalman_processor.get_prediction("left")
         
-        # Update Kalman filter with right detection
-        if best_right_circle is not None:
-            x, y, r = best_right_circle
-            self.model.add_coordinate("right", x, y, r)
+        if right_circles:
+            x, y, r = right_circles[0]
             right_prediction = self.kalman_processor.update("right", x, y)
-        else:
-            # If no circle is detected, use prediction only
-            right_prediction = self.kalman_processor.get_prediction("right")
         
-        # Store the predictions in the model
-        self.model.set_predictions(left_prediction, right_prediction)
-        
-        # Fuse the coordinates from both cameras
-        fused_coords = self._fuse_coordinates()
-        
-        # Use triangulation service to get 3D world point if we have fused coordinates
-        if fused_coords and hasattr(self, 'triangulator') and self.triangulator is not None:
-            uL, vL, uR, vR = fused_coords
-            world_point = self.triangulator.triangulate(uL, vL, uR, vR)
-            
-            # Add 3D point to model if valid
-            if world_point is not None:
-                X, Y, Z = world_point
-                self.model.add_3d_point(X, Y, Z)
-                
-                # Emit signal to update UI with 3D position
-                self.tracking_updated.emit(X, Y, Z)
-                
-                logging.debug(f"3D world point: ({X:.3f}, {Y:.3f}, {Z:.3f}) m")
-        
-        # Check if there was a detection
-        if best_left_circle is not None or best_right_circle is not None:
-            self._detection_counter += 1
-            return True
-        else:
-            return False
+        return left_prediction, right_prediction
     
     def _get_best_circle(self, circles):
         """
@@ -504,8 +668,20 @@ class BallTrackingController(QObject):
     
     def _update_detection_signal(self):
         """Emit detection update signal with current state."""
-        detection_rate = self.model.get_detection_rate()
-        left_coords, right_coords = self.model.get_latest_coordinates()
+        # Get detection rate with compatibility check
+        if hasattr(self.model, 'get_detection_rate'):
+            detection_rate = self.model.get_detection_rate()
+        else:
+            # Default to 0.0 for StereoImageModel
+            detection_rate = 0.0
+            
+        # Get coordinates with compatibility check
+        if hasattr(self.model, 'get_latest_coordinates'):
+            left_coords, right_coords = self.model.get_latest_coordinates()
+        else:
+            # Default to None for StereoImageModel
+            left_coords, right_coords = None, None
+            
         self.detection_updated.emit(detection_rate, left_coords, right_coords)
     
     def detect_circles_in_roi(self):
@@ -517,11 +693,20 @@ class BallTrackingController(QObject):
             tuple: (left_processed_image, right_processed_image)
         """
         if self.model.is_enabled and (self.model.left_image is not None or self.model.right_image is not None):
-            self._detect_circles()
+            # Get current values for detection
+            left_image = self.model.left_image
+            right_image = self.model.right_image
+            left_mask = self.left_mask if hasattr(self, 'left_mask') else None
+            right_mask = self.right_mask if hasattr(self, 'right_mask') else None
+            roi_settings = self.get_roi_settings()
             
-            # Return processed images with circles
-            # These are normally emitted via signals, but we return them here for direct access
-            left_mask, right_mask = self.get_current_masks()
+            # Call _detect_circles with all required parameters
+            left_circles, right_circles = self._detect_circles(
+                left_image, right_image, left_mask, right_mask, roi_settings)
+                
+            # Set the detected circles to the model
+            self.model.left_circles = left_circles
+            self.model.right_circles = right_circles
             
             # Create circle visualizations
             left_viz = None
@@ -604,27 +789,11 @@ class BallTrackingController(QObject):
         Returns:
             dict: Current HSV values
         """
-        return self.model.hsv_values
-    
-    def set_roi_settings(self, roi_settings):
-        """
-        Set ROI settings for ball tracking.
-        
-        Args:
-            roi_settings (dict): Dictionary containing ROI settings
-        """
-        # Update model and configuration
-        self.model.set_roi_settings(roi_settings)
-        self.config_manager.set_roi_settings(roi_settings)
-        
-        # Update service
-        self.roi_computer.update_roi_settings(roi_settings)
-        
-        logging.info(f"ROI settings updated and saved: {roi_settings}")
-        
-        # Reprocess images if enabled to update ROIs
-        if self.model.is_enabled and (self.model.left_image is not None or self.model.right_image is not None):
-            self._process_images()
+        if hasattr(self.model, 'hsv_values'):
+            return self.model.hsv_values
+        else:
+            # Return our internal HSV values
+            return self._hsv_values
     
     def get_roi_settings(self):
         """
@@ -633,7 +802,39 @@ class BallTrackingController(QObject):
         Returns:
             dict: Current ROI settings
         """
-        return self.model.roi_settings
+        if hasattr(self.model, 'roi_settings'):
+            return self.model.roi_settings
+        else:
+            # Return our internal ROI settings
+            return self._roi_settings
+    
+    def set_roi_settings(self, roi_settings):
+        """
+        Set ROI settings for ball tracking.
+        
+        Args:
+            roi_settings (dict): Dictionary containing ROI settings
+        """
+        # Store internally for model compatibility
+        self._roi_settings = roi_settings
+        
+        # Update model if it supports this method
+        if hasattr(self.model, 'set_roi_settings') and callable(getattr(self.model, 'set_roi_settings')):
+            self.model.set_roi_settings(roi_settings)
+        elif hasattr(self.model, 'roi_settings'):
+            self.model.roi_settings = roi_settings
+        
+        # Update configuration
+        self.config_manager.set_roi_settings(roi_settings)
+        
+        # Update service
+        self.roi_computer.update_roi_settings(roi_settings)
+        
+        logging.info(f"ROI settings updated and saved: {roi_settings}")
+        
+        # Reprocess images if enabled to update ROIs
+        if self.is_enabled and (self.model.left_image is not None or self.model.right_image is not None):
+            self._process_images()
     
     def get_current_rois(self):
         """
@@ -660,7 +861,14 @@ class BallTrackingController(QObject):
         Returns:
             float: Detection rate (0.0 to 1.0) or None if not tracking
         """
-        return self.model.get_detection_rate()
+        if hasattr(self.model, 'get_detection_rate'):
+            return self.model.get_detection_rate()
+        else:
+            # For StereoImageModel, return 0.0 or calculate based on internal counter
+            if hasattr(self, '_detection_counter') and hasattr(self, '_frame_counter'):
+                if self._frame_counter > 0:
+                    return self._detection_counter / self._frame_counter
+            return 0.0
     
     def get_latest_coordinates(self):
         """
@@ -669,7 +877,20 @@ class BallTrackingController(QObject):
         Returns:
             tuple: (left_coords, right_coords) where each is (x, y, r) or None if not available
         """
-        return self.model.get_latest_coordinates()
+        if hasattr(self.model, 'get_latest_coordinates'):
+            return self.model.get_latest_coordinates()
+        else:
+            # For StereoImageModel, use our internal coordinate history
+            left_coords = None
+            right_coords = None
+            
+            if hasattr(self, '_coordinate_history'):
+                if self._coordinate_history["left"]:
+                    left_coords = self._coordinate_history["left"][-1][:3]  # Remove timestamp
+                if self._coordinate_history["right"]:
+                    right_coords = self._coordinate_history["right"][-1][:3]  # Remove timestamp
+            
+            return left_coords, right_coords
     
     def get_coordinate_history(self, side="both", count=None):
         """
@@ -708,14 +929,30 @@ class BallTrackingController(QObject):
         Reset all tracking data and filters.
         """
         try:
-            # 저장 큐 정리
+            # Clean up data saver queue
             self.data_saver.cleanup()
             
             # Reset Kalman filters
             self.kalman_processor.reset()
             
-            # Reset model data
-            self.model.reset()
+            # Reset model data if method exists
+            if hasattr(self.model, 'reset'):
+                self.model.reset()
+            else:
+                # Basic reset for StereoImageModel
+                if hasattr(self.model, 'left_mask'):
+                    self.model.left_mask = None
+                if hasattr(self.model, 'right_mask'):
+                    self.model.right_mask = None
+                if hasattr(self.model, 'left_roi'):
+                    self.model.left_roi = None
+                if hasattr(self.model, 'right_roi'):
+                    self.model.right_roi = None
+                # Clear cropped images
+                self.model.cropped_images = {
+                    "left": None,
+                    "right": None
+                }
             
             # Reset timestamp tracking
             self.last_update_time = {"left": None, "right": None}
@@ -725,8 +962,18 @@ class BallTrackingController(QObject):
         except Exception as e:
             logging.error(f"Error resetting tracking: {e}")
             
-        # Return current status
-        return self.model.detection_stats
+        # Return stats if available, or a default value
+        if hasattr(self.model, 'detection_stats'):
+            return self.model.detection_stats
+        else:
+            # Create default stats
+            return {
+                "is_tracking": False,
+                "frames_processed": 0,
+                "frames_detected": 0,
+                "detection_rate": 0.0,
+                "lost_frames": 0
+            }
 
     def save_coordinate_history(self, filename):
         """
@@ -794,8 +1041,8 @@ class BallTrackingController(QObject):
                 
                 # Get latest Hough circle center if available
                 left_hough_center = None
-                if self.model.left_circles:
-                    left_hough_center = (self.model.left_circles[0][0], self.model.left_circles[0][1])
+                if self.model.left_circles and len(self.model.left_circles) > 0:
+                    left_hough_center = (float(self.model.left_circles[0][0]), float(self.model.left_circles[0][1]))
                 
                 # Get Kalman prediction if available
                 left_kalman_pred = self.kalman_processor.get_prediction("left")
@@ -828,8 +1075,8 @@ class BallTrackingController(QObject):
                 
                 # Get latest Hough circle center if available
                 right_hough_center = None
-                if self.model.right_circles:
-                    right_hough_center = (self.model.right_circles[0][0], self.model.right_circles[0][1])
+                if self.model.right_circles and len(self.model.right_circles) > 0:
+                    right_hough_center = (float(self.model.right_circles[0][0]), float(self.model.right_circles[0][1]))
                 
                 # Get Kalman prediction if available
                 right_kalman_pred = self.kalman_processor.get_prediction("right")
@@ -918,7 +1165,7 @@ class BallTrackingController(QObject):
                 
                 # Get latest Hough circle center if available
                 left_hough_center = None
-                if self.model.left_circles:
+                if self.model.left_circles and len(self.model.left_circles) > 0:
                     left_hough_center = (float(self.model.left_circles[0][0]), float(self.model.left_circles[0][1]))
                     frame_data["left"]["hough_center"] = {
                         "x": left_hough_center[0],
@@ -967,7 +1214,7 @@ class BallTrackingController(QObject):
                 
                 # Get latest Hough circle center if available
                 right_hough_center = None
-                if self.model.right_circles:
+                if self.model.right_circles and len(self.model.right_circles) > 0:
                     right_hough_center = (float(self.model.right_circles[0][0]), float(self.model.right_circles[0][1]))
                     frame_data["right"]["hough_center"] = {
                         "x": right_hough_center[0],
@@ -1017,7 +1264,7 @@ class BallTrackingController(QObject):
         
         Args:
             folder_name: Name of the folder for tracking data
-            
+        
         Returns:
             bool: Success or failure
         """
@@ -1050,7 +1297,7 @@ class BallTrackingController(QObject):
         Args:
             frame_number: Current frame number
             frame_name: Optional frame filename
-            
+        
         Returns:
             Boolean success indicator
         """
@@ -1067,11 +1314,11 @@ class BallTrackingController(QObject):
                 logging.warning(f"Failed to save frame {frame_number} to XML")
                 
             return result
-            
+                
         except Exception as e:
             logging.error(f"Error saving frame to XML: {e}")
             return False
-            
+    
     def save_xml_tracking_data(self, folder_path=None):
         """
         Save the complete XML tracking data to a file.
@@ -1113,26 +1360,27 @@ class BallTrackingController(QObject):
             "right": {}
         }
         
-        # Add left camera data
-        if self.model.left_circles:
+        # Add left camera data - safely access circles
+        if self.model.left_circles and len(self.model.left_circles) > 0:
             best_left = self.model.left_circles[0]
             data["left"]["hough_center"] = {
-                "x": best_left[0],
-                "y": best_left[1],
-                "radius": best_left[2]
+                "x": float(best_left[0]),
+                "y": float(best_left[1]),
+                "radius": float(best_left[2])
             }
         
         # Add HSV center for left
         if hasattr(self, 'hsv_mask_generator') and self.hsv_mask_generator:
-            left_hsv_center = self.roi_computer.compute_mask_centroid(self.model.left_mask)
-            if left_hsv_center:
-                data["left"]["hsv_center"] = {
-                    "x": left_hsv_center[0],
-                    "y": left_hsv_center[1]
-                }
+            if self.model.left_mask is not None:
+                left_hsv_center = self.roi_computer.compute_mask_centroid(self.model.left_mask)
+                if left_hsv_center:
+                    data["left"]["hsv_center"] = {
+                        "x": left_hsv_center[0],
+                        "y": left_hsv_center[1]
+                    }
         
         # Add left Kalman prediction
-        if self.model.left_prediction:
+        if self.model.left_prediction is not None:
             data["left"]["kalman_prediction"] = {
                 "x": self.model.left_prediction[0],
                 "y": self.model.left_prediction[1],
@@ -1140,26 +1388,27 @@ class BallTrackingController(QObject):
                 "vy": self.model.left_prediction[3]
             }
         
-        # Add right camera data
-        if self.model.right_circles:
+        # Add right camera data - safely access circles
+        if self.model.right_circles and len(self.model.right_circles) > 0:
             best_right = self.model.right_circles[0]
             data["right"]["hough_center"] = {
-                "x": best_right[0],
-                "y": best_right[1],
-                "radius": best_right[2]
+                "x": float(best_right[0]),
+                "y": float(best_right[1]),
+                "radius": float(best_right[2])
             }
         
         # Add HSV center for right
         if hasattr(self, 'hsv_mask_generator') and self.hsv_mask_generator:
-            right_hsv_center = self.roi_computer.compute_mask_centroid(self.model.right_mask)
-            if right_hsv_center:
-                data["right"]["hsv_center"] = {
-                    "x": right_hsv_center[0],
-                    "y": right_hsv_center[1]
-                }
+            if self.model.right_mask is not None:
+                right_hsv_center = self.roi_computer.compute_mask_centroid(self.model.right_mask)
+                if right_hsv_center:
+                    data["right"]["hsv_center"] = {
+                        "x": right_hsv_center[0],
+                        "y": right_hsv_center[1]
+                    }
         
         # Add right Kalman prediction
-        if self.model.right_prediction:
+        if self.model.right_prediction is not None:
             data["right"]["kalman_prediction"] = {
                 "x": self.model.right_prediction[0],
                 "y": self.model.right_prediction[1],
@@ -1168,7 +1417,13 @@ class BallTrackingController(QObject):
             }
         
         # Add latest 3D world point if available
-        world_point = self.model.get_latest_3d_point()
+        world_point = None
+        if hasattr(self.model, 'get_latest_3d_point'):
+            world_point = self.model.get_latest_3d_point()
+        elif hasattr(self, '_world_coordinate_history') and self._world_coordinate_history:
+            # Use our internal world coordinate history
+            world_point = self._world_coordinate_history[-1]
+            
         if world_point:
             data["world"] = world_point
             
@@ -1211,8 +1466,13 @@ class BallTrackingController(QObject):
             frame_index: Index of the current frame
             frame: Frame object (optional)
         """
+        # Safely check if tracking is enabled and images are available
+        is_tracking_enabled = self.is_enabled
+        has_left_image = hasattr(self.model, 'left_image') and self.model.left_image is not None
+        has_right_image = hasattr(self.model, 'right_image') and self.model.right_image is not None
+        
         # Process images if tracking is enabled and we have images
-        if self.is_enabled and (self.left_image is not None and self.right_image is not None):
+        if is_tracking_enabled and (has_left_image or has_right_image):
             # Always process images when this method is called
             self._process_images()
                 
