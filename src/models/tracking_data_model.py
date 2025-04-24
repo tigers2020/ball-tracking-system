@@ -59,6 +59,9 @@ class TrackingDataModel:
             "right": []
         }
         
+        # 3D world coordinate history
+        self.world_coordinate_history = []
+        
         # Detection statistics
         self.detection_stats = {
             "is_tracking": False,
@@ -178,12 +181,58 @@ class TrackingDataModel:
         if len(self.coordinate_history[side]) > max_history:
             self.coordinate_history[side] = self.coordinate_history[side][-max_history:]
     
+    def add_3d_point(self, x: float, y: float, z: float) -> None:
+        """
+        Add a triangulated 3D world point to the history.
+        
+        Args:
+            x: X coordinate in world frame (meters)
+            y: Y coordinate in world frame (meters)
+            z: Z coordinate in world frame (meters)
+        """
+        # Add point to 3D coordinate history
+        self.world_coordinate_history.append((x, y, z))
+        
+        # Limit history size to prevent memory issues
+        max_history = 1000  # Adjust as needed
+        if len(self.world_coordinate_history) > max_history:
+            self.world_coordinate_history = self.world_coordinate_history[-max_history:]
+            
+        logging.debug(f"Added 3D world point: ({x:.3f}, {y:.3f}, {z:.3f})")
+    
+    def get_latest_3d_point(self) -> Optional[Tuple[float, float, float]]:
+        """
+        Get the most recent triangulated 3D point.
+        
+        Returns:
+            Tuple of (x, y, z) world coordinates in meters, or None if no points exist
+        """
+        if not self.world_coordinate_history:
+            return None
+        return self.world_coordinate_history[-1]
+    
+    def get_3d_trajectory(self, num_points: Optional[int] = None) -> List[Tuple[float, float, float]]:
+        """
+        Get the 3D trajectory history.
+        
+        Args:
+            num_points: Number of most recent points to return (None for all points)
+            
+        Returns:
+            List of (x, y, z) world coordinates
+        """
+        if num_points is None or num_points >= len(self.world_coordinate_history):
+            return self.world_coordinate_history.copy()
+        else:
+            return self.world_coordinate_history[-num_points:].copy()
+    
     def clear_coordinate_history(self) -> None:
         """Clear all coordinate history."""
         self.coordinate_history = {
             "left": [],
             "right": []
         }
+        self.world_coordinate_history = []
         logging.info("Coordinate history cleared")
     
     def get_latest_coordinates(self) -> Tuple[Optional[Tuple[float, float, float]], 

@@ -12,6 +12,7 @@ import time
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 from typing import Dict, Any, Optional, Union, List
+import numpy as np
 
 
 class XMLLogger:
@@ -152,6 +153,9 @@ class XMLLogger:
                 self._add_velocity_data(right_elem, right_data, "kalman_prediction", "Kalman")
                 self._add_point_data(right_elem, right_data, "fused_center", "Fused")
             
+            # Add 3D world coordinates if available
+            self._add_world_point(image_elem, data)
+            
             # Increment frame count
             self.frame_count += 1
             
@@ -221,6 +225,43 @@ class XMLLogger:
             if "vx" in kalman_data and "vy" in kalman_data:
                 kalman_elem.set("vx", str(float(kalman_data["vx"])))
                 kalman_elem.set("vy", str(float(kalman_data["vy"])))
+    
+    def _add_world_point(self, parent_elem: ET.Element, data: Dict[str, Any]) -> None:
+        """
+        Add 3D world coordinates to an XML element.
+        
+        Args:
+            parent_elem: Parent XML element
+            data: Dictionary containing the data
+        """
+        if "world" in data and data["world"] is not None:
+            world_data = data["world"]
+            
+            # Skip if not enough coordinates
+            if len(world_data) < 3:
+                return
+                
+            try:
+                x_val = float(world_data[0])
+                y_val = float(world_data[1])
+                z_val = float(world_data[2])
+            except (ValueError, TypeError, IndexError):
+                return
+                
+            # Skip invalid points
+            if not all(np.isfinite([x_val, y_val, z_val])):
+                return
+                
+            # Create world element
+            world_elem = ET.SubElement(parent_elem, "World")
+            
+            # Add x, y, z coordinates
+            world_elem.set("x", str(x_val))
+            world_elem.set("y", str(y_val))
+            world_elem.set("z", str(z_val))
+            
+            # Add timestamp
+            world_elem.set("timestamp", time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3])
     
     def add_statistics(self, stats: Dict[str, Any]) -> bool:
         """
