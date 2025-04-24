@@ -1,2 +1,128 @@
 <?xml version="1.0" ?>
-<TrackingData folder="serve1" timestamp="2025-04-23 20:34:41" created="1745454881.915872"/>
+<TrackingData folder="serve1" timestamp="2025-04-23 20:34:41" created="1745454881.915872" resumed="1745463238.9505687" resume_time="2025-04-23 22:53:58" finalized="1745463251.270069" finalized_time="2025-04-23 22:54:11" total_frames="11" duration_seconds="8369.35" duration_formatted="02:19:29">
+  <ProcessingStats is_tracking="False" frames_processed="0" frames_detected="0" detection_rate="0.0" lost_frames="0"/>
+  <ProcessingStats/>
+  <ProcessingStats is_tracking="False" frames_processed="0" frames_detected="0" detection_rate="0.0" lost_frames="0"/>
+  <ProcessingStats/>
+  <Image number="16" name="frame_000016.png" timestamp="2025-04-23 22:54:06" tracking_active="False">
+    <Left>
+      <HSV x="960.0" y="540.0"/>
+      <Fused x="960.0" y="540.0"/>
+    </Left>
+    <Right>
+      <HSV x="960.0" y="540.0"/>
+      <Fused x="960.0" y="540.0"/>
+    </Right>
+  </Image>
+  <Image number="32" name="frame_000032.png" timestamp="2025-04-23 22:54:06" tracking_active="False">
+    <Left>
+      <HSV x="960.0" y="540.0"/>
+      <Fused x="960.0" y="540.0"/>
+    </Left>
+    <Right>
+      <HSV x="960.0" y="540.0"/>
+      <Fused x="960.0" y="540.0"/>
+    </Right>
+  </Image>
+  <Image number="48" name="frame_000048.png" timestamp="2025-04-23 22:54:06" tracking_active="False">
+    <Left>
+      <HSV x="960.0" y="540.0"/>
+      <Fused x="960.0" y="540.0"/>
+    </Left>
+    <Right>
+      <HSV x="960.0" y="540.0"/>
+      <Fused x="960.0" y="540.0"/>
+    </Right>
+  </Image>
+  <Image number="64" name="frame_000064.png" timestamp="2025-04-23 22:54:07" tracking_active="False">
+    <Left>
+      <HSV x="960.0" y="540.0"/>
+      <Fused x="960.0" y="540.0"/>
+    </Left>
+    <Right>
+      <HSV x="960.0" y="540.0"/>
+      <Fused x="960.0" y="540.0"/>
+    </Right>
+  </Image>
+  <Image number="80" name="frame_000080.png" timestamp="2025-04-23 22:54:07" tracking_active="False">
+    <Left>
+      <HSV x="960.0" y="540.0"/>
+      <Fused x="960.0" y="540.0"/>
+    </Left>
+    <Right>
+      <HSV x="960.0" y="540.0"/>
+      <Fused x="960.0" y="540.0"/>
+    </Right>
+  </Image>
+  <Image number="96" name="frame_000096.png" timestamp="2025-04-23 22:54:07" tracking_active="False">
+    <Left>
+      <HSV x="1197.0" y="54.0"/>
+      <Hough x="1195.0" y="48.0" radius="15.0"/>
+      <Fused x="1196.0" y="51.0"/>
+    </Left>
+    <Right>
+      <HSV x="960.0" y="540.0"/>
+      <Fused x="960.0" y="540.0"/>
+    </Right>
+  </Image>
+  <Image number="112" name="frame_000112.png" timestamp="2025-04-23 22:54:08" tracking_active="False">
+    <Left>
+      <HSV x="960.0" y="540.0"/>
+      <Fused x="960.0" y="540.0"/>
+    </Left>
+    <Right>
+      <HSV x="1125.0" y="67.0"/>
+      <Hough x="1125.0" y="51.0" radius="24.0"/>
+      <Fused x="1125.0" y="59.0"/>
+    </Right>
+  </Image>
+  <Image number="128" name="frame_000128.png" timestamp="2025-04-23 22:54:08" tracking_active="False">
+    <Left>
+      <HSV x="1192.0" y="80.0"/>
+      <Hough x="1196.0" y="80.0" radius="14.0"/>
+      <Fused x="1194.0" y="80.0"/>
+    </Left>
+    <Right>
+      <HSV x="1122.0" y="80.0"/>
+      <Hough x="1124.0" y="80.0" radius="14.0"/>
+      <Fused x="1123.0" y="80.0"/>
+    </Right>
+  </Image>
+  <Image number="144" name="frame_000144.png" timestamp="2025-04-23 22:54:09" tracking_active="False">
+    <Left>
+      <HSV x="1195.0" y="92.0"/>
+      <Hough x="1195.0" y="88.0" radius="14.0"/>
+      <Fused x="1195.0" y="90.0"/>
+    </Left>
+    <Right>
+      <HSV x="960.0" y="540.0"/>
+      <Fused x="960.0" y="540.0"/>
+    </Right>
+  </Image>
+  <Image number="160" name="frame_000160.png" timestamp="2025-04-23 22:54:09" tracking_active="False">
+    <Left>
+      <HSV x="1192.0" y="106.0"/>
+      <Hough x="1172.0" y="152.0" radius="20.0"/>
+      <Fused x="1182.0" y="129.0"/>
+    </Left>
+    <Right>
+      <HSV x="1119.0" y="106.0"/>
+      <Hough x="1173.0" y="152.0" radius="20.0"/>
+      <Fused x="1146.0" y="129.0"/>
+    </Right>
+  </Image>
+  <Image number="176" name="frame_000176.png" timestamp="2025-04-23 22:54:09" tracking_active="False">
+    <Left>
+      <HSV x="1194.0" y="120.0"/>
+      <Hough x="1149.0" y="153.0" radius="20.0"/>
+      <Fused x="1171.5" y="136.5"/>
+    </Left>
+    <Right>
+      <HSV x="1119.0" y="120.0"/>
+      <Hough x="1097.0" y="153.0" radius="24.0"/>
+      <Fused x="1108.0" y="136.5"/>
+    </Right>
+  </Image>
+  <ProcessingStats is_tracking="False" frames_processed="13" frames_detected="13" detection_rate="1.0" lost_frames="0"/>
+  <ProcessingStats/>
+</TrackingData>
