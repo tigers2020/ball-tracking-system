@@ -471,66 +471,62 @@ class DataSaver:
             logging.error(f"Error during DataSaver cleanup: {e}")
             return False
     
-    def finalize_xml(self):
+    def finalize_xml(self, processing_stats=None):
         """
-        Finalize XML file by adding the closing tag and closing the file.
-        Should be called when tracking is complete or application is exiting.
-        """
-        if self.xml_root is None:
-            return
+        Finalize the XML tracking data by adding summary statistics and timestamps.
+        This should be called before application exit to ensure proper XML closure.
+        
+        Args:
+            processing_stats (dict, optional): Dictionary with processing statistics
             
+        Returns:
+            bool: Success or failure
+        """
         try:
-            # Create XML file path
-            folder_path = None
-            if self.current_folder is None:
-                folder_path = os.path.join(os.getcwd(), "tracking_data", "default")
-            else:
-                folder_path = os.path.join(os.getcwd(), "tracking_data", self.current_folder)
+            if self.xml_root is None:
+                logging.warning("No XML tracking data to finalize")
+                return False
             
-            # Check if folder exists
-            os.makedirs(folder_path, exist_ok=True)
+            # Calculate statistics
+            if not processing_stats:
+                processing_stats = {}
+                if hasattr(self, 'stats'):
+                    processing_stats = getattr(self, 'stats')
             
-            # Create output file path
-            output_file = os.path.join(folder_path, "tracking_data.xml")
+            # Get total frames count
+            image_elements = self.xml_root.findall("Image")
+            total_frames = len(image_elements)
             
-            # Check if XML is already saved and if it has a closing tag
-            try:
-                with open(output_file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                
-                # If closing tag already exists, do nothing
-                if content.strip().endswith('</TrackingData>'):
-                    logging.debug("XML file already has closing tag. No action needed.")
-                    return
-                
-                # Add statistics elements and closing tag
-                with open(output_file, 'a', encoding='utf-8') as f:
-                    # Add statistics information (optional)
-                    if hasattr(self, 'stats') and isinstance(getattr(self, 'stats'), dict):
-                        stats_elem = "  <Statistics"
-                        stats = getattr(self, 'stats')
-                        for key, value in stats.items():
-                            stats_elem += f" {key}=\"{str(value)}\""
-                        stats_elem += "/>\n"
-                        f.write(stats_elem)
-                    
-                    # Add closing tag
-                    f.write("</TrackingData>\n")
-                
-                logging.info("Finalized XML tracking data file")
-                
-            except FileNotFoundError:
-                # Create new file if it doesn't exist
-                logging.warning(f"XML file {output_file} not found. Creating new file with closing tag only.")
-                with open(output_file, 'w', encoding='utf-8') as f:
-                    f.write('<?xml version="1.0" encoding="utf-8"?>\n')
-                    f.write('<TrackingData folder="default" timestamp="' + time.strftime("%Y-%m-%d %H:%M:%S") + '" created="' + str(time.time()) + '">\n')
-                    f.write('</TrackingData>\n')
-                
-                logging.info("Created and finalized new XML tracking data file")
-                
+            # Add timestamps and metadata
+            self.xml_root.set("finalized", str(time.time()))
+            self.xml_root.set("finalized_time", time.strftime("%Y-%m-%d %H:%M:%S"))
+            self.xml_root.set("total_frames", str(total_frames))
+            
+            # Calculate duration if possible
+            if "created" in self.xml_root.attrib:
+                try:
+                    start_time = float(self.xml_root.attrib["created"])
+                    end_time = time.time()
+                    duration_seconds = end_time - start_time
+                    self.xml_root.set("duration_seconds", str(round(duration_seconds, 2)))
+                    self.xml_root.set("duration_formatted", 
+                                    time.strftime("%H:%M:%S", time.gmtime(duration_seconds)))
+                except (ValueError, TypeError):
+                    logging.warning("Could not calculate tracking duration")
+            
+            # Add processing statistics
+            stats_elem = ET.SubElement(self.xml_root, "ProcessingStats")
+            for key, value in processing_stats.items():
+                stats_elem.set(key, str(value))
+            
+            # Save the final XML
+            self.save_xml_tracking_data()
+            logging.info(f"XML tracking data finalized with {total_frames} frames")
+            return True
+            
         except Exception as e:
-            logging.error(f"Error finalizing XML file: {e}")
+            logging.error(f"Error finalizing XML tracking data: {e}")
+            return False
             
         # Remove XML root from memory
         self.xml_root = None

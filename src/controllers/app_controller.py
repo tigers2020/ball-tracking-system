@@ -202,6 +202,12 @@ class AppController(QObject):
             self.view.image_view.playback_controls.set_total_frames(total_frames)
             self.view.image_view.enable_controls(True)
             
+            # Initialize XML tracking for the current folder
+            folder_name = os.path.basename(self.config_manager.get_last_image_folder())
+            if folder_name:
+                self.ball_tracking_controller.initialize_xml_tracking(folder_name)
+                logging.info(f"XML tracking initialized for folder: {folder_name}")
+            
             # Load the first frame
             self.model.set_current_frame_index(0)
         else:
@@ -230,8 +236,11 @@ class AppController(QObject):
             if self.ball_tracking_controller.is_enabled:
                 self.ball_tracking_controller.set_images(left_image, right_image)
                 
-                # Save tracking data for the current frame if tracking is active
-                if self.tracking_data_save_enabled and self.ball_tracking_controller.detection_stats["is_tracking"]:
+                # Process the current frame for tracking and XML logging
+                self.ball_tracking_controller.process_frame(frame_index)
+                
+                # Save entire XML file at intervals to prevent performance issues
+                if frame_index % 10 == 0:  # Save every 10 frames
                     # Use folder name based on current image folder
                     folder_name = os.path.basename(self.config_manager.get_last_image_folder())
                     if not folder_name:
@@ -240,22 +249,9 @@ class AppController(QObject):
                     # Create specific folder for this dataset
                     tracking_folder = os.path.join(self.tracking_data_folder, folder_name)
                     
-                    # First ensure XML tracking is initialized
-                    if not hasattr(self.ball_tracking_controller, 'xml_root') or self.ball_tracking_controller.xml_root is None:
-                        self.ball_tracking_controller.initialize_xml_tracking(folder_name)
-                    
-                    # Save frame to XML (primary method)
-                    frame_name = f"frame_{frame_index:06d}.png"
-                    success = self.ball_tracking_controller.append_frame_xml(frame_index, frame_name)
-                    
-                    # entire XML File specific Only at intervals save (Performance problem prevention and disk I/O decrease)
-                    if frame_index % 10 == 0:  # 10 Every frame save
-                        self.ball_tracking_controller.save_xml_tracking_data(tracking_folder)
-                        logging.debug(f"XML tracking data saved at frame {frame_index} (periodic save)")
-                    
-                    # Fallback to JSON if XML saving failed
-                    if not success:
-                        self.ball_tracking_controller.save_frame_to_json(frame_index, tracking_folder)
+                    # Save XML tracking data periodically
+                    self.ball_tracking_controller.save_xml_tracking_data(tracking_folder)
+                    logging.debug(f"XML tracking data saved at frame {frame_index} (periodic save)")
         else:
             self.view.image_view.clear_images()
         
@@ -603,10 +599,16 @@ class AppController(QObject):
             # Reset ball tracking controller to ensure all data is saved
             if self.ball_tracking_controller:
                 logging.info("Cleaning up ball tracking resources...")
-                # 종료 전 XML 파일을 정상적으로 닫기 위해 finalize_xml 호출
-                if hasattr(self.ball_tracking_controller.data_saver, 'finalize_xml'):
+                
+                # Get detection statistics to include in XML
+                detection_stats = None
+                if hasattr(self.ball_tracking_controller, 'detection_stats'):
+                    detection_stats = self.ball_tracking_controller.detection_stats
+                
+                # Finalize XML tracking data
+                if hasattr(self.ball_tracking_controller, 'data_saver') and self.ball_tracking_controller.data_saver:
                     logging.info("Finalizing XML tracking data...")
-                    self.ball_tracking_controller.data_saver.finalize_xml()
+                    self.ball_tracking_controller.data_saver.finalize_xml(detection_stats)
                 
                 self.ball_tracking_controller.reset_tracking()
                 

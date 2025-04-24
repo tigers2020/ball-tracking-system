@@ -155,6 +155,8 @@ class XMLLogger:
             # Increment frame count
             self.frame_count += 1
             
+            logging.debug(f"XML: frame {frame_number} appended (total: {self.frame_count})")
+            
             # Always flush to disk after every frame to ensure real-time updates
             self.flush()
                 

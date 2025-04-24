@@ -1067,27 +1067,32 @@ class BallTrackingController(QObject):
     
     def initialize_xml_tracking(self, folder_name):
         """
-        Initialize XML tracking file structure for the given folder.
+        Initialize XML tracking with the given folder name.
         
         Args:
-            folder_name: Name of the folder to store tracking data
+            folder_name: Name of the folder for tracking data
             
         Returns:
-            Boolean success indicator
+            bool: Success or failure
         """
         try:
-            # Create data saver if not already created
+            # Initialize data saver if not already done
             if not hasattr(self, 'data_saver') or self.data_saver is None:
-                from src.services.data_saver import DataSaver
                 self.data_saver = DataSaver()
             
-            # Initialize XML file
+            # Create output folder path
+            output_path = os.path.join(os.getcwd(), "tracking_data", folder_name)
+            os.makedirs(output_path, exist_ok=True)
+            
+            # Initialize XML tracking in the data saver
             result = self.data_saver.initialize_xml_tracking(folder_name)
+            
             if result:
-                logging.info(f"Initialized XML tracking for folder: {folder_name}")
-            
+                logging.info(f"XML tracking initialized for folder: {folder_name}")
+            else:
+                logging.warning(f"Failed to initialize XML tracking for folder: {folder_name}")
+                
             return result
-            
         except Exception as e:
             logging.error(f"Error initializing XML tracking: {e}")
             return False
@@ -1291,4 +1296,35 @@ class BallTrackingController(QObject):
             
         except Exception as e:
             logging.error(f"Error saving frame to JSON: {e}")
-            return None 
+            return None
+    
+    def process_frame(self, frame_index, frame=None):
+        """
+        Process a frame and log tracking data to XML.
+        
+        Args:
+            frame_index: Index of the current frame
+            frame: Frame object (optional)
+        """
+        # Process images if not already processed and tracking is enabled
+        if self.is_enabled and (self.left_image is not None and self.right_image is not None):
+            # Process images if needed
+            if not self._processed:
+                self._process_images()
+                
+            # Log to XML if tracking data exists
+            if hasattr(self, 'data_saver') and self.data_saver is not None:
+                # Get frame data dictionary
+                frame_data = self.get_frame_data_dict(frame_index)
+                
+                # Generate frame name
+                frame_name = f"frame_{frame_index:06d}.png"
+                
+                # Log to XML
+                result = self.append_frame_xml(frame_index, frame_name)
+                if result:
+                    logging.debug(f"XML: frame {frame_index} appended")
+                else:
+                    logging.warning(f"Failed to append frame {frame_index} to XML")
+        
+        return True 
