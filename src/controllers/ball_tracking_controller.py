@@ -1055,7 +1055,7 @@ class BallTrackingController(QObject):
                         logging.debug(f"Right fused coordinates: {fused_coords}")
             
             # Use data saver service to save the frame data
-            return self.data_saver.save_json_frame(frame_number, frame_data, folder_path)
+            return self.data_saver.save_frame_to_xml(frame_number, frame_data, None)
             
         except Exception as e:
             logging.error(f"Error saving frame tracking data: {e}")
@@ -1074,7 +1074,7 @@ class BallTrackingController(QObject):
         try:
             # Create data saver if not already created
             if not hasattr(self, 'data_saver') or self.data_saver is None:
-                from models.data_saver import DataSaver
+                from src.services.data_saver import DataSaver
                 self.data_saver = DataSaver()
             
             # Initialize XML file
@@ -1258,4 +1258,33 @@ class BallTrackingController(QObject):
                     }
                     logging.debug(f"Right fused coordinates: {fused_coords}")
         
-        return frame_data 
+        return frame_data
+    
+    def save_frame_to_json(self, frame_number, folder_path=None):
+        """
+        Save the current frame's tracking data to JSON file.
+        
+        Args:
+            frame_number: Current frame number
+            folder_path: Optional path to the output folder
+            
+        Returns:
+            Path to the saved file or None if failed
+        """
+        try:
+            # Get the current frame data
+            frame_data = self.get_frame_data_dict(frame_number)
+            
+            # Use the data saver to save as JSON
+            result = self.data_saver.save_json_frame(frame_number, frame_data, folder_path)
+            
+            if result:
+                logging.debug(f"Frame {frame_number} tracking data saved as JSON to {result}")
+            else:
+                logging.warning(f"Failed to save frame {frame_number} as JSON")
+                
+            return result
+            
+        except Exception as e:
+            logging.error(f"Error saving frame to JSON: {e}")
+            return None 

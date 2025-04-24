@@ -255,7 +255,7 @@ class AppController(QObject):
                     
                     # Fallback to JSON if XML saving failed
                     if not success:
-                        self.ball_tracking_controller.save_tracking_data_for_frame(frame_index, tracking_folder)
+                        self.ball_tracking_controller.save_frame_to_json(frame_index, tracking_folder)
         else:
             self.view.image_view.clear_images()
         
