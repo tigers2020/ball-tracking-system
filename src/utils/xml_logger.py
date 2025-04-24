@@ -249,6 +249,63 @@ class XMLLogger:
             logging.error(f"Error adding statistics to XML: {e}")
             return False
     
+    def finalize_xml(self, processing_stats: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Finalize the XML file by adding total tracking time and processing statistics.
+        
+        Args:
+            processing_stats (dict, optional): Dictionary with processing statistics
+                                              such as processing_time, fps, etc.
+            
+        Returns:
+            bool: Success or failure
+        """
+        if not self.is_session_active or self.root is None:
+            logging.error("Cannot finalize XML: No active session. Call start_session first.")
+            return False
+            
+        try:
+            # Calculate tracking duration if the created attribute exists
+            if "created" in self.root.attrib:
+                try:
+                    start_time = float(self.root.attrib["created"])
+                    end_time = time.time()
+                    duration_seconds = end_time - start_time
+                    
+                    # Add duration information
+                    self.root.set("duration_seconds", str(round(duration_seconds, 2)))
+                    self.root.set("duration_formatted", str(time.strftime(
+                        "%H:%M:%S", time.gmtime(duration_seconds))))
+                except (ValueError, TypeError):
+                    logging.warning("Could not calculate tracking duration: invalid created timestamp")
+            
+            # Update final frame count
+            self.root.set("total_frames", str(self.frame_count))
+            self.root.set("finalized", str(time.time()))
+            self.root.set("finalized_time", time.strftime("%Y-%m-%d %H:%M:%S"))
+            
+            # Add processing statistics if provided
+            if processing_stats:
+                # Create or get existing processing stats element
+                stats_elems = self.root.findall("ProcessingStats")
+                if stats_elems:
+                    # Update existing element
+                    stats_elem = stats_elems[0]
+                else:
+                    # Create new element
+                    stats_elem = ET.SubElement(self.root, "ProcessingStats")
+                
+                # Add all stats as attributes
+                for key, value in processing_stats.items():
+                    stats_elem.set(key, str(value))
+            
+            # Flush to disk
+            return self.flush()
+            
+        except Exception as e:
+            logging.error(f"Error finalizing XML: {e}")
+            return False
+    
     def flush(self) -> bool:
         """
         Write current XML data to disk without closing the session.
