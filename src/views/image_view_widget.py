@@ -221,19 +221,61 @@ class ImageViewWidget(QWidget):
             # Make a copy to avoid modifying the original
             result = image.copy()
             
-            # Extract ROI information
-            x = roi["x"]
-            y = roi["y"]
-            w = roi["width"]
-            h = roi["height"]
-            center_x = roi["center_x"]
-            center_y = roi["center_y"]
+            # Get image dimensions for defaults and bounds checking
+            img_h, img_w = image.shape[:2]
+            
+            # Extract ROI information with fallback defaults
+            required_keys = ["x", "y", "width", "height", "center_x", "center_y"]
+            roi_data = {}
+            
+            # Check for missing keys and use defaults if needed
+            missing_keys = []
+            for key in required_keys:
+                if key not in roi:
+                    missing_keys.append(key)
+            
+            if missing_keys:
+                logging.warning(f"Missing ROI keys: {', '.join(missing_keys)}. Using defaults.")
+            
+            # Set defaults for missing keys
+            roi_data["width"] = roi.get("width", min(100, img_w // 4))
+            roi_data["height"] = roi.get("height", min(100, img_h // 4))
+            
+            # If center coordinates are provided but x,y are missing, calculate x,y from center
+            if "center_x" in roi and "center_y" in roi and ("x" not in roi or "y" not in roi):
+                center_x = roi["center_x"]
+                center_y = roi["center_y"]
+                roi_data["center_x"] = center_x
+                roi_data["center_y"] = center_y
+                roi_data["x"] = max(0, center_x - roi_data["width"] // 2)
+                roi_data["y"] = max(0, center_y - roi_data["height"] // 2)
+            # If x,y are provided but center is missing, calculate center from x,y
+            elif "x" in roi and "y" in roi and ("center_x" not in roi or "center_y" not in roi):
+                roi_data["x"] = roi["x"]
+                roi_data["y"] = roi["y"]
+                roi_data["center_x"] = roi_data["x"] + roi_data["width"] // 2
+                roi_data["center_y"] = roi_data["y"] + roi_data["height"] // 2
+            # Use defaults if both center and x,y are missing
+            else:
+                # Use provided values or defaults
+                roi_data["x"] = roi.get("x", img_w // 2 - roi_data["width"] // 2)
+                roi_data["y"] = roi.get("y", img_h // 2 - roi_data["height"] // 2)
+                roi_data["center_x"] = roi.get("center_x", img_w // 2)
+                roi_data["center_y"] = roi.get("center_y", img_h // 2)
+            
+            # Validate coordinates are within image bounds
+            roi_data["x"] = max(0, min(roi_data["x"], img_w - 1))
+            roi_data["y"] = max(0, min(roi_data["y"], img_h - 1))
+            roi_data["width"] = min(roi_data["width"], img_w - roi_data["x"])
+            roi_data["height"] = min(roi_data["height"], img_h - roi_data["y"])
+            roi_data["center_x"] = max(0, min(roi_data["center_x"], img_w - 1))
+            roi_data["center_y"] = max(0, min(roi_data["center_y"], img_h - 1))
             
             # Draw ROI rectangle
             cv2.rectangle(
                 result,
-                (x, y),
-                (x + w, y + h),
+                (int(roi_data["x"]), int(roi_data["y"])),
+                (int(roi_data["x"] + roi_data["width"]), int(roi_data["y"] + roi_data["height"])),
                 ROI.BORDER_COLOR,
                 ROI.BORDER_THICKNESS
             )
@@ -241,7 +283,7 @@ class ImageViewWidget(QWidget):
             # Draw center marker
             cv2.drawMarker(
                 result,
-                (center_x, center_y),
+                (int(roi_data["center_x"]), int(roi_data["center_y"])),
                 ROI.CENTER_MARKER_COLOR,
                 cv2.MARKER_CROSS,
                 ROI.CENTER_MARKER_SIZE * 2,
