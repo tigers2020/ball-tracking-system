@@ -130,6 +130,9 @@ class AppController(QObject):
         # Connect ball tracking button
         self.view.image_view.playback_controls.ball_tracking_clicked.connect(self._on_ball_tracking_button_clicked)
         
+        # 볼 트래킹 버튼 비활성화 (초기 상태)
+        self.view.image_view.playback_controls.ball_tracking_button.setEnabled(False)
+        
         # Tracking data save settings
         self.tracking_data_save_enabled = True  # Enable/disable saving
         self.tracking_data_folder = os.path.join(os.getcwd(), "tracking_data")  # Default folder
@@ -202,6 +205,9 @@ class AppController(QObject):
             self.view.image_view.playback_controls.set_total_frames(total_frames)
             self.view.image_view.enable_controls(True)
             
+            # 현재 프레임이 로드되었으므로 볼 트래킹 버튼 활성화
+            self.view.image_view.playback_controls.ball_tracking_button.setEnabled(True)
+            
             # Initialize XML tracking for the current folder
             folder_name = os.path.basename(self.config_manager.get_last_image_folder())
             if folder_name:
@@ -213,6 +219,9 @@ class AppController(QObject):
         else:
             self.view.update_status(Messages.NO_IMAGES_FOUND)
             self.view.show_warning_message(Messages.NO_IMAGES_FOUND)
+            
+            # 이미지가 없으면 볼 트래킹 버튼 비활성화 유지
+            self.view.image_view.playback_controls.ball_tracking_button.setEnabled(False)
     
     @Slot(int)
     def _on_frame_changed(self, frame_index):
@@ -488,6 +497,19 @@ class AppController(QObject):
     @Slot()
     def _on_ball_tracking_button_clicked(self):
         """Handle ball tracking button click."""
+        # 현재 이미지가 로드되었는지 확인
+        current_frame = self.model.get_current_frame()
+        if not current_frame:
+            self.view.show_warning_message("이미지를 먼저 로드해주세요.")
+            return
+            
+        left_image = current_frame.get_left_image()
+        right_image = current_frame.get_right_image()
+        
+        if left_image is None and right_image is None:
+            self.view.show_warning_message("이미지 로딩이 완료되지 않았습니다. 잠시 후 다시 시도해주세요.")
+            return
+            
         # Create dialog if it doesn't exist
         if not self.ball_tracking_dialog:
             self.ball_tracking_dialog = BallTrackingSettingsDialog(self.view)
@@ -504,11 +526,7 @@ class AppController(QObject):
         self.view.image_view.enable_mask_overlay(True)
         
         # Set current images to the ball tracking controller
-        current_frame = self.model.get_current_frame()
-        if current_frame:
-            left_image = current_frame.get_left_image()
-            right_image = current_frame.get_right_image()
-            self.ball_tracking_controller.set_images(left_image, right_image)
+        self.ball_tracking_controller.set_images(left_image, right_image)
         
         # Show the dialog
         self.ball_tracking_dialog.exec()
