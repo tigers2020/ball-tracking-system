@@ -13,6 +13,7 @@ import json
 import os
 import time
 import xml.etree.ElementTree as ET
+import atexit
 from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 
@@ -41,24 +42,31 @@ class BallTrackingController(QObject):
     def __init__(self):
         """Initialize the ball tracking controller."""
         super(BallTrackingController, self).__init__()
-
+        
         # Create configuration manager
         self.config_manager = ConfigManager()
         
-        # Create model
+        # Create model and initialize with configuration
         self.model = TrackingDataModel()
-        
-        # Initialize model with configuration
         self.model.set_hsv_values(self.config_manager.get_hsv_settings())
         self.model.set_roi_settings(self.config_manager.get_roi_settings())
         self.model.set_hough_settings(self.config_manager.get_hough_circle_settings())
         
-        # Create services
+        # Create services with proper configuration
         self.hsv_mask_generator = HSVMaskGenerator(self.model.hsv_values)
         self.roi_computer = ROIComputer(self.model.roi_settings)
         self.circle_detector = CircleDetector(self.model.hough_settings)
         self.kalman_processor = KalmanProcessor()
         self.data_saver = DataSaver()
+        
+        # Register finalize_xml with atexit to ensure XML is properly closed at exit
+        atexit.register(self.data_saver.finalize_xml)
+        
+        # Timestamp tracking for Kalman filter dt calculation
+        self.last_update_time = {"left": None, "right": None}
+        
+        # Tracking enabled flag
+        self._enabled = False
     
     @property
     def is_enabled(self):
@@ -170,17 +178,23 @@ class BallTrackingController(QObject):
         left_result = self.hsv_mask_generator.generate_mask(self.model.left_image) if self.model.left_image is not None else None
         right_result = self.hsv_mask_generator.generate_mask(self.model.right_image) if self.model.right_image is not None else None
         
-        # Extract binary masks from results (original_img, masked_img, binary_mask, centroid)
+        # Extract binary masks from results (original_img, masked_img, binary_mask, centroid, mask_too_narrow)
         left_mask = None
         right_mask = None
+        left_mask_too_narrow = False
+        right_mask_too_narrow = False
         
         if left_result is not None:
-            if len(left_result) >= 4:
-                _, _, left_mask, left_centroid = left_result
+            if len(left_result) >= 5:
+                _, _, left_mask, left_centroid, left_mask_too_narrow = left_result
         
         if right_result is not None:
-            if len(right_result) >= 4:
-                _, _, right_mask, right_centroid = right_result
+            if len(right_result) >= 5:
+                _, _, right_mask, right_centroid, right_mask_too_narrow = right_result
+        
+        # Store mask quality info in model for use in detection stats calculation
+        self.model.left_mask_too_narrow = left_mask_too_narrow
+        self.model.right_mask_too_narrow = right_mask_too_narrow
         
         # Update model with masks
         self.model.set_masks(left_mask, right_mask)
@@ -231,6 +245,12 @@ class BallTrackingController(QObject):
         left_hsv_center = None
         left_kalman_pred = None
         
+        # Import visualization modules
+        from src.views.visualization.hsv_visualizer import apply_mask_overlay, draw_centroid
+        from src.views.visualization.roi_visualizer import draw_roi
+        from src.views.visualization.hough_visualizer import draw_circles
+        from src.views.visualization.kalman_visualizer import draw_prediction
+        
         if self.model.left_image is not None and self.model.left_roi is not None and self.model.left_mask is not None:
             # Get HSV mask centroid
             left_hsv_center = self.roi_computer.compute_mask_centroid(self.model.left_mask)
@@ -238,25 +258,70 @@ class BallTrackingController(QObject):
             # Get Kalman prediction if available
             left_kalman_pred = self.kalman_processor.get_prediction("left")
             
-            # Detect circles
-            left_processed_image, left_circles = self.circle_detector.detect_circles(
-                self.model.left_image,
-                self.model.left_roi,
-                left_hsv_center,
-                left_kalman_pred,
-                not self.model.detection_stats["is_tracking"],
-                "left"
+            # Detect circles - using updated API with visualize=False
+            left_detection_result = self.circle_detector.detect_circles(
+                img=self.model.left_image,
+                roi=self.model.left_roi,
+                hsv_center=left_hsv_center,
+                kalman_pred=left_kalman_pred,
+                reset_mode=not self.model.detection_stats["is_tracking"],
+                side="left",
+                visualize=False
             )
             
-            # Record circle coordinates
+            # Extract circles from result
+            left_circles = left_detection_result.get('circles')
+            
+            # Create visualization using visualization modules
+            left_processed_image = self.model.left_image.copy()
+            
+            # Draw ROI
+            if left_detection_result.get('roi'):
+                left_processed_image = draw_roi(left_processed_image, left_detection_result.get('roi'))
+            
+            # Draw HSV centroid
+            if left_hsv_center:
+                left_processed_image = draw_centroid(left_processed_image, left_hsv_center, color=(0, 255, 255))
+            
+            # Draw Kalman prediction
+            if left_kalman_pred:
+                pred_pos = (int(left_kalman_pred[0]), int(left_kalman_pred[1]))
+                future_pos = None
+                if abs(left_kalman_pred[2]) > 0.5 or abs(left_kalman_pred[3]) > 0.5:
+                    future_x = int(left_kalman_pred[0] + left_kalman_pred[2] * 3)
+                    future_y = int(left_kalman_pred[1] + left_kalman_pred[3] * 3)
+                    future_pos = (future_x, future_y)
+                
+                # Draw prediction point
+                left_processed_image = draw_centroid(left_processed_image, pred_pos, color=(255, 0, 255))
+                
+                # Draw prediction arrow if velocity is significant
+                if future_pos:
+                    left_processed_image = draw_prediction(left_processed_image, pred_pos, future_pos)
+            
+            # Draw circles
             if left_circles:
-                # Add coordinates to history
+                left_processed_image = draw_circles(left_processed_image, left_circles)
+                
+                # Record circle coordinates
                 x, y, r = left_circles[0]
                 self.model.add_coordinate("left", x, y, r)
                 
-                # Update Kalman filter
+                # Get current time
+                current_time = time.time()
+                
+                # Update Kalman filter with measured time delta
                 if self.model.detection_stats["is_tracking"]:
-                    self.kalman_processor.update("left", x, y)
+                    # Calculate dt if we have a previous timestamp
+                    dt = None
+                    if self.last_update_time["left"] is not None:
+                        dt = current_time - self.last_update_time["left"]
+                        
+                    # Update Kalman with calculated dt
+                    self.kalman_processor.update("left", x, y, dt)
+                    
+                # Store current time for next dt calculation
+                self.last_update_time["left"] = current_time
         
         # Process right image
         right_processed_image = None
@@ -271,25 +336,70 @@ class BallTrackingController(QObject):
             # Get Kalman prediction if available
             right_kalman_pred = self.kalman_processor.get_prediction("right")
             
-            # Detect circles
-            right_processed_image, right_circles = self.circle_detector.detect_circles(
-                self.model.right_image,
-                self.model.right_roi,
-                right_hsv_center,
-                right_kalman_pred,
-                not self.model.detection_stats["is_tracking"],
-                "right"
+            # Detect circles - using updated API with visualize=False
+            right_detection_result = self.circle_detector.detect_circles(
+                img=self.model.right_image,
+                roi=self.model.right_roi,
+                hsv_center=right_hsv_center,
+                kalman_pred=right_kalman_pred,
+                reset_mode=not self.model.detection_stats["is_tracking"],
+                side="right",
+                visualize=False
             )
             
-            # Record circle coordinates
+            # Extract circles from result
+            right_circles = right_detection_result.get('circles')
+            
+            # Create visualization using visualization modules
+            right_processed_image = self.model.right_image.copy()
+            
+            # Draw ROI
+            if right_detection_result.get('roi'):
+                right_processed_image = draw_roi(right_processed_image, right_detection_result.get('roi'))
+            
+            # Draw HSV centroid
+            if right_hsv_center:
+                right_processed_image = draw_centroid(right_processed_image, right_hsv_center, color=(0, 255, 255))
+            
+            # Draw Kalman prediction
+            if right_kalman_pred:
+                pred_pos = (int(right_kalman_pred[0]), int(right_kalman_pred[1]))
+                future_pos = None
+                if abs(right_kalman_pred[2]) > 0.5 or abs(right_kalman_pred[3]) > 0.5:
+                    future_x = int(right_kalman_pred[0] + right_kalman_pred[2] * 3)
+                    future_y = int(right_kalman_pred[1] + right_kalman_pred[3] * 3)
+                    future_pos = (future_x, future_y)
+                
+                # Draw prediction point
+                right_processed_image = draw_centroid(right_processed_image, pred_pos, color=(255, 0, 255))
+                
+                # Draw prediction arrow if velocity is significant
+                if future_pos:
+                    right_processed_image = draw_prediction(right_processed_image, pred_pos, future_pos)
+            
+            # Draw circles
             if right_circles:
-                # Add coordinates to history
+                right_processed_image = draw_circles(right_processed_image, right_circles)
+            
+                # Record circle coordinates
                 x, y, r = right_circles[0]
                 self.model.add_coordinate("right", x, y, r)
                 
-                # Update Kalman filter
+                # Get current time
+                current_time = time.time()
+                
+                # Update Kalman filter with measured time delta
                 if self.model.detection_stats["is_tracking"]:
-                    self.kalman_processor.update("right", x, y)
+                    # Calculate dt if we have a previous timestamp
+                    dt = None
+                    if self.last_update_time["right"] is not None:
+                        dt = current_time - self.last_update_time["right"]
+                    
+                    # Update Kalman with calculated dt
+                    self.kalman_processor.update("right", x, y, dt)
+                
+                # Store current time for next dt calculation
+                self.last_update_time["right"] = current_time
         
         # Update model with circle detection results
         self.model.set_circles(left_circles, right_circles)
@@ -645,19 +755,28 @@ class BallTrackingController(QObject):
     
     def reset_tracking(self):
         """
-        Reset all tracking data including detection rate, coordinate history and predictions.
-        Call this when user manually stops tracking or restarts application.
+        Reset all tracking data and filters.
         """
-        # Reset model
-        self.model.reset()
-        
-        # Reset Kalman filters
-        self.kalman_processor.reset()
-        
-        logging.info("Ball tracking data completely reset")
-        
-        # Emit signal with updated detection rate (0.0) and empty coordinates
-        self.detection_updated.emit(0.0, None, None)
+        try:
+            # 저장 큐 정리
+            self.data_saver.cleanup()
+            
+            # Reset Kalman filters
+            self.kalman_processor.reset()
+            
+            # Reset model data
+            self.model.reset()
+            
+            # Reset timestamp tracking
+            self.last_update_time = {"left": None, "right": None}
+            
+            logging.info("Ball tracking reset complete")
+            
+        except Exception as e:
+            logging.error(f"Error resetting tracking: {e}")
+            
+        # Return current status
+        return self.model.detection_stats
 
     def save_coordinate_history(self, filename):
         """
@@ -944,159 +1063,199 @@ class BallTrackingController(QObject):
     
     def initialize_xml_tracking(self, folder_name):
         """
-        Initialize XML tracking data structure for a new folder.
-        If an existing XML file exists, it will be loaded to continue tracking.
+        Initialize XML tracking file structure for the given folder.
         
         Args:
-            folder_name (str): Name of the folder being processed
-        
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        return self.data_saver.initialize_xml_tracking(folder_name)
-    
-    def save_frame_to_xml(self, frame_number, frame_name=None):
-        """
-        Save the current frame's tracking data to the XML structure.
-        
-        Args:
-            frame_number (int): Frame number
-            frame_name (str, optional): Frame filename if available
+            folder_name: Name of the folder to store tracking data
             
         Returns:
-            bool: Success or failure
+            Boolean success indicator
         """
         try:
-            # Prepare frame data (similar to save_tracking_data_for_frame)
-            frame_data = {
-                "frame_number": frame_number,
-                "tracking_active": self.model.detection_stats["is_tracking"],
-                "left": {},
-                "right": {}
-            }
+            # Create data saver if not already created
+            if not hasattr(self, 'data_saver') or self.data_saver is None:
+                from models.data_saver import DataSaver
+                self.data_saver = DataSaver()
             
-            # Process left side
-            if self.model.left_mask is not None:
-                # Get HSV mask centroid
-                left_hsv_center = self.roi_computer.compute_mask_centroid(self.model.left_mask)
-                if left_hsv_center:
-                    frame_data["left"]["hsv_center"] = {
-                        "x": float(left_hsv_center[0]),
-                        "y": float(left_hsv_center[1])
-                    }
-                
-                # Get latest Hough circle center if available
-                left_hough_center = None
-                if self.model.left_circles:
-                    left_hough_center = (float(self.model.left_circles[0][0]), float(self.model.left_circles[0][1]))
-                    frame_data["left"]["hough_center"] = {
-                        "x": left_hough_center[0],
-                        "y": left_hough_center[1],
-                        "radius": float(self.model.left_circles[0][2])
-                    }
-                
-                # Get Kalman prediction if available
-                left_kalman_pred = self.kalman_processor.get_prediction("left")
-                if left_kalman_pred is not None:
-                    left_kalman_pos = (float(left_kalman_pred[0]), float(left_kalman_pred[1]))
-                    frame_data["left"]["kalman_prediction"] = {
-                        "x": left_kalman_pos[0],
-                        "y": left_kalman_pos[1],
-                        "vx": float(left_kalman_pred[2]),
-                        "vy": float(left_kalman_pred[3])
-                    }
-                
-                # Calculate fused coordinates
-                coords_to_fuse = []
-                if left_hsv_center:
-                    coords_to_fuse.append(left_hsv_center)
-                if left_hough_center:
-                    coords_to_fuse.append(left_hough_center)
-                if left_kalman_pred:
-                    coords_to_fuse.append((left_kalman_pred[0], left_kalman_pred[1]))
-                
-                if coords_to_fuse:
-                    fused_coords = fuse_coordinates(coords_to_fuse)
-                    if fused_coords:
-                        frame_data["left"]["fused_center"] = {
-                            "x": float(fused_coords[0]),
-                            "y": float(fused_coords[1])
-                        }
-                        logging.debug(f"Left fused coordinates: {fused_coords}")
+            # Initialize XML file
+            result = self.data_saver.initialize_xml_tracking(folder_name)
+            if result:
+                logging.info(f"Initialized XML tracking for folder: {folder_name}")
             
-            # Process right side (similar to left)
-            if self.model.right_mask is not None:
-                # Get HSV mask centroid
-                right_hsv_center = self.roi_computer.compute_mask_centroid(self.model.right_mask)
-                if right_hsv_center:
-                    frame_data["right"]["hsv_center"] = {
-                        "x": float(right_hsv_center[0]),
-                        "y": float(right_hsv_center[1])
-                    }
-                
-                # Get latest Hough circle center if available
-                right_hough_center = None
-                if self.model.right_circles:
-                    right_hough_center = (float(self.model.right_circles[0][0]), float(self.model.right_circles[0][1]))
-                    frame_data["right"]["hough_center"] = {
-                        "x": right_hough_center[0],
-                        "y": right_hough_center[1],
-                        "radius": float(self.model.right_circles[0][2])
-                    }
-                
-                # Get Kalman prediction if available
-                right_kalman_pred = self.kalman_processor.get_prediction("right")
-                if right_kalman_pred is not None:
-                    right_kalman_pos = (float(right_kalman_pred[0]), float(right_kalman_pred[1]))
-                    frame_data["right"]["kalman_prediction"] = {
-                        "x": right_kalman_pos[0],
-                        "y": right_kalman_pos[1],
-                        "vx": float(right_kalman_pred[2]),
-                        "vy": float(right_kalman_pred[3])
-                    }
-                
-                # Calculate fused coordinates
-                coords_to_fuse = []
-                if right_hsv_center:
-                    coords_to_fuse.append(right_hsv_center)
-                if right_hough_center:
-                    coords_to_fuse.append(right_hough_center)
-                if right_kalman_pred:
-                    coords_to_fuse.append((right_kalman_pred[0], right_kalman_pred[1]))
-                
-                if coords_to_fuse:
-                    fused_coords = fuse_coordinates(coords_to_fuse)
-                    if fused_coords:
-                        frame_data["right"]["fused_center"] = {
-                            "x": float(fused_coords[0]),
-                            "y": float(fused_coords[1])
-                        }
-                        logging.debug(f"Right fused coordinates: {fused_coords}")
+            return result
             
-            # Use data saver service to save the frame to XML
-            return self.data_saver.save_frame_to_xml(frame_number, frame_data, frame_name)
+        except Exception as e:
+            logging.error(f"Error initializing XML tracking: {e}")
+            return False
+            
+    def save_frame_to_xml(self, frame_number, frame_name=None):
+        """
+        Save the current frame's tracking data to XML.
+        
+        Args:
+            frame_number: Current frame number
+            frame_name: Optional frame filename
+            
+        Returns:
+            Boolean success indicator
+        """
+        try:
+            # Get the current frame data
+            frame_data = self.get_frame_data_dict(frame_number)
+            
+            # Use the data saver to add to XML
+            result = self.data_saver.save_frame_to_xml(frame_number, frame_data, frame_name)
+            
+            if result:
+                logging.debug(f"Frame {frame_number} tracking data saved to XML")
+            else:
+                logging.warning(f"Failed to save frame {frame_number} to XML")
+                
+            return result
             
         except Exception as e:
             logging.error(f"Error saving frame to XML: {e}")
             return False
-    
+            
     def save_xml_tracking_data(self, folder_path=None):
         """
-        Save the XML tracking data to a file.
+        Save the complete XML tracking data to a file.
+        For the incremental logging approach, this creates a full snapshot
+        of the in-memory tracking data.
         
         Args:
-            folder_path (str, optional): Path to the output folder. 
+            folder_path: Optional path to the output folder
             
         Returns:
-            str: Path to the saved file or None if failed
+            Path to the saved file or None if failed
         """
-        # Add statistics to data saver
-        self.data_saver.stats = {
-            "detection_rate": self.model.get_detection_rate(),
-            "frames_total": self.model.detection_stats["total_frames"],
-            "detections_count": self.model.detection_stats["detection_count"],
-            "tracking_active": self.model.detection_stats["is_tracking"]
+        try:
+            # Have the data saver save a snapshot of the current data
+            xml_path = self.data_saver.save_xml_tracking_data(folder_path)
+            
+            if xml_path:
+                logging.info(f"XML tracking data snapshot saved to {xml_path}")
+            
+            return xml_path
+            
+        except Exception as e:
+            logging.error(f"Error saving XML tracking data: {e}")
+            return None
+    
+    def get_frame_data_dict(self, frame_number):
+        """
+        Create a tracking data dictionary for the current frame.
+        
+        Args:
+            frame_number (int): Frame number
+            
+        Returns:
+            dict: Frame tracking data dictionary
+        """
+        # Create basic frame data structure
+        frame_data = {
+            "frame_number": frame_number,
+            "tracking_active": self.model.detection_stats["is_tracking"],
+            "left": {},
+            "right": {}
         }
         
-        # Use data saver service to save the XML data
-        return self.data_saver.save_xml_tracking_data(folder_path) 
+        # Process left camera data
+        if self.model.left_mask is not None:
+            # Get HSV mask centroid
+            left_hsv_center = self.roi_computer.compute_mask_centroid(self.model.left_mask)
+            if left_hsv_center:
+                frame_data["left"]["hsv_center"] = {
+                    "x": float(left_hsv_center[0]),
+                    "y": float(left_hsv_center[1])
+                }
+            
+            # Get Hough circle center
+            left_hough_center = None
+            if self.model.left_circles:
+                left_hough_center = (float(self.model.left_circles[0][0]), float(self.model.left_circles[0][1]))
+                frame_data["left"]["hough_center"] = {
+                    "x": left_hough_center[0],
+                    "y": left_hough_center[1],
+                    "radius": float(self.model.left_circles[0][2])
+                }
+            
+            # Get Kalman prediction
+            left_kalman_pred = self.kalman_processor.get_prediction("left")
+            if left_kalman_pred is not None:
+                left_kalman_pos = (float(left_kalman_pred[0]), float(left_kalman_pred[1]))
+                frame_data["left"]["kalman_prediction"] = {
+                    "x": left_kalman_pos[0],
+                    "y": left_kalman_pos[1],
+                    "vx": float(left_kalman_pred[2]),
+                    "vy": float(left_kalman_pred[3])
+                }
+            
+            # Calculate fused coordinates
+            coords_to_fuse = []
+            if left_hsv_center:
+                coords_to_fuse.append(left_hsv_center)
+            if left_hough_center:
+                coords_to_fuse.append(left_hough_center)
+            if left_kalman_pred:
+                coords_to_fuse.append((left_kalman_pred[0], left_kalman_pred[1]))
+            
+            if coords_to_fuse:
+                fused_coords = fuse_coordinates(coords_to_fuse)
+                if fused_coords:
+                    frame_data["left"]["fused_center"] = {
+                        "x": float(fused_coords[0]),
+                        "y": float(fused_coords[1])
+                    }
+                    logging.debug(f"Left fused coordinates: {fused_coords}")
+        
+        # Process right camera data
+        if self.model.right_mask is not None:
+            # Get HSV mask centroid
+            right_hsv_center = self.roi_computer.compute_mask_centroid(self.model.right_mask)
+            if right_hsv_center:
+                frame_data["right"]["hsv_center"] = {
+                    "x": float(right_hsv_center[0]),
+                    "y": float(right_hsv_center[1])
+                }
+            
+            # Get Hough circle center
+            right_hough_center = None
+            if self.model.right_circles:
+                right_hough_center = (float(self.model.right_circles[0][0]), float(self.model.right_circles[0][1]))
+                frame_data["right"]["hough_center"] = {
+                    "x": right_hough_center[0],
+                    "y": right_hough_center[1],
+                    "radius": float(self.model.right_circles[0][2])
+                }
+            
+            # Get Kalman prediction
+            right_kalman_pred = self.kalman_processor.get_prediction("right")
+            if right_kalman_pred is not None:
+                right_kalman_pos = (float(right_kalman_pred[0]), float(right_kalman_pred[1]))
+                frame_data["right"]["kalman_prediction"] = {
+                    "x": right_kalman_pos[0],
+                    "y": right_kalman_pos[1],
+                    "vx": float(right_kalman_pred[2]),
+                    "vy": float(right_kalman_pred[3])
+                }
+            
+            # Calculate fused coordinates
+            coords_to_fuse = []
+            if right_hsv_center:
+                coords_to_fuse.append(right_hsv_center)
+            if right_hough_center:
+                coords_to_fuse.append(right_hough_center)
+            if right_kalman_pred:
+                coords_to_fuse.append((right_kalman_pred[0], right_kalman_pred[1]))
+            
+            if coords_to_fuse:
+                fused_coords = fuse_coordinates(coords_to_fuse)
+                if fused_coords:
+                    frame_data["right"]["fused_center"] = {
+                        "x": float(fused_coords[0]),
+                        "y": float(fused_coords[1])
+                    }
+                    logging.debug(f"Right fused coordinates: {fused_coords}")
+        
+        return frame_data 

@@ -50,7 +50,8 @@ class CircleDetector:
                     hsv_center: Optional[Tuple[int, int]] = None, 
                     kalman_pred: Optional[Tuple[float, float, float, float]] = None, 
                     reset_mode: bool = False, 
-                    side: str = None) -> Tuple[np.ndarray, Optional[List[Tuple[int, int, int]]]]:
+                    side: str = None,
+                    visualize: bool = False) -> Dict[str, Any]:
         """
         Detect circles in an image using Hough Circle Transform.
         
@@ -61,10 +62,15 @@ class CircleDetector:
             kalman_pred: Optional Kalman filter prediction (x, y, vx, vy)
             reset_mode: Whether to ignore previous tracking (reset mode)
             side: Which side the detection is for ('left' or 'right')
+            visualize: Whether to include visualization in the output (deprecated, use visualization module instead)
             
         Returns:
-            Tuple of (image_with_circles, circles_list)
-            where circles_list is a list of (x, y, radius) tuples or None if no circles detected
+            Dictionary containing detection results:
+            - 'circles': List of (x, y, radius) tuples or None
+            - 'roi': ROI dictionary or None
+            - 'hsv_center': HSV center point (x, y) or None
+            - 'kalman_pred': Kalman prediction (x, y, vx, vy) or None
+            - 'image': Output image with visualizations (only if visualize=True)
         """
         try:
             # Convert to grayscale if it's a color image
@@ -73,8 +79,18 @@ class CircleDetector:
             else:
                 gray = img.copy()
             
-            # Create a copy of the original image for drawing
-            output_img = img.copy() if len(img.shape) > 2 else cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+            # Create output data dictionary
+            result = {
+                'circles': None,
+                'roi': None,
+                'hsv_center': hsv_center,
+                'kalman_pred': kalman_pred
+            }
+            
+            # Create a copy of the original image for drawing if visualization is requested
+            output_img = None
+            if visualize:
+                output_img = img.copy() if len(img.shape) > 2 else cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
             
             # Extract ROI if provided
             if roi is not None:
@@ -92,8 +108,8 @@ class CircleDetector:
                 
                 roi_img = gray[y:y+h, x:x+w]
                 
-                # Draw ROI rectangle for visualization
-                cv2.rectangle(output_img, (x, y), (x + w, y + h), (255, 255, 0), 2)
+                # Store adjusted ROI in results
+                result['roi'] = {'x': x, 'y': y, 'width': w, 'height': h}
                 logging.debug(f"Using ROI at x={x}, y={y}, w={w}, h={h}")
             else:
                 roi_img = gray
@@ -125,24 +141,6 @@ class CircleDetector:
                 logging.debug(f"ROI-adaptive parameters: dp={settings['dp']:.2f}, min_dist={settings['min_dist']}, "
                              f"param2={settings['param2']}, roi_ratio={roi_area_ratio:.3f}")
             
-            # Draw HSV center if provided
-            if hsv_center is not None:
-                cv2.circle(output_img, hsv_center, 5, (0, 255, 255), -1)
-                logging.debug(f"Using HSV center at {hsv_center}")
-            
-            # Draw Kalman prediction if provided
-            if kalman_pred is not None:
-                pred_x, pred_y = int(kalman_pred[0]), int(kalman_pred[1])
-                if 0 <= pred_x < output_img.shape[1] and 0 <= pred_y < output_img.shape[0]:
-                    cv2.circle(output_img, (pred_x, pred_y), 5, (255, 0, 255), -1)
-                    # Draw velocity vector
-                    vel_length = np.sqrt(kalman_pred[2]**2 + kalman_pred[3]**2)
-                    if vel_length > 0.5:  # Only draw if significant velocity
-                        end_x = int(pred_x + kalman_pred[2] * 3)  # 3 frames prediction
-                        end_y = int(pred_y + kalman_pred[3] * 3)
-                        cv2.arrowedLine(output_img, (pred_x, pred_y), (end_x, end_y), (255, 0, 255), 2)
-                    logging.debug(f"Using Kalman prediction at ({pred_x}, {pred_y})")
-            
             # Apply Gaussian blur to reduce noise
             blurred = cv2.GaussianBlur(roi_img, (5, 5), 0)
             
@@ -158,9 +156,9 @@ class CircleDetector:
                 maxRadius=settings['max_radius']
             )
             
+            # Process detected circles
             circles_list = None
             
-            # Draw circles if any were found
             if circles is not None:
                 # Convert to integer coordinates
                 circles = np.uint16(np.around(circles))
@@ -168,7 +166,7 @@ class CircleDetector:
                 # Prepare circles list
                 circles_list = []
                 
-                # Draw all circles
+                # Process all circles
                 for i in range(len(circles[0])):
                     circle = circles[0][i]
                     center_x = int(circle[0]) + x
@@ -178,23 +176,57 @@ class CircleDetector:
                     # Store circle data
                     circles_list.append((center_x, center_y, radius))
                     
-                    # Use different colors for the best circle (first one) and others
-                    color = (0, 255, 0) if i == 0 else (255, 0, 0)
-                    
-                    # Draw the circle on the output image
-                    cv2.circle(output_img, (center_x, center_y), radius, color, 2)
-                    cv2.circle(output_img, (center_x, center_y), 2, (0, 0, 255), 3)
-                    
                     if i == 0:
                         logging.debug(f"Detected circle: center=({center_x}, {center_y}), radius={radius}")
                 
                 if side:
                     logging.debug(f"Detected {len(circles_list)} circles on {side} side")
+                
+                # Store circles in result
+                result['circles'] = circles_list
             else:
                 logging.debug(f"No circles detected{' on ' + side if side else ''}")
             
-            return output_img, circles_list
+            # If visualization is requested (legacy behavior), add visualization to result
+            if visualize and output_img is not None:
+                # This is deprecated behavior, use visualization modules instead
+                logging.warning("Visualization in CircleDetector is deprecated. Use visualization modules instead.")
+                
+                # Legacy visualization code left for backward compatibility
+                if result['roi'] is not None:
+                    roi_dict = result['roi']
+                    cv2.rectangle(output_img, 
+                                 (roi_dict['x'], roi_dict['y']), 
+                                 (roi_dict['x'] + roi_dict['width'], roi_dict['y'] + roi_dict['height']), 
+                                 (255, 255, 0), 2)
+                
+                if hsv_center is not None:
+                    cv2.circle(output_img, hsv_center, 5, (0, 255, 255), -1)
+                
+                if kalman_pred is not None:
+                    pred_x, pred_y = int(kalman_pred[0]), int(kalman_pred[1])
+                    if 0 <= pred_x < output_img.shape[1] and 0 <= pred_y < output_img.shape[0]:
+                        cv2.circle(output_img, (pred_x, pred_y), 5, (255, 0, 255), -1)
+                        # Draw velocity vector
+                        vel_length = np.sqrt(kalman_pred[2]**2 + kalman_pred[3]**2)
+                        if vel_length > 0.5:  # Only draw if significant velocity
+                            end_x = int(pred_x + kalman_pred[2] * 3)  # 3 frames prediction
+                            end_y = int(pred_y + kalman_pred[3] * 3)
+                            cv2.arrowedLine(output_img, (pred_x, pred_y), (end_x, end_y), (255, 0, 255), 2)
+                
+                if circles_list:
+                    for i, (center_x, center_y, radius) in enumerate(circles_list):
+                        # Use different colors for the best circle (first one) and others
+                        color = (0, 255, 0) if i == 0 else (255, 0, 0)
+                        
+                        # Draw the circle on the output image
+                        cv2.circle(output_img, (center_x, center_y), radius, color, 2)
+                        cv2.circle(output_img, (center_x, center_y), 2, (0, 0, 255), 3)
+                
+                result['image'] = output_img
+            
+            return result
             
         except Exception as e:
             logging.error(f"Error in circle detection{' on ' + side if side else ''}: {e}")
-            return img, None 
+            return {'circles': None, 'roi': roi, 'hsv_center': hsv_center, 'kalman_pred': kalman_pred} 

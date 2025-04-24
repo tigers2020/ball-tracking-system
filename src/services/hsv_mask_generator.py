@@ -85,7 +85,7 @@ class HSVMaskGenerator:
         """
         self.update_settings(hsv_values)
 
-    def generate_mask(self, img: np.ndarray, roi: Optional[Tuple[int, int, int, int]] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[Tuple[int, int]]]:
+    def generate_mask(self, img: np.ndarray, roi: Optional[Tuple[int, int, int, int]] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[Tuple[int, int]], bool]:
         """
         Generate HSV mask for the given image.
         
@@ -94,9 +94,10 @@ class HSVMaskGenerator:
             roi: Region of interest (x, y, w, h) or None for the whole image
             
         Returns:
-            Tuple of (original_image, masked_image, binary_mask, centroid)
-            where binary_mask is the raw binary mask and
-            centroid is (x, y) or None if no contours found
+            Tuple of (original_image, masked_image, binary_mask, centroid, mask_too_narrow)
+            where binary_mask is the raw binary mask,
+            centroid is (x, y) or None if no contours found, and
+            mask_too_narrow is a boolean flag indicating if the mask ratio is too small
         """
         try:
             # Create a copy of the original image for output
@@ -148,6 +149,16 @@ class HSVMaskGenerator:
                 blur_size = self.hsv_settings.get('blur_size', 5)
                 dilation_iterations = self.hsv_settings.get('dilation_iterations', 1)
                 
+                # Ensure blur_size is a positive odd integer
+                if blur_size <= 0:
+                    # If blur_size is invalid, use default value
+                    blur_size = 5
+                    logging.warning(f"Invalid blur_size {self.hsv_settings.get('blur_size')}, using default value 5")
+                elif blur_size % 2 == 0:
+                    # If even, convert to nearest odd number
+                    blur_size = blur_size + 1
+                    logging.warning(f"Even blur_size {self.hsv_settings.get('blur_size')} converted to odd: {blur_size}")
+                
                 # Create kernel for morphological operations
                 kernel = np.ones((5, 5), np.uint8)
                 
@@ -174,10 +185,13 @@ class HSVMaskGenerator:
             
             # Check mask ratio for sanity (warn if too many or too few white pixels)
             mask_ratio = cv2.countNonZero(mask) / mask.size if mask.size > 0 else 0
+            mask_too_narrow = False
+            
             if mask_ratio > 0.9:
                 logging.warning(f"Suspicious mask ratio {mask_ratio:.3f} (>90%) - HSV range may be too broad")
             elif mask_ratio < 0.0001:
                 logging.warning(f"Suspicious mask ratio {mask_ratio:.6f} (<0.01%) - HSV range may be too narrow")
+                mask_too_narrow = True
             else:
                 logging.debug(f"Mask ratio: {mask_ratio:.3f}, non-zero pixels: {cv2.countNonZero(mask)}")
             
@@ -224,12 +238,12 @@ class HSVMaskGenerator:
             if roi is not None:
                 cv2.rectangle(output_img, (x, y), (x + w, y + h), (255, 255, 0), 2)
             
-            return img, output_img, binary_mask, centroid
+            return img, output_img, binary_mask, centroid, mask_too_narrow
             
         except Exception as e:
             logging.error(f"Error in HSV mask generation: {e}")
             if img is not None:
                 empty_mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8) if len(img.shape) >= 2 else None
-                return img, img, empty_mask, None
+                return img, img, empty_mask, None, False
             else:
-                return None, None, None, None 
+                return None, None, None, None, False 

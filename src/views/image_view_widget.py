@@ -150,49 +150,32 @@ class ImageViewWidget(QWidget):
             return image
         
         try:
-            # Make a copy of the original image
-            result = image.copy()
+            # Import visualization module
+            from src.views.visualization.hsv_visualizer import apply_mask_overlay, draw_centroid
             
             # Ensure mask is the same size as the image
             if mask.shape[:2] != image.shape[:2]:
                 logging.debug(f"Resizing mask from {mask.shape} to match image size {image.shape[:2]}")
                 mask = cv2.resize(mask, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_NEAREST)
             
-            # 1. Apply contour highlighting (red boundary around detected area)
+            # Apply mask using visualization module
+            result = apply_mask_overlay(image, mask, alpha=0.3, mask_color=(0, 0, 255))
+            
+            # Find contours and draw centroid
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            cv2.drawContours(result, contours, -1, (0, 0, 255), 2)  # Red contour with thickness 2
             
-            # 2. Apply colored mask overlay
-            # Create a colored overlay (red with transparency)
-            overlay = np.zeros_like(image, dtype=np.uint8)
+            # Draw contours
+            cv2.drawContours(result, contours, -1, (0, 0, 255), 2)
             
-            # Create a binary mask that matches the image size
-            binary_mask = (mask > 0)
-            if binary_mask.shape[:2] != overlay.shape[:2]:
-                logging.error(f"Mask shape {binary_mask.shape} doesn't match overlay shape {overlay.shape[:2]}")
-                # Safety check - don't apply mismatched mask
-                return result
-                
-            # Apply red color where mask is non-zero
-            overlay[binary_mask] = (0, 0, 255)
-            
-            # Blend the overlay with the contour-highlighted image
-            alpha = 0.3  # Transparency factor
-            cv2.addWeighted(overlay, alpha, result, 1 - alpha, 0, result)
-            
-            # 3. Draw a small square at the center of each contour
+            # Draw centroids for each contour
             for contour in contours:
                 if contour.size > 5:  # Only if contour has enough points
                     M = cv2.moments(contour)
                     if M["m00"] != 0:
                         cX = int(M["m10"] / M["m00"])
                         cY = int(M["m01"] / M["m00"])
-                        # Draw a small white square at the center
-                        square_size = 5
-                        cv2.rectangle(result, 
-                                     (cX - square_size, cY - square_size), 
-                                     (cX + square_size, cY + square_size), 
-                                     (255, 255, 255), -1)  # White filled square
+                        # Draw centroid
+                        result = draw_centroid(result, (cX, cY), radius=5, color=(255, 255, 255))
             
             # Log successful mask application
             logging.debug(f"Mask applied successfully - mask shape: {mask.shape}, non-zero pixels: {np.count_nonzero(mask)}")
@@ -218,8 +201,8 @@ class ImageViewWidget(QWidget):
             return image
         
         try:
-            # Make a copy to avoid modifying the original
-            result = image.copy()
+            # Import visualization module
+            from src.views.visualization.roi_visualizer import draw_roi
             
             # Safely extract ROI information with default values
             try:
@@ -245,27 +228,28 @@ class ImageViewWidget(QWidget):
                 center_x = max(0, min(center_x, img_w - 1))
                 center_y = max(0, min(center_y, img_h - 1))
                 
+                # Update ROI with validated values
+                validated_roi = {
+                    'x': x,
+                    'y': y,
+                    'width': w,
+                    'height': h,
+                    'center_x': center_x,
+                    'center_y': center_y
+                }
+                
             except (ValueError, TypeError) as e:
                 logging.error(f"ROI value conversion error: {e}")
                 return image
             
-            # Draw ROI rectangle
-            cv2.rectangle(
-                result,
-                (x, y),
-                (x + w, y + h),
-                ROI.BORDER_COLOR,
-                ROI.BORDER_THICKNESS
-            )
-            
-            # Draw center marker
-            cv2.drawMarker(
-                result,
-                (center_x, center_y),
-                ROI.CENTER_MARKER_COLOR,
-                cv2.MARKER_CROSS,
-                ROI.CENTER_MARKER_SIZE * 2,
-                ROI.BORDER_THICKNESS
+            # Draw ROI using visualization module
+            result = draw_roi(
+                image, 
+                validated_roi, 
+                color=ROI.BORDER_COLOR, 
+                thickness=ROI.BORDER_THICKNESS, 
+                show_center=True, 
+                center_color=ROI.CENTER_MARKER_COLOR
             )
             
             logging.debug(f"ROI drawn: x={x}, y={y}, w={w}, h={h}, center=({center_x}, {center_y})")

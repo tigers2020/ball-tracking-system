@@ -13,6 +13,8 @@ import time
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 from typing import Dict, List, Tuple, Optional, Any
+from collections import deque
+import threading
 
 
 class DataSaver:
@@ -20,10 +22,113 @@ class DataSaver:
     Service class for saving tracking data to files.
     """
     
-    def __init__(self):
-        """Initialize the data saver."""
+    def __init__(self, queue_size=30, batch_size=5):
+        """
+        Initialize the data saver.
+        
+        Args:
+            queue_size: Maximum number of frames to keep in the queue
+            batch_size: Number of frames to process in a batch
+        """
         self.xml_root = None
         self.current_folder = None
+        
+        # 비동기 저장을 위한 큐 및 설정
+        self.frame_queue = deque(maxlen=queue_size)
+        self.batch_size = batch_size
+        self.queue_lock = threading.Lock()
+        self.save_thread = None
+        self.is_saving = False
+        self.exit_flag = False
+    
+    def enqueue_frame(self, frame_number: int, frame_data: Dict[str, Any], 
+                      folder_path: Optional[str] = None, auto_flush: bool = True):
+        """
+        추가 프레임 데이터를 큐에 추가하고 필요시 저장을 트리거합니다.
+        
+        Args:
+            frame_number: 프레임 번호
+            frame_data: 저장할 프레임 데이터
+            folder_path: 저장 폴더 경로 (없으면 기본값 사용)
+            auto_flush: 큐가 배치 크기에 도달하면 자동으로 저장
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # 큐에 항목 추가
+            with self.queue_lock:
+                self.frame_queue.append((frame_number, frame_data, folder_path))
+                queue_size = len(self.frame_queue)
+            
+            logging.debug(f"Frame {frame_number} added to queue. Queue size: {queue_size}")
+            
+            # 큐가 배치 크기에 도달하면 저장 시작
+            if auto_flush and queue_size >= self.batch_size:
+                self.flush_queue()
+                
+            return True
+        except Exception as e:
+            logging.error(f"Error enqueueing frame data: {e}")
+            return False
+    
+    def flush_queue(self):
+        """
+        큐에 있는 모든 프레임을 비동기적으로 저장합니다.
+        
+        Returns:
+            저장 작업이 시작되었는지 여부
+        """
+        # 이미 저장 중이거나 큐가 비어있으면 건너뜀
+        if self.is_saving or len(self.frame_queue) == 0:
+            return False
+            
+        # 이미 실행 중인 스레드가 있으면 종료를 기다림
+        if self.save_thread and self.save_thread.is_alive():
+            logging.debug("Waiting for previous save thread to complete...")
+            self.save_thread.join(timeout=1.0)
+            
+        # 새 저장 스레드 시작
+        self.is_saving = True
+        self.save_thread = threading.Thread(target=self._process_queue)
+        self.save_thread.daemon = True
+        self.save_thread.start()
+        
+        logging.debug(f"Started queue processing thread with {len(self.frame_queue)} items")
+        return True
+    
+    def _process_queue(self):
+        """
+        큐에서 프레임 데이터를 처리하는 백그라운드 메서드
+        """
+        try:
+            frames_to_process = []
+            
+            # 현재 큐의 모든 항목을 복사하고 큐 비우기
+            with self.queue_lock:
+                frames_to_process = list(self.frame_queue)
+                self.frame_queue.clear()
+            
+            logging.debug(f"Processing {len(frames_to_process)} frames from queue")
+            
+            # 모든 프레임 처리
+            for frame_number, frame_data, folder_path in frames_to_process:
+                if self.exit_flag:
+                    break
+                    
+                # 파일에 저장
+                self.save_json_frame(frame_number, frame_data, folder_path)
+                
+                # XML에 저장 (프레임 이름은 숫자 기반으로 생성)
+                frame_name = f"frame_{frame_number:06d}.png"
+                self.save_frame_to_xml(frame_number, frame_data, frame_name)
+            
+            logging.debug(f"Completed processing {len(frames_to_process)} frames")
+            
+        except Exception as e:
+            logging.error(f"Error processing queue: {e}")
+        finally:
+            self.is_saving = False
     
     def save_json_frame(self, frame_number: int, frame_data: Dict[str, Any], 
                        folder_path: Optional[str] = None) -> Optional[str]:
@@ -329,4 +434,104 @@ class DataSaver:
             
         except Exception as e:
             logging.error(f"Error saving XML tracking data: {e}")
-            return None 
+            return None
+    
+    def cleanup(self, wait=True, timeout=3.0):
+        """
+        Complete all saving tasks and clean up resources.
+        
+        Args:
+            wait: Whether to wait for ongoing save operations to complete
+            timeout: Maximum wait time (seconds)
+            
+        Returns:
+            Task completion status
+        """
+        try:
+            # Process all remaining queue items
+            if len(self.frame_queue) > 0:
+                logging.info(f"Saving remaining {len(self.frame_queue)} items in queue before cleanup")
+                self.flush_queue()
+                
+            # Set exit flag
+            self.exit_flag = True
+            
+            # Wait for save thread to complete
+            if wait and self.save_thread and self.save_thread.is_alive():
+                logging.debug(f"Waiting for save thread to complete (timeout: {timeout}s)")
+                self.save_thread.join(timeout=timeout)
+                
+            # Save XML file
+            if self.xml_root is not None:
+                self.save_xml_tracking_data()
+                
+            return not (self.save_thread and self.save_thread.is_alive())
+            
+        except Exception as e:
+            logging.error(f"Error during DataSaver cleanup: {e}")
+            return False
+    
+    def finalize_xml(self):
+        """
+        Finalize XML file by adding the closing tag and closing the file.
+        Should be called when tracking is complete or application is exiting.
+        """
+        if self.xml_root is None:
+            return
+            
+        try:
+            # Create XML file path
+            folder_path = None
+            if self.current_folder is None:
+                folder_path = os.path.join(os.getcwd(), "tracking_data", "default")
+            else:
+                folder_path = os.path.join(os.getcwd(), "tracking_data", self.current_folder)
+            
+            # Check if folder exists
+            os.makedirs(folder_path, exist_ok=True)
+            
+            # Create output file path
+            output_file = os.path.join(folder_path, "tracking_data.xml")
+            
+            # Check if XML is already saved and if it has a closing tag
+            try:
+                with open(output_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # If closing tag already exists, do nothing
+                if content.strip().endswith('</TrackingData>'):
+                    logging.debug("XML file already has closing tag. No action needed.")
+                    return
+                
+                # Add statistics elements and closing tag
+                with open(output_file, 'a', encoding='utf-8') as f:
+                    # Add statistics information (optional)
+                    if hasattr(self, 'stats') and isinstance(getattr(self, 'stats'), dict):
+                        stats_elem = "  <Statistics"
+                        stats = getattr(self, 'stats')
+                        for key, value in stats.items():
+                            stats_elem += f" {key}=\"{str(value)}\""
+                        stats_elem += "/>\n"
+                        f.write(stats_elem)
+                    
+                    # Add closing tag
+                    f.write("</TrackingData>\n")
+                
+                logging.info("Finalized XML tracking data file")
+                
+            except FileNotFoundError:
+                # Create new file if it doesn't exist
+                logging.warning(f"XML file {output_file} not found. Creating new file with closing tag only.")
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    f.write('<?xml version="1.0" encoding="utf-8"?>\n')
+                    f.write('<TrackingData folder="default" timestamp="' + time.strftime("%Y-%m-%d %H:%M:%S") + '" created="' + str(time.time()) + '">\n')
+                    f.write('</TrackingData>\n')
+                
+                logging.info("Created and finalized new XML tracking data file")
+                
+        except Exception as e:
+            logging.error(f"Error finalizing XML file: {e}")
+            
+        # Remove XML root from memory
+        self.xml_root = None
+        self.current_folder = None 

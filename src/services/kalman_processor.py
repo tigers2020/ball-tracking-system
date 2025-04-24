@@ -156,7 +156,7 @@ class KalmanProcessor:
         except Exception as e:
             logging.error(f"Error setting initial Kalman state for {camera} camera: {e}")
 
-    def update(self, camera: str, x: float, y: float) -> Tuple[float, float, float, float]:
+    def update(self, camera: str, x: float, y: float, dt: float = None) -> Tuple[float, float, float, float]:
         """
         Update the Kalman filter with a new measurement and get updated state.
         
@@ -164,11 +164,35 @@ class KalmanProcessor:
             camera: Camera identifier ('left' or 'right')
             x: Measured x-coordinate
             y: Measured y-coordinate
+            dt: Time since last update (seconds). If None, uses default dt
             
         Returns:
             Tuple of (predicted_x, predicted_y, velocity_x, velocity_y)
         """
         try:
+            # Update transition matrix with actual dt if provided
+            if dt is not None and dt > 0:
+                # Only update if dt is a positive value
+                current_dt = dt
+                
+                # Update the transition matrix with the current dt
+                if camera.lower() == 'left':
+                    self.kalman_left.transitionMatrix = np.array([
+                        [1, 0, current_dt, 0],
+                        [0, 1, 0, current_dt],
+                        [0, 0, self.velocity_decay_factor, 0],
+                        [0, 0, 0, self.velocity_decay_factor]
+                    ], np.float32)
+                    logging.debug(f"Updated left Kalman dt to {current_dt:.4f}")
+                elif camera.lower() == 'right':
+                    self.kalman_right.transitionMatrix = np.array([
+                        [1, 0, current_dt, 0],
+                        [0, 1, 0, current_dt],
+                        [0, 0, self.velocity_decay_factor, 0],
+                        [0, 0, 0, self.velocity_decay_factor]
+                    ], np.float32)
+                    logging.debug(f"Updated right Kalman dt to {current_dt:.4f}")
+            
             # Determine which Kalman filter to use
             if camera.lower() == 'left':
                 kalman = self.kalman_left

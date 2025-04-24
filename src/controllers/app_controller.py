@@ -585,44 +585,35 @@ class AppController(QObject):
     @Slot()
     def _on_app_closing(self):
         """Handle application closing."""
-        logging.info("Application closing. Saving tracking data...")
-        
-        # 1. First The second certainly XML Data directly save (most importance)
         try:
-            # Get folder name based on current image folder
-            folder_name = os.path.basename(self.config_manager.get_last_image_folder())
-            if not folder_name:
-                folder_name = "default"
+            logging.info("Application closing...")
             
-            # Create specific folder for this dataset
-            tracking_folder = os.path.join(self.tracking_data_folder, folder_name)
+            # Stop playback if active
+            if self.playback_timer.isActive():
+                self.playback_timer.stop()
             
-            # Ensure XML tracking is initialized
-            if not hasattr(self.ball_tracking_controller, 'xml_root') or self.ball_tracking_controller.xml_root is None:
-                self.ball_tracking_controller.initialize_xml_tracking(folder_name)
+            # Stop preloading if active
+            if self.preload_thread and self.preload_thread.isRunning():
+                self.preload_thread.requestInterruption()
+                self.preload_thread.wait(1000)  # Wait up to 1 second
             
-            # Force XML data to be saved with final statistics
-            xml_path = self.ball_tracking_controller.save_xml_tracking_data(tracking_folder)
-            if xml_path:
-                logging.info(f"XML tracking data finalized successfully: {xml_path}")
-            else:
-                logging.warning("XML tracking data could not be saved directly.")
+            # Save settings
+            # Any last-minute settings saving happens here
+            
+            # Reset ball tracking controller to ensure all data is saved
+            if self.ball_tracking_controller:
+                logging.info("Cleaning up ball tracking resources...")
+                # 종료 전 XML 파일을 정상적으로 닫기 위해 finalize_xml 호출
+                if hasattr(self.ball_tracking_controller.data_saver, 'finalize_xml'):
+                    logging.info("Finalizing XML tracking data...")
+                    self.ball_tracking_controller.data_saver.finalize_xml()
+                
+                self.ball_tracking_controller.reset_tracking()
+                
+            logging.info("Application cleanup complete")
+            
         except Exception as e:
-            logging.error(f"Error finalizing XML tracking data: {e}")
-        
-        # 2. By backup existing save_all_tracking_data() Call (JSON Paul bag include)
-        try:
-            result = self.save_all_tracking_data()
-            if result:
-                logging.info(f"Additional tracking data backup saved to: {result}")
-        except Exception as e:
-            logging.error(f"Error while saving tracking data backup: {e}")
-        
-        # Clean up resources
-        self.progress_dialog = None
-        self.preload_thread = None
-        self.ball_tracking_dialog = None
-        self.tracking_data_save_enabled = False
-        self.tracking_data_folder = None
-        
-        logging.info("Application closed.") 
+            logging.error(f"Error during application cleanup: {e}")
+            
+        # Final log message
+        logging.info("Application closed") 

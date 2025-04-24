@@ -27,6 +27,10 @@ class TrackingDataModel:
         self.left_mask = None
         self.right_mask = None
         
+        # Mask quality indicators
+        self.left_mask_too_narrow = False
+        self.right_mask_too_narrow = False
+        
         # ROIs
         self.left_roi = None
         self.right_roi = None
@@ -205,6 +209,13 @@ class TrackingDataModel:
     
     def update_detection_stats(self) -> None:
         """Update detection statistics based on current data."""
+        # Check if current frame should be excluded from detection rate calculation
+        # due to HSV range being too narrow (resulting in essentially no valid mask)
+        if self.left_mask_too_narrow and self.right_mask_too_narrow:
+            # If both masks are too narrow, don't count this frame for detection rate
+            logging.debug("Skipping detection rate calculation - both masks have too narrow HSV range")
+            return
+            
         # Increment frame counter
         self.detection_stats["frames_processed"] += 1
         
@@ -233,6 +244,10 @@ class TrackingDataModel:
         # Reset masks
         self.left_mask = None
         self.right_mask = None
+        
+        # Reset mask quality indicators
+        self.left_mask_too_narrow = False
+        self.right_mask_too_narrow = False
         
         # Reset ROIs
         self.left_roi = None
