@@ -9,6 +9,7 @@ This module contains the ConfigManager class for managing application configurat
 import json
 import os
 import logging
+import time
 from pathlib import Path
 
 
@@ -81,6 +82,11 @@ class ConfigManager:
         # Configuration file path
         self.config_file = Path(config_file)
         
+        # Add throttling for save operations
+        self._last_save_time = 0
+        self._save_debounce_interval = 1.0  # minimum seconds between saves
+        self._pending_save = False
+        
         # Load configuration from file if it exists
         self.load_config()
     
@@ -100,15 +106,32 @@ class ConfigManager:
         except Exception as e:
             logging.error(f"Error loading configuration: {e}")
     
-    def save_config(self):
+    def save_config(self, force=False):
         """
         Save the current configuration to the configuration file.
+        Throttles saves to avoid excessive disk I/O.
+        
+        Args:
+            force (bool): If True, ignore throttling and save immediately
         """
-        try:
-            with open(self.config_file, "w") as f:
-                json.dump(self.config, f, indent=4)
+        current_time = time.time()
+        # Mark that we have a pending save
+        self._pending_save = True
+        
+        # Check if we should throttle the save
+        if not force and (current_time - self._last_save_time) < self._save_debounce_interval:
+            logging.debug("Throttling config save, will save soon")
+            return
             
-            logging.info(f"Configuration saved to {self.config_file}")
+        try:
+            # Only save if we have pending changes
+            if self._pending_save:
+                with open(self.config_file, "w") as f:
+                    json.dump(self.config, f, indent=4)
+                
+                self._last_save_time = current_time
+                self._pending_save = False
+                logging.info(f"Configuration saved to {self.config_file}")
         except Exception as e:
             logging.error(f"Error saving configuration: {e}")
     
@@ -211,7 +234,8 @@ class ConfigManager:
         # 업데이트된 설정 적용
         current_settings.update(hsv_settings)
         self.set("hsv_settings", current_settings)
-        self.save_config()
+        # Don't save immediately, allow bundling of changes
+        self.save_config(force=False)
     
     def get_roi_settings(self):
         """
@@ -232,7 +256,8 @@ class ConfigManager:
         current_settings = self.get_roi_settings().copy()
         current_settings.update(roi_settings)
         self.set("roi_settings", current_settings)
-        self.save_config()
+        # Don't save immediately, allow bundling of changes
+        self.save_config(force=False)
     
     def get_hough_circle_settings(self):
         """
@@ -254,7 +279,8 @@ class ConfigManager:
         current_settings = self.get_hough_circle_settings().copy()
         current_settings.update(hough_circle_settings)
         self.set("hough_circle_settings", current_settings)
-        self.save_config()
+        # Don't save immediately, allow bundling of changes
+        self.save_config(force=False)
     
     def get_kalman_settings(self):
         """
@@ -275,7 +301,8 @@ class ConfigManager:
         current_settings = self.get_kalman_settings().copy()
         current_settings.update(kalman_settings)
         self.set("kalman_settings", current_settings)
-        self.save_config()
+        # Don't save immediately, allow bundling of changes
+        self.save_config(force=False)
     
     def get_camera_settings(self):
         """
@@ -296,7 +323,7 @@ class ConfigManager:
         current_settings = self.get_camera_settings().copy()
         current_settings.update(camera_settings)
         self.set("camera_settings", current_settings)
-        self.save_config()
+        self.save_config(force=False)
 
     def validate_roi(self, roi_settings=None, image_width=None, image_height=None):
         """

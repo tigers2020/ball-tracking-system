@@ -54,6 +54,12 @@ class ImageViewWidget(QWidget):
         self.current_roi = None
         self.mask_enabled = True  # Default to True for backward compatibility
         
+        # Cache for optimizing performance
+        self._prev_mask = None
+        self._cached_overlay = None
+        self._frame_id = 0
+        self._log_sample_rate = 30  # Only log once every 30 frames
+        
         # Empty pixmap as placeholder
         self.clear_image()
     
@@ -70,6 +76,9 @@ class ImageViewWidget(QWidget):
         if cv_image is None:
             self.clear_image()
             return False
+        
+        # Increment frame counter for sampling logs
+        self._frame_id += 1
         
         # Store the original CV image
         self.current_cv_image = cv_image.copy()
@@ -110,6 +119,9 @@ class ImageViewWidget(QWidget):
         Returns:
             bool: True if successful, False otherwise
         """
+        # Reset cached mask when receiving a new one
+        self._prev_mask = None
+        self._cached_overlay = None
         self.current_mask = mask
         
         # Reapply image with mask if we have an image
@@ -154,36 +166,54 @@ class ImageViewWidget(QWidget):
         if hasattr(self, 'mask_enabled') and not self.mask_enabled:
             return image
         
+        # Fast-exit if mask unchanged - use cached result
+        if self._prev_mask is not None and mask.size == self._prev_mask.size:
+            if np.array_equal(mask, self._prev_mask) and self._cached_overlay is not None:
+                return self._cached_overlay
+        
         try:
             # Import visualization module
             from src.views.visualization.hsv_visualizer import apply_mask_overlay, draw_centroid
             
             # Ensure mask is the same size as the image
             if mask.shape[:2] != image.shape[:2]:
-                logging.debug(f"Resizing mask from {mask.shape} to match image size {image.shape[:2]}")
+                if self._frame_id % self._log_sample_rate == 0:
+                    logging.debug(f"Resizing mask from {mask.shape} to match image size {image.shape[:2]}")
                 mask = cv2.resize(mask, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_NEAREST)
             
             # Apply mask using visualization module
             result = apply_mask_overlay(image, mask, alpha=0.3, mask_color=(0, 0, 255))
             
-            # Find contours and draw centroid
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # Only find contours and draw them if there are sufficient non-zero pixels
+            non_zero_count = np.count_nonzero(mask)
+            # Skip drawing contours if mask is too sparse (less than 0.01% of pixels)
+            if non_zero_count > mask.size * 0.0001:
+                # Find contours 
+                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                
+                # Draw contours - limit to largest 5 contours if there are many
+                if len(contours) > 5:
+                    contours = sorted(contours, key=cv2.contourArea, reverse=True)[:5]
+                
+                cv2.drawContours(result, contours, -1, (0, 0, 255), 2)
+                
+                # Draw centroids for each contour (limited to largest contours)
+                for contour in contours:
+                    if contour.size > 5:  # Only if contour has enough points
+                        M = cv2.moments(contour)
+                        if M["m00"] != 0:
+                            cX = int(M["m10"] / M["m00"])
+                            cY = int(M["m01"] / M["m00"])
+                            # Draw centroid
+                            result = draw_centroid(result, (cX, cY), radius=5, color=(255, 255, 255))
             
-            # Draw contours
-            cv2.drawContours(result, contours, -1, (0, 0, 255), 2)
+            # Only log occasionally to avoid log flooding
+            if self._frame_id % self._log_sample_rate == 0 and logging.getLogger().isEnabledFor(logging.DEBUG):
+                logging.debug(f"Mask applied - nonzero pixels: {non_zero_count}/{mask.size} ({non_zero_count/mask.size:.4%})")
             
-            # Draw centroids for each contour
-            for contour in contours:
-                if contour.size > 5:  # Only if contour has enough points
-                    M = cv2.moments(contour)
-                    if M["m00"] != 0:
-                        cX = int(M["m10"] / M["m00"])
-                        cY = int(M["m01"] / M["m00"])
-                        # Draw centroid
-                        result = draw_centroid(result, (cX, cY), radius=5, color=(255, 255, 255))
-            
-            # Log successful mask application
-            logging.debug(f"Mask applied successfully - mask shape: {mask.shape}, non-zero pixels: {np.count_nonzero(mask)}")
+            # Cache the result and mask for future reuse
+            self._prev_mask = mask.copy()
+            self._cached_overlay = result.copy()
             
             return result
             
@@ -358,6 +388,9 @@ class StereoImageViewWidget(QWidget):
         self.right_image_view = ImageViewWidget("Right Image")
         self.layout.addWidget(self.right_image_view)
         
+        # Flag to prevent duplicate signal connections
+        self._controller_connected = False
+        
         # Set size policy
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     
@@ -524,4 +557,25 @@ class StereoImageViewWidget(QWidget):
             except Exception as e:
                 logging.error(f"Error saving right ROI image: {e}")
                 
-        return left_success, right_success 
+        return left_success, right_success
+    
+    def connect_ball_tracking_controller(self, controller):
+        """
+        Connect the ball tracking controller to the image view.
+        
+        Args:
+            controller: BallTrackingController instance
+        """
+        # Prevent duplicate connections
+        if hasattr(self, '_controller_connected') and self._controller_connected:
+            logging.info("Ball tracking controller already connected, skipping reconnection")
+            return
+            
+        # Connect controller signals to view
+        controller.mask_updated.connect(self.set_masks)
+        controller.roi_updated.connect(self.set_rois)
+        controller.circles_processed.connect(self.set_images)
+        
+        # Mark as connected
+        self._controller_connected = True
+        logging.info("Connected to ball tracking controller") 

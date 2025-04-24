@@ -6,7 +6,7 @@ Ball Tracking Settings Dialog module.
 This module contains the BallTrackingSettingsDialog class for configuring HSV mask settings.
 """
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSlider, 
     QPushButton, QGroupBox, QGridLayout, QCheckBox
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from src.utils.ui_constants import Layout, ROI
 from src.utils.config_manager import ConfigManager
+import logging
 
 
 class BallTrackingSettingsDialog(QDialog):
@@ -92,6 +93,17 @@ class BallTrackingSettingsDialog(QDialog):
         for key, default_value in kalman_defaults.items():
             if key not in self.kalman_params:
                 self.kalman_params[key] = default_value
+        
+        # Debounce timer for handling slider changes efficiently
+        self._debounce_timer = QTimer(self)
+        self._debounce_timer.setSingleShot(True)
+        self._debounce_timer.timeout.connect(self._update_all_settings)
+        
+        # Flag to track if settings have changed and need saving
+        self._hsv_changed = False
+        self._roi_changed = False
+        self._hough_changed = False
+        self._kalman_changed = False
         
         # Set up UI
         self._setup_ui()
@@ -445,8 +457,14 @@ class BallTrackingSettingsDialog(QDialog):
         elif key == "dilation_iterations":
             self.dilation_value_label.setText(str(value))
         
+        # Mark HSV settings as changed
+        self._hsv_changed = True
+        
         # Emit signal with updated HSV values
         self.hsv_changed.emit(self.hsv_values)
+        
+        # Restart debounce timer
+        self._debounce_timer.start(300)  # 300ms debounce
     
     def _update_roi_value(self, key, value):
         """
@@ -470,8 +488,14 @@ class BallTrackingSettingsDialog(QDialog):
             self.height_slider.setEnabled(value)
             self.auto_center_checkbox.setEnabled(value)
         
+        # Mark ROI settings as changed
+        self._roi_changed = True
+        
         # Emit signal with updated ROI settings
         self.roi_changed.emit(self.roi_settings)
+        
+        # Restart debounce timer
+        self._debounce_timer.start(300)  # 300ms debounce
     
     def _update_hough_value(self, key, value):
         """
@@ -497,8 +521,14 @@ class BallTrackingSettingsDialog(QDialog):
         elif key == "max_radius":
             self.max_radius_value_label.setText(str(value))
         
+        # Mark Hough settings as changed
+        self._hough_changed = True
+        
         # Emit signal with updated Hough Circle parameters
         self.hough_circle_changed.emit(self.hough_circle_params)
+        
+        # Restart debounce timer
+        self._debounce_timer.start(300)  # 300ms debounce
     
     def _update_kalman_value(self, key, value):
         """
@@ -522,8 +552,34 @@ class BallTrackingSettingsDialog(QDialog):
         elif key == "adaptive_measurement_noise":
             self.adaptive_measurement_checkbox.setChecked(value)
         
+        # Mark Kalman settings as changed
+        self._kalman_changed = True
+        
         # Emit signal with updated Kalman filter parameters
         self.kalman_changed.emit(self.kalman_params)
+        
+        # Restart debounce timer
+        self._debounce_timer.start(300)  # 300ms debounce
+    
+    def _update_all_settings(self):
+        """Save all changed settings to configuration after debounce period."""
+        logging.debug("Saving settings after slider changes")
+        
+        if self._hsv_changed:
+            self.config_manager.set_hsv_settings(self.hsv_values)
+            self._hsv_changed = False
+            
+        if self._roi_changed:
+            self.config_manager.set_roi_settings(self.roi_settings)
+            self._roi_changed = False
+            
+        if self._hough_changed:
+            self.config_manager.set_hough_circle_settings(self.hough_circle_params)
+            self._hough_changed = False
+            
+        if self._kalman_changed:
+            self.config_manager.set_kalman_settings(self.kalman_params)
+            self._kalman_changed = False
     
     def get_hsv_values(self):
         """
@@ -685,24 +741,20 @@ class BallTrackingSettingsDialog(QDialog):
         Args:
             event (QCloseEvent): Close event
         """
-        # Save current HSV values to configuration
-        self.config_manager.set_hsv_settings(self.hsv_values)
-        # Save current ROI settings to configuration
-        self.config_manager.set_roi_settings(self.roi_settings)
-        # Save current Hough Circle parameters to configuration
-        self.config_manager.set_hough_circle_settings(self.hough_circle_params)
-        # Save current Kalman filter parameters to configuration
-        self.config_manager.set_kalman_settings(self.kalman_params)
+        # Save current settings to configuration
+        self._save_all_settings()
         super(BallTrackingSettingsDialog, self).closeEvent(event)
         
     def accept(self):
         """Handle dialog accept (OK button)."""
-        # Save current HSV values to configuration
+        # Save current settings to configuration
+        self._save_all_settings()
+        super(BallTrackingSettingsDialog, self).accept()
+        
+    def _save_all_settings(self):
+        """Save all settings to configuration."""
+        logging.info("Saving all settings to configuration")
         self.config_manager.set_hsv_settings(self.hsv_values)
-        # Save current ROI settings to configuration
         self.config_manager.set_roi_settings(self.roi_settings)
-        # Save current Hough Circle parameters to configuration
         self.config_manager.set_hough_circle_settings(self.hough_circle_params)
-        # Save current Kalman filter parameters to configuration
-        self.config_manager.set_kalman_settings(self.kalman_params)
-        super(BallTrackingSettingsDialog, self).accept() 
+        self.config_manager.set_kalman_settings(self.kalman_params) 
