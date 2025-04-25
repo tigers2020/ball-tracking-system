@@ -205,3 +205,46 @@ class XML:
     LEFT_IMAGE_ELEMENT: str = "left_image"
     RIGHT_IMAGE_ELEMENT: str = "right_image"
     PATH_ATTR: str = "path" 
+
+# =============================================
+# Tennis Court Constants
+# =============================================
+
+@dataclass
+class COURT:
+    """Tennis court dimensions and properties (in meters)"""
+    LENGTH: float = 23.77  # Total court length
+    HALF_WIDTH: float = 11.885  # Half court width
+    NET_HEIGHT: float = 0.914  # Height of the net
+    NET_Y: float = 23.77 / 2  # Net position (y-coordinate)
+    SERVICE_LINE_Y: float = 6.40  # Distance from baseline to service line
+    CENTER_SERVICE_LINE_WIDTH: float = 0.05  # Width of center service line
+    BASELINE_WIDTH: float = 0.10  # Width of the baseline
+    SIDELINE_WIDTH: float = 0.05  # Width of the sideline
+    SINGLES_COURT_HALF_WIDTH: float = 4.115  # Half width of singles court
+    INSIDE_EPS: float = 0.05  # 5 cm margin for IN/OUT decisions
+
+# =============================================
+# Game Analysis Constants
+# =============================================
+
+@dataclass
+class ANALYSIS:
+    """Game analysis parameters"""
+    # Bounce detection
+    MIN_BOUNCE_VELOCITY_CHANGE: float = 0.5  # Minimum velocity change for bounce detection (m/s)
+    MAX_GROUND_HEIGHT: float = 0.03  # Maximum height to consider as ground contact (m)
+    MIN_FRAMES_BETWEEN_BOUNCES: int = 3  # Minimum frames between consecutive bounces
+    
+    # Kalman filter 3D
+    PROCESS_NOISE_POS: float = 0.01  # Process noise for position
+    PROCESS_NOISE_VEL: float = 0.1   # Process noise for velocity 
+    MEASUREMENT_NOISE: float = 0.05  # Measurement noise (m)
+    
+    # Visualization
+    BOUNCE_MARKER_SIZE: int = 8  # Size of bounce markers
+    BOUNCE_IN_COLOR: Tuple[int, int, int] = COLOR.GREEN  # Color for IN bounces
+    BOUNCE_OUT_COLOR: Tuple[int, int, int] = COLOR.RED   # Color for OUT bounces
+    TRAJECTORY_COLOR: Tuple[int, int, int] = COLOR.BLUE  # Color for ball trajectory
+    COURT_LINE_COLOR: Tuple[int, int, int] = COLOR.WHITE  # Color for court lines
+    COURT_LINE_THICKNESS: int = 2  # Thickness of court lines 

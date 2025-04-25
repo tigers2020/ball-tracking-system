@@ -186,6 +186,34 @@ class ConfigManager:
         """
         self.config[key] = value
     
+    def get_section(self, section_name, default=None):
+        """
+        Get a configuration section.
+        
+        Args:
+            section_name (str): Name of the configuration section
+            default: Default value if the section doesn't exist
+            
+        Returns:
+            Configuration section dict or default value
+        """
+        return self.config.get(section_name, default)
+        
+    def get_value(self, section, key, default=None):
+        """
+        Get a specific value from a configuration section.
+        
+        Args:
+            section (str): Section name
+            key (str): Key within the section
+            default: Default value if the key or section doesn't exist
+            
+        Returns:
+            Configuration value or default
+        """
+        section_data = self.config.get(section, {})
+        return section_data.get(key, default)
+    
     def set_last_image_folder(self, folder_path):
         """
         Set the last image folder path.

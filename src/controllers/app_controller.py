@@ -9,6 +9,7 @@ This module contains the AppController class which connects the model and view c
 import logging
 import os
 from pathlib import Path
+import time
 
 from PySide6.QtCore import QObject, QTimer, Slot, Signal, Qt, QThread
 from PySide6.QtGui import QPixmap
@@ -18,7 +19,8 @@ from src.models.stereo_image_model import StereoImageModel
 from src.views.main_window import MainWindow
 from src.utils.ui_constants import Messages, Timing
 from src.utils.config_manager import ConfigManager
-from src.controllers.ball_tracking_controller import BallTrackingController
+from src.controllers.ball_tracking_controller import BallTrackingController, TrackingState
+from src.controllers.game_analyzer import GameAnalyzer
 from src.views.ball_tracking_settings_dialog import BallTrackingSettingsDialog
 
 
@@ -121,8 +123,17 @@ class AppController(QObject):
         # Initialize ball tracking controller with the same config manager
         self.ball_tracking_controller = BallTrackingController(self.model, self.config_manager)
         
+        # Initialize game analyzer controller with the same config manager
+        self.game_analyzer = GameAnalyzer(self.config_manager)
+        
+        # Connect ball_tracking_controller to game_analyzer
+        self._connect_ball_tracking_to_game_analyzer()
+        
         # Connect image_view to ball_tracking_controller
         self.view.image_view.connect_ball_tracking_controller(self.ball_tracking_controller)
+        
+        # Connect image_view to game_analyzer
+        self.view.image_view.connect_game_analyzer(self.game_analyzer)
         
         # Initialize ball tracking settings dialog
         self.ball_tracking_dialog = None
@@ -147,6 +158,50 @@ class AppController(QObject):
         # Tracking data save settings
         self.tracking_data_save_enabled = True  # Enable/disable saving
         self.tracking_data_folder = os.path.join(os.getcwd(), "tracking_data")  # Default folder
+    
+    def _connect_ball_tracking_to_game_analyzer(self):
+        """
+        Connect the ball tracking controller to game analyzer for 3D analysis.
+        """
+        # Connect ball tracking 2D detection signals to game analyzer
+        self.ball_tracking_controller.detection_updated.connect(
+            lambda detection_rate, pixel_coords, world_coords: 
+            self._on_ball_detection_updated(detection_rate, pixel_coords, world_coords)
+        )
+        
+        # Connect tracking update signals
+        self.ball_tracking_controller.tracking_updated.connect(
+            lambda x, y, z: self.game_analyzer.on_ball_position_updated(x, y, z, 0, 0, 0, time.time())
+        )
+        
+        # Connect ball tracking controller signals
+        self.ball_tracking_controller.tracking_enabled_changed.connect(
+            lambda enabled: self.view.image_view.playback_controls.ball_tracking_button.setChecked(enabled))
+        self.ball_tracking_controller.tracking_state_changed.connect(
+            lambda state: self.game_analyzer.enable(state == TrackingState.TRACKING or state == TrackingState.TRACKING_LOST))
+        
+        logging.info("Ball tracking controller connected to game analyzer")
+    
+    @Slot(float, tuple, tuple)
+    def _on_ball_detection_updated(self, detection_rate, pixel_coords, world_coords):
+        """
+        Handle ball detection updates from ball tracking controller and pass to game analyzer.
+        
+        Args:
+            detection_rate (float): Detection confidence rate (0-1)
+            pixel_coords (tuple): (x, y) in pixel coordinates
+            world_coords (tuple): (x, y, z) in world coordinates
+        """
+        if pixel_coords and len(pixel_coords) == 2:
+            # We have 2D pixel coordinates from both cameras
+            frame_index = self.model.current_frame_index
+            timestamp = time.time()
+            
+            # Get left and right pixel coordinates
+            left_coords, right_coords = pixel_coords
+            
+            # Pass to game analyzer
+            self.game_analyzer.on_ball_detected(frame_index, timestamp, left_coords, right_coords)
     
     def show(self):
         """Show the main window."""
@@ -648,6 +703,16 @@ class AppController(QObject):
             
             # Save settings
             # Any last-minute settings saving happens here
+            
+            # Reset game analyzer to clean up resources
+            if hasattr(self, 'game_analyzer') and self.game_analyzer:
+                logging.info("Cleaning up game analyzer resources...")
+                self.game_analyzer.reset()
+                
+                # Save any game analysis data if needed
+                if hasattr(self.game_analyzer, 'get_analysis_results'):
+                    analysis_results = self.game_analyzer.get_analysis_results()
+                    logging.info(f"Game analysis results: detected bounces={analysis_results.get('bounce_count', 0)}")
             
             # Reset ball tracking controller to ensure all data is saved
             if self.ball_tracking_controller:

@@ -18,6 +18,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal, Slot
 from typing import Dict, List, Tuple, Optional, Any, Union
 import traceback
+from enum import Enum
 
 from src.models.tracking_data_model import TrackingDataModel
 from src.services.hsv_mask_generator import HSVMaskGenerator
@@ -29,6 +30,14 @@ from src.services.triangulation_service import TriangulationService
 from src.utils.config_manager import ConfigManager
 from src.utils.coord_utils import fuse_coordinates
 from src.utils.constants import HSV, ROI, COLOR
+
+
+class TrackingState(Enum):
+    """Enum representing the state of ball tracking."""
+    TRACKING = 0       # Tracking is active and ball is being detected
+    TRACKING_LOST = 1  # Tracking is active but ball is not detected
+    RESET = 2          # Tracking has been reset
+    DISABLED = 3       # Tracking is disabled
 
 
 class BallTrackingController(QObject):
@@ -44,6 +53,8 @@ class BallTrackingController(QObject):
     circles_processed = Signal(np.ndarray, np.ndarray)  # left_circle_image, right_circle_image
     tracking_updated = Signal(float, float, float)  # x, y, z
     prediction_updated = Signal(str, float, float, float, float)  # camera, x, y, vx, vy
+    tracking_state_changed = Signal(object)  # TrackingState
+    tracking_enabled_changed = Signal(bool)  # enabled flag
     
     def __init__(self, model: Any, config_manager: ConfigManager):
         """
@@ -283,8 +294,13 @@ class BallTrackingController(QObject):
             self.model.tracking_enabled = enabled
         
         # 버튼 상태 업데이트 신호 발생
-        if hasattr(self, 'tracking_enabled_changed'):
-            self.tracking_enabled_changed.emit(enabled)
+        self.tracking_enabled_changed.emit(enabled)
+        
+        # Emit tracking state changed signal
+        if enabled:
+            self.tracking_state_changed.emit(TrackingState.TRACKING)
+        else:
+            self.tracking_state_changed.emit(TrackingState.DISABLED)
         
         # 추적 활성화 시에만 이미지 처리 시작
         if enabled:
@@ -1237,62 +1253,59 @@ class BallTrackingController(QObject):
     
     def reset_tracking(self):
         """
-        Reset all tracking data and filters.
+        Reset the tracking by clearing history and resetting counters.
         """
-        try:
-            # Clean up data saver queue
-            self.data_saver.cleanup()
-            
-            # Reset Kalman filters
+        # Clear coordinate history
+        self._coordinate_history = {
+            'left': [],
+            'right': [],
+            'fused': []
+        }
+        
+        # Reset counters and detection stats
+        self._frames_analyzed = 0
+        self._circles_detected = 0
+        self._last_detection_timestamp = None
+        
+        # Reset kalman filter
+        if hasattr(self, 'kalman_processor') and self.kalman_processor:
             self.kalman_processor.reset()
+        
+        # Reset frame counter
+        self._frame_counter = 0
+        
+        # Clear data model tracking data
+        if hasattr(self.model, 'clear_tracking_data'):
+            self.model.clear_tracking_data()
+        
+        # Reset ROI if dynamic ROI is enabled
+        roi_settings = self.get_roi_settings()
+        if roi_settings.get('dynamic', False):
+            # Reset to default ROIs
+            self.left_roi = None
+            self.right_roi = None
             
-            # Reset model data if method exists
-            if hasattr(self.model, 'reset'):
-                self.model.reset()
-            else:
-                # Basic reset for StereoImageModel
-                if hasattr(self.model, 'left_mask'):
-                    self.model.left_mask = None
-                if hasattr(self.model, 'right_mask'):
-                    self.model.right_mask = None
-                if hasattr(self.model, 'left_roi'):
-                    self.model.left_roi = None
-                if hasattr(self.model, 'right_roi'):
-                    self.model.right_roi = None
-                # Clear cropped images
-                self.model.cropped_images = {
-                    "left": None,
-                    "right": None
-                }
+            if hasattr(self.model, 'left_roi'):
+                self.model.left_roi = None
+            if hasattr(self.model, 'right_roi'):
+                self.model.right_roi = None
+                
+            # Emit ROI updated signal with empty ROIs
+            if hasattr(self, 'roi_updated'):
+                self.roi_updated.emit({}, {})
+        
+        # Reset 3D coordinates
+        self._last_3d_coordinates = None
+        
+        # Save reset state to model
+        if hasattr(self.model, 'set_tracking_reset'):
+            self.model.set_tracking_reset(True)
             
-            # Reset timestamp tracking
-            self.last_update_time = {"left": None, "right": None}
+        # Emit tracking state changed signal
+        self.tracking_state_changed.emit(TrackingState.RESET)
             
-            # Reset detection counters and emit signal
-            self._detection_counter = 0
-            self._frame_counter = 0
-            
-            # Emit detection_updated signal with 0.0 detection rate
-            self.detection_updated.emit(0.0, None, None)
-            
-            logging.info("Ball tracking reset complete")
-            
-        except Exception as e:
-            logging.error(f"Error resetting tracking: {e}")
-            
-        # Return stats if available, or a default value
-        if hasattr(self.model, 'detection_stats'):
-            return self.model.detection_stats
-        else:
-            # Create default stats
-            return {
-                "is_tracking": False,
-                "frames_processed": 0,
-                "frames_detected": 0,
-                "detection_rate": 0.0,
-                "lost_frames": 0
-            }
-
+        logging.info("Ball tracking reset complete")
+    
     def save_coordinate_history(self, filename):
         """
         Save the coordinate history to a JSON file.
