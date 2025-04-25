@@ -3,377 +3,239 @@
 
 """
 Calibration Controller module.
-This module contains the CalibrationController class which serves as the controller for the Court Calibration tab.
+This module contains the CalibrationController class which connects the model and view.
 """
 
-import os
 import logging
-import json
-import time
-from pathlib import Path
-from typing import List, Tuple, Dict, Any, Optional
+import os
+from typing import Optional
 
-from PySide6.QtCore import QObject, Slot, Signal
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtCore import QObject, Slot, QPointF
+from PySide6.QtGui import QPixmap
 
 from src.models.calibration_model import CalibrationModel
-from src.views.calibration_tab import CalibrationTab
-from src.utils.ui_constants import Messages, Calibration
-from src.utils.config_manager import ConfigManager
-
-logger = logging.getLogger(__name__)
+from src.views.calibration_view import CalibrationView
 
 
 class CalibrationController(QObject):
     """
-    Controller class for Court Calibration tab.
-    Manages communication between the CalibrationModel and CalibrationTab.
+    Controller for the calibration feature.
+    Connects the CalibrationModel and CalibrationView.
     """
     
-    # Signal emitted when a status message should be displayed
-    status_updated = Signal(str)
-    
-    def __init__(self, model: CalibrationModel, view: CalibrationTab, config_manager: ConfigManager = None):
+    def __init__(self, model: CalibrationModel, view: CalibrationView):
         """
         Initialize the calibration controller.
         
         Args:
-            model (CalibrationModel): The calibration model
-            view (CalibrationTab): The calibration tab view
-            config_manager (ConfigManager, optional): Configuration manager
+            model (CalibrationModel): Calibration model
+            view (CalibrationView): Calibration view
         """
-        super().__init__()
+        super(CalibrationController, self).__init__()
         
         self.model = model
         self.view = view
         
-        # 뷰에 모델 설정
-        self.view.model = model
-        
-        # Configuration manager
-        self.config_manager = config_manager or ConfigManager()
-        
-        # Current image paths
-        self.left_image_path = ""
-        self.right_image_path = ""
-        
-        # Current image service (will be set by the main controller)
-        self.image_service = None
-        
-        # Connect signals from view
-        self._connect_signals()
-        
-        # Initialize config directory if it doesn't exist
-        self._init_config_dir()
-        
-        # Timestamp for throttling saves
-        self._last_save_time = 0
-    
-    def _connect_signals(self):
-        """Connect signals from view to controller methods."""
-        # Point management signals
+        # Connect view signals to controller slots
         self.view.point_added.connect(self.add_point)
-        self.view.point_updated.connect(self.update_point)
-        self.view.points_cleared.connect(self.clear_points)
-        
-        # Button action signals
+        self.view.point_moved.connect(self.update_point)
         self.view.fine_tune_requested.connect(self.fine_tune)
-        self.view.save_requested.connect(self.save_calibration)
-        self.view.load_requested.connect(self.load_calibration)
+        self.view.save_calibration_requested.connect(self.save_calibration)
+        self.view.load_calibration_requested.connect(self.load_calibration)
+        self.view.clear_points_requested.connect(self.clear_points)
+        self.view.load_images_requested.connect(self.load_images)
         self.view.load_current_frame_requested.connect(self.load_current_frame)
+        
+        # Connect model signals to view update methods
+        self.model.points_changed.connect(self.update_view)
+        self.model.point_updated.connect(self.view.update_point)
+        
+        # Reference to main window or frame provider (to be set by main application)
+        self.main_window = None
+        
+        # Flag to indicate whether we should use the config manager (preferred) or direct file I/O
+        self.use_config_manager = True
     
-    def _init_config_dir(self):
-        """Initialize the configuration directory if it doesn't exist."""
-        config_dir = os.path.dirname(Calibration.CONFIG_FILE)
-        os.makedirs(config_dir, exist_ok=True)
-        logger.debug(f"Initialized config directory: {config_dir}")
-    
-    def _get_current_image_size(self, side: str) -> Optional[Tuple[int, int]]:
+    @Slot(str, QPointF)
+    def add_point(self, side: str, position: QPointF) -> None:
         """
-        Get the size of the currently loaded image.
+        Add a calibration point.
         
         Args:
-            side (str): 'left' or 'right' side
-            
-        Returns:
-            Optional[Tuple[int, int]]: (width, height) or None if no image
+            side (str): 'left' or 'right'
+            position (QPointF): Point position
         """
-        # Get the image path for the specified side
-        image_path = self.left_image_path if side == "left" else self.right_image_path
-        
-        if not image_path or not os.path.exists(image_path):
-            return None
-            
-        # Get image size using OpenCV
-        import cv2
-        img = cv2.imread(image_path)
-        if img is None:
-            return None
-            
-        height, width = img.shape[:2]
-        return (width, height)
+        self.model.add_point(side, position)
     
-    @Slot(str, tuple)
-    def add_point(self, side: str, position: Tuple[float, float]):
-        """
-        Add a calibration point to the specified side.
-        
-        Args:
-            side (str): 'left' or 'right' side
-            position (Tuple[float, float]): (x, y) coordinates
-        """
-        logger.debug(f"Adding point at {position} to {side} side")
-        
-        # Get current image size
-        image_size = self._get_current_image_size(side)
-        if not image_size:
-            logger.error(f"Cannot get image size for {side} side")
-            return
-            
-        width, height = image_size
-        
-        # Normalize screen coordinates to 1080p standard
-        normalized_position = self.model.normalize_points_to_1080p([position], width, height)[0]
-        logger.debug(f"Normalized position: {normalized_position} (original: {position})")
-        
-        # Add point to model using normalized coordinates
-        if self.model.add_point(side, normalized_position):
-            # Get points from model
-            points = self.model.left_pts if side == "left" else self.model.right_pts
-            
-            # Denormalize 1080p coordinates to current screen coordinates for display
-            screen_points = self.model.denormalize_points_from_1080p(points, width, height)
-            
-            # Update display
-            self.view.update_points(side, screen_points)
-            
-            # Show status message
-            self.status_updated.emit(Messages.CALIBRATION_POINTS_ADDED)
-            
-            # Auto-save with throttling
-            self._throttled_save()
-    
-    @Slot(str, int, tuple)
-    def update_point(self, side: str, index: int, position: Tuple[float, float]):
+    @Slot(str, int, QPointF)
+    def update_point(self, side: str, index: int, position: QPointF) -> None:
         """
         Update a calibration point.
         
         Args:
-            side (str): 'left' or 'right' side
-            index (int): Index of point to update
-            position (Tuple[float, float]): New (x, y) coordinates
+            side (str): 'left' or 'right'
+            index (int): Point index
+            position (QPointF): New position
         """
-        logger.debug(f"Updating point {index} to {position} on {side} side")
-        
-        # Get current image size
-        image_size = self._get_current_image_size(side)
-        if not image_size:
-            logger.error(f"Cannot get image size for {side} side")
-            return
-            
-        width, height = image_size
-        
-        # Normalize screen coordinates to 1080p standard
-        normalized_position = self.model.normalize_points_to_1080p([position], width, height)[0]
-        logger.debug(f"Normalized position: {normalized_position} (original: {position})")
-        
-        # Update model with normalized coordinates
-        if self.model.update_point(side, index, normalized_position):
-            # Get points from model
-            points = self.model.left_pts if side == "left" else self.model.right_pts
-            
-            # Denormalize 1080p coordinates to current screen coordinates for display
-            screen_points = self.model.denormalize_points_from_1080p(points, width, height)
-            
-            # Update display
-            self.view.update_points(side, screen_points)
-            
-            # Show status message
-            self.status_updated.emit(Messages.CALIBRATION_POINTS_UPDATED)
-            
-            # Auto-save with throttling
-            self._throttled_save()
-    
-    @Slot(str)
-    def clear_points(self, side=None):
-        """
-        Clear calibration points for the specified side or both sides.
-        
-        Args:
-            side (str, optional): 'left', 'right', or None for both sides
-        """
-        logger.debug(f"Clearing points for {side if side else 'both'} side(s)")
-        
-        # Clear points in model
-        self.model.clear_points(side)
-        
-        # Update view
-        if side is None or side == "left":
-            self.view.update_points("left", self.model.left_pts)
-        
-        if side is None or side == "right":
-            self.view.update_points("right", self.model.right_pts)
-        
-        # Show status message
-        self.status_updated.emit(Messages.CALIBRATION_POINTS_CLEARED)
+        self.model.update_point(side, index, position)
     
     @Slot()
-    def fine_tune(self):
+    def fine_tune(self) -> None:
         """
         Fine-tune calibration points.
-        This is a placeholder that will be implemented in Week 3.
+        This is a placeholder that will be implemented in future versions.
         """
-        logger.debug("Fine-tune requested (placeholder)")
-        self.status_updated.emit(Messages.CALIBRATION_FINE_TUNE_START)
+        # This will be implemented in the future with the ROI cropper, skeletonizer, etc.
+        logging.info("Fine-tune requested - feature not implemented yet")
         
-        # Placeholder for Week 3 implementation
-        self.view.show_info("Fine-tuning will be implemented in Week 3")
-        
-        self.status_updated.emit(Messages.CALIBRATION_FINE_TUNE_COMPLETE)
+        # Show a message in the view
+        # This would be better with a status message system
+        pass
     
-    @Slot()
-    def save_calibration(self):
-        """Save calibration data to config.json using ConfigManager."""
-        logger.debug("Saving calibration data using ConfigManager")
+    @Slot(str)
+    def save_calibration(self, file_path: str) -> None:
+        """
+        Save calibration to file.
         
-        try:
-            # Convert model to dictionary
-            data = self.model.to_dict()
-            
-            # Save to config.json using ConfigManager
-            self.config_manager.set("court_calibration", data)
-            self.config_manager.save_config(force=True)
-            
-            # Show status message
-            self.status_updated.emit(Messages.CALIBRATION_SAVED)
-            self._last_save_time = time.time()
-        except Exception as e:
-            logger.error(f"Error saving calibration data: {e}")
-    
-    @Slot()
-    def load_calibration(self):
-        """Load calibration data from config.json using ConfigManager."""
-        logger.debug("Loading calibration data using ConfigManager")
-        
-        try:
-            # Load calibration data from ConfigManager
-            calibration_data = self.config_manager.get("court_calibration", None)
-            
-            if calibration_data:
-                # Update model
-                if self.model.from_dict(calibration_data):
-                    # Get current image sizes for both left and right
-                    left_size = self._get_current_image_size("left")
-                    right_size = self._get_current_image_size("right")
-                    
-                    # Update left points
-                    if left_size:
-                        left_width, left_height = left_size
-                        # Denormalize 1080p coordinates to current screen resolution
-                        screen_left_pts = self.model.denormalize_points_from_1080p(
-                            self.model.left_pts, left_width, left_height)
-                        self.view.update_points("left", screen_left_pts)
-                    else:
-                        # Use original coordinates if image size is unknown
-                        self.view.update_points("left", self.model.left_pts)
-                    
-                    # Update right points
-                    if right_size:
-                        right_width, right_height = right_size
-                        # Denormalize 1080p coordinates to current screen resolution
-                        screen_right_pts = self.model.denormalize_points_from_1080p(
-                            self.model.right_pts, right_width, right_height)
-                        self.view.update_points("right", screen_right_pts)
-                    else:
-                        # Use original coordinates if image size is unknown
-                        self.view.update_points("right", self.model.right_pts)
-                    
-                    # Show status message
-                    self.status_updated.emit(Messages.CALIBRATION_LOADED)
-                else:
-                    logger.warning("Invalid calibration data format")
+        Args:
+            file_path (str): File path
+        """
+        if self.use_config_manager and self.model.config_manager:
+            # Save using config manager
+            if self.model.save_to_config():
+                logging.info("Calibration saved to config")
             else:
-                logger.warning("No calibration data found in config")
-        except Exception as e:
-            logger.error(f"Error loading calibration data: {e}")
+                logging.error("Failed to save calibration to config")
+        else:
+            # Fall back to direct file saving if no config manager
+            if self.model.save_to_json(file_path):
+                logging.info(f"Calibration saved to {file_path}")
+            else:
+                logging.error(f"Failed to save calibration to {file_path}")
+    
+    @Slot(str)
+    def load_calibration(self, file_path: str) -> None:
+        """
+        Load calibration from file.
+        
+        Args:
+            file_path (str): File path
+        """
+        if self.use_config_manager and self.model.config_manager:
+            # Load using config manager
+            if self.model.load_from_config():
+                logging.info("Calibration loaded from config")
+                
+                # Load images if paths are available
+                if self.model.left_image_path and self.model.right_image_path:
+                    self.load_images(self.model.left_image_path, self.model.right_image_path)
+            else:
+                logging.error("Failed to load calibration from config")
+        else:
+            # Fall back to direct file loading if no config manager
+            if self.model.load_from_json(file_path):
+                logging.info(f"Calibration loaded from {file_path}")
+                
+                # Load images if paths are available
+                if self.model.left_image_path and self.model.right_image_path:
+                    self.load_images(self.model.left_image_path, self.model.right_image_path)
+            else:
+                logging.error(f"Failed to load calibration from {file_path}")
     
     @Slot()
-    def load_current_frame(self):
-        """Load the current frame images for calibration."""
-        logger.debug("Loading current frame images for calibration")
+    def clear_points(self) -> None:
+        """Clear all calibration points."""
+        self.model.clear_points()
+        self.view.clear_points()
+    
+    @Slot(str, str)
+    def load_images(self, left_path: str, right_path: str) -> None:
+        """
+        Load images.
         
-        # Check if image service is available
-        if self.image_service is None:
-            logger.warning("Image service is not available")
+        Args:
+            left_path (str): Path to left image
+            right_path (str): Path to right image
+        """
+        # Check if files exist
+        if not os.path.isfile(left_path) or not os.path.isfile(right_path):
+            logging.error("One or both image files do not exist")
             return
         
+        # Set paths in model
+        self.model.set_image_paths(left_path, right_path)
+        
+        # Load images to view
+        left_pixmap = QPixmap(left_path)
+        right_pixmap = QPixmap(right_path)
+        
+        if left_pixmap.isNull() or right_pixmap.isNull():
+            logging.error("Failed to load one or both images")
+            return
+        
+        # Set image sizes in model for normalized coordinates
+        self.model.set_image_sizes(
+            (left_pixmap.width(), left_pixmap.height()),
+            (right_pixmap.width(), right_pixmap.height())
+        )
+        
+        self.view.set_left_image(left_pixmap)
+        self.view.set_right_image(right_pixmap)
+        
+        logging.info(f"Images loaded: {left_path}, {right_path}")
+    
+    @Slot(str)
+    def update_view(self, side: str) -> None:
+        """
+        Update view when model changes.
+        
+        Args:
+            side (str): 'left' or 'right' side that changed
+        """
+        # This will be implemented to rebuild points when needed
+        # For now, it's a placeholder for future implementation
+        pass
+    
+    @Slot()
+    def load_current_frame(self) -> None:
+        """
+        Load the current frame images from the main application.
+        This method will be triggered when the user clicks the Load Current Frame button.
+        """
+        # Check if we have a reference to the main window
+        if not self.main_window:
+            logging.error("Cannot load current frame: No reference to main window")
+            return
+            
+        # Get current frame images from main window
+        # This assumes the main window has a method to get the current frame images
+        # The implementation might need to be adjusted based on the actual main window structure
         try:
-            # Get current frame images
-            left_image_path, right_image_path = self.image_service.get_current_frame_paths()
-            logger.debug(f"Retrieved paths from image service: left={left_image_path}, right={right_image_path}")
+            # Get current pixmaps from main window (to be implemented)
+            left_pixmap, right_pixmap = self.main_window.get_current_frame_pixmaps()
             
-            if left_image_path and right_image_path:
-                # Set images in view
-                self.set_images(left_image_path, right_image_path)
+            if left_pixmap is None or right_pixmap is None:
+                logging.error("Failed to get current frame images")
+                return
+            
+            # Set image sizes in model for normalized coordinates
+            self.model.set_image_sizes(
+                (left_pixmap.width(), left_pixmap.height()),
+                (right_pixmap.width(), right_pixmap.height())
+            )
                 
-                # Show status message
-                self.status_updated.emit("Current frame images loaded")
-            else:
-                logger.warning("No current frame images available")
-        except Exception as e:
-            logger.error(f"Error loading current frame images: {e}")
-            # Print stack trace for debugging
-            import traceback
-            logger.error(traceback.format_exc())
-    
-    def _throttled_save(self):
-        """Save calibration data with throttling to avoid too frequent I/O."""
-        current_time = time.time()
-        
-        # Only save if enough time has passed since the last save
-        if current_time - self._last_save_time > Calibration.CONFIG_SAVE_COOLDOWN:
-            self.save_calibration()
-    
-    def set_images(self, left_image_path: str, right_image_path: str):
-        """
-        Set the images for calibration.
-        
-        Args:
-            left_image_path (str): Path to the left image
-            right_image_path (str): Path to the right image
-        """
-        self.left_image_path = left_image_path
-        self.right_image_path = right_image_path
-        
-        # Set images in view
-        self.view.set_images(left_image_path, right_image_path)
-        
-        # Update model points in view (to match current resolution)
-        if self.model and (self.model.left_pts or self.model.right_pts):
-            self.load_calibration()
-        
-        logger.debug(f"Set calibration images: {left_image_path}, {right_image_path}")
-    
-    def set_image_service(self, image_service):
-        """
-        Set the image service for accessing current frames.
-        
-        Args:
-            image_service: The image service
-        """
-        self.image_service = image_service
-        logger.info("Image service set for calibration controller")
-        
-        # Verify image service is working
-        if self.image_service is not None:
-            paths = self.image_service.get_current_frame_paths()
-            logger.info(f"Image service paths: {paths}")
-        else:
-            logger.warning("Image service is None")
-    
-    def initialize(self):
-        """Initialize the controller, typically after all components are set up."""
-        # Try to load existing calibration data
-        self.load_calibration()
+            # Set the images in the view
+            self.view.set_left_image(left_pixmap)
+            self.view.set_right_image(right_pixmap)
             
-        logger.debug("Calibration controller initialized") 
+            # Set image paths to None or to actual paths if available
+            frame_info = self.main_window.get_current_frame_info()
+            if frame_info:
+                self.model.set_image_paths(
+                    frame_info.get('left_path', None),
+                    frame_info.get('right_path', None)
+                )
+            
+            logging.info("Current frame images loaded")
+        except Exception as e:
+            logging.error(f"Error loading current frame images: {str(e)}") 

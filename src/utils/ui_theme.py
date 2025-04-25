@@ -101,36 +101,6 @@ class StyleManager:
         """
 
     @staticmethod
-    def get_calibration_button_style():
-        """Returns the style for calibration buttons"""
-        return f"""
-        QPushButton {{
-            background-color: {Colors.BUTTON_BACKGROUND.name()};
-            color: {Colors.TEXT.name()};
-            border: 1px solid {Colors.BORDER.name()};
-            border-radius: 3px;
-            padding: 5px 10px;
-            min-width: 80px;
-        }}
-        QPushButton:hover {{
-            background-color: {Colors.BUTTON_HOVER.name()};
-        }}
-        QPushButton:pressed {{
-            background-color: {Colors.BUTTON_PRESSED.name()};
-        }}
-        QPushButton[class="primary"] {{
-            background-color: {Colors.ACCENT.name()};
-        }}
-        QPushButton[class="primary"]:hover {{
-            background-color: QColor({Colors.ACCENT.red()}, {Colors.ACCENT.green()}, {Colors.ACCENT.blue()}, 220);
-        }}
-        QPushButton:disabled {{
-            background-color: {Colors.SECONDARY.name()};
-            color: {Colors.TEXT_SECONDARY.name()};
-        }}
-        """
-
-    @staticmethod
     def get_toolbar_style():
         """Returns the style for toolbars"""
         return f"""
@@ -246,69 +216,6 @@ class StyleManager:
         }}
         """
 
-    @staticmethod
-    def get_graphics_view_style():
-        """Returns the style for QGraphicsView"""
-        return f"""
-        QGraphicsView {{
-            background-color: {Colors.SECONDARY.name()};
-            border: 1px solid {Colors.BORDER.name()};
-            border-radius: 3px;
-        }}
-        """
-
-    @staticmethod
-    def get_tab_widget_style():
-        """Returns the style for QTabWidget"""
-        return f"""
-        QTabWidget::pane {{
-            border: 1px solid {Colors.BORDER.name()};
-            background: {Colors.BACKGROUND.name()};
-        }}
-        QTabWidget::tab-bar {{
-            left: 5px;
-        }}
-        QTabBar::tab {{
-            background: {Colors.PRIMARY.name()};
-            color: {Colors.TEXT.name()};
-            border: 1px solid {Colors.BORDER.name()};
-            border-bottom-color: {Colors.BORDER.name()};
-            border-top-left-radius: 4px;
-            border-top-right-radius: 4px;
-            min-width: 8ex;
-            padding: 6px 10px;
-        }}
-        QTabBar::tab:selected, QTabBar::tab:hover {{
-            background: {Colors.ACCENT.name()};
-        }}
-        QTabBar::tab:selected {{
-            border-color: {Colors.BORDER.name()};
-            border-bottom-color: {Colors.ACCENT.name()};
-        }}
-        QTabBar::tab:!selected {{
-            margin-top: 2px;
-        }}
-        """
-
-    @staticmethod
-    def get_group_box_style():
-        """Returns the style for QGroupBox"""
-        return f"""
-        QGroupBox {{
-            background-color: {Colors.PRIMARY.name()};
-            border: 1px solid {Colors.BORDER.name()};
-            border-radius: 5px;
-            margin-top: 10px;
-            font-weight: bold;
-        }}
-        QGroupBox::title {{
-            subcontrol-origin: margin;
-            subcontrol-position: top left;
-            padding: 0 5px;
-            color: {Colors.TEXT.name()};
-        }}
-        """
-
 
 class ThemeManager:
     """Manages the application theme"""
@@ -328,16 +235,12 @@ class ThemeManager:
         style_sheet = "\n".join([
             StyleManager.get_main_window_style(),
             StyleManager.get_button_style(),
-            StyleManager.get_calibration_button_style(),
             StyleManager.get_toolbar_style(),
             StyleManager.get_menu_style(),
             StyleManager.get_slider_style(),
             StyleManager.get_label_style(),
             StyleManager.get_status_bar_style(),
             StyleManager.get_progress_dialog_style(),
-            StyleManager.get_graphics_view_style(),
-            StyleManager.get_tab_widget_style(),
-            StyleManager.get_group_box_style(),
         ])
         
         app.setStyleSheet(style_sheet)

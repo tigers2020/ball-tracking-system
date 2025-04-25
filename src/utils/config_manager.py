@@ -81,6 +81,11 @@ class ConfigManager:
                 "sensor_height": 24.0,
                 "principal_point_x": 320.0,
                 "principal_point_y": 240.0
+            },
+            "calibration_points": {
+                "left": [],
+                "right": [],
+                "calib_ver": 1.0
             }
         }
         
@@ -407,4 +412,153 @@ class ConfigManager:
         # Apply validated settings
         self.set_roi_settings(validated_settings)
         
-        return validated_settings 
+        return validated_settings
+    
+    def set_camera_settings_with_validation(self, camera_settings):
+        """
+        Validate and set the camera settings.
+        
+        Args:
+            camera_settings (dict): Camera settings
+        
+        Returns:
+            dict: The validated and applied camera settings
+        """
+        # Apply validated settings
+        self.set_camera_settings(camera_settings)
+        
+        return camera_settings
+    
+    def get_calibration_points(self):
+        """
+        Get the calibration points.
+        
+        Returns:
+            dict: Calibration points data with 'left' and 'right' lists of vector coordinates
+        """
+        # Try to get from 'calibration_points' first (new structure)
+        calibration_data = self.get("calibration_points", None)
+        logging.debug(f"Initial calibration_data: {calibration_data is not None}")
+        
+        # If not found, try 'court_calibration.points' (old structure in config.json)
+        if not calibration_data:
+            court_calibration = self.get("court_calibration", None)
+            if court_calibration and "points" in court_calibration:
+                calibration_data = court_calibration["points"]
+                # Include version if available
+                if "calib_ver" in court_calibration:
+                    calibration_data["calib_ver"] = court_calibration["calib_ver"]
+                logging.debug("Using calibration data from court_calibration.points")
+        
+        # If still not found, try 'points' (another possible old structure)
+        if not calibration_data:
+            calibration_data = self.get("points", None)
+            if calibration_data:
+                logging.debug("Using calibration data from points")
+        
+        # If no calibration data found in any format, return default empty structure
+        if not calibration_data:
+            calibration_data = {
+                "left": [],
+                "right": [],
+                "calib_ver": 1.0
+            }
+            logging.debug("No calibration data found, using default empty structure")
+        
+        # Log the state of the data
+        if calibration_data:
+            logging.debug(f"Calibration data has left points: {len(calibration_data.get('left', []))}, right points: {len(calibration_data.get('right', []))}")
+            
+        # Ensure we have both left and right arrays
+        if "left" not in calibration_data:
+            calibration_data["left"] = []
+        if "right" not in calibration_data:
+            calibration_data["right"] = []
+        if "calib_ver" not in calibration_data:
+            calibration_data["calib_ver"] = 1.0
+        
+        # Migrate from old array format [x, y] to object format {"x": x, "y": y}
+        for side in ["left", "right"]:
+            if side in calibration_data:
+                for i, point in enumerate(calibration_data[side]):
+                    if isinstance(point, list) and len(point) >= 2:
+                        # Convert [x, y] to {"x": x, "y": y}
+                        calibration_data[side][i] = {"x": point[0], "y": point[1]}
+                        logging.debug(f"Converted point format for {side}[{i}]")
+        
+        # Additional check to handle the case where points exist but are incorrectly formatted
+        # This could happen if the config file is manually edited
+        if "left" in calibration_data and calibration_data["left"] is None:
+            calibration_data["left"] = []
+            logging.warning("Left calibration points were None, initialized to empty list")
+        if "right" in calibration_data and calibration_data["right"] is None:
+            calibration_data["right"] = []
+            logging.warning("Right calibration points were None, initialized to empty list")
+            
+        # Clone the data to avoid reference issues
+        result = {
+            "left": list(calibration_data.get("left", [])),
+            "right": list(calibration_data.get("right", [])),
+            "calib_ver": calibration_data.get("calib_ver", 1.0)
+        }
+        
+        # Include image size and path information if available
+        if "left_image_size" in calibration_data:
+            result["left_image_size"] = calibration_data["left_image_size"]
+        if "right_image_size" in calibration_data:
+            result["right_image_size"] = calibration_data["right_image_size"]
+        if "left_image_path" in calibration_data:
+            result["left_image_path"] = calibration_data["left_image_path"]
+        if "right_image_path" in calibration_data:
+            result["right_image_path"] = calibration_data["right_image_path"]
+            
+        return result
+    
+    def set_calibration_points(self, calibration_data):
+        """
+        Set the calibration points.
+        
+        Args:
+            calibration_data (dict): Calibration points data with 'left' and 'right' lists
+                of vector coordinates and optional 'calib_ver'
+        """
+        # Ensure we have the minimum required structure
+        if not isinstance(calibration_data, dict):
+            logging.error("Invalid calibration data format. Must be a dictionary.")
+            return
+            
+        # Ensure 'left' and 'right' keys are present and are lists
+        if "left" not in calibration_data or not isinstance(calibration_data["left"], list):
+            calibration_data["left"] = []
+        if "right" not in calibration_data or not isinstance(calibration_data["right"], list):
+            calibration_data["right"] = []
+            
+        # Add version if not present
+        if "calib_ver" not in calibration_data:
+            calibration_data["calib_ver"] = 1.0
+            
+        # Store in the new format
+        self.set("calibration_points", calibration_data)
+        
+        # Save config
+        self.save_config()
+        
+    def get_left_calibration_points(self):
+        """
+        Get the left calibration points.
+        
+        Returns:
+            list: List of vector coordinates for left camera
+        """
+        calibration_data = self.get_calibration_points()
+        return calibration_data.get("left", [])
+        
+    def get_right_calibration_points(self):
+        """
+        Get the right calibration points.
+        
+        Returns:
+            list: List of vector coordinates for right camera
+        """
+        calibration_data = self.get_calibration_points()
+        return calibration_data.get("right", []) 

@@ -73,18 +73,6 @@ class Messages:
     PLAYBACK_PAUSED = "Playback paused"
     PLAYBACK_STOPPED = "Playback stopped"
     READY = "Ready"
-    # Calibration tab messages
-    CALIBRATION_POINTS_ADDED = "Calibration point added"
-    CALIBRATION_POINTS_UPDATED = "Calibration point updated"
-    CALIBRATION_POINTS_CLEARED = "Calibration points cleared"
-    CALIBRATION_SAVED = "Calibration saved"
-    CALIBRATION_LOADED = "Calibration loaded"
-    CALIBRATION_FINE_TUNE_START = "Starting fine-tune process..."
-    CALIBRATION_FINE_TUNE_COMPLETE = "Fine-tune complete"
-    CALIBRATION_FINE_TUNE_ERROR = "Error during fine-tune process"
-    ROI_CROPPING_ERROR = "Error cropping ROI"
-    SKELETONIZE_ERROR = "Error during skeletonization"
-    INTERSECTION_ERROR = "Error finding intersection points"
 
 
 class Icons:
@@ -101,11 +89,6 @@ class Icons:
     SETTINGS = os.path.join(ICONS_DIR, "check.svg")  # Using check.svg as a substitute
     OPEN = os.path.join(ICONS_DIR, "check.svg")      # Using check.svg as a substitute
     EXIT = os.path.join(ICONS_DIR, "stop.svg") 
-    # Calibration icons
-    SAVE = os.path.join(ICONS_DIR, "check.svg")      # Using check.svg as a substitute
-    LOAD = os.path.join(ICONS_DIR, "check.svg")      # Using check.svg as a substitute
-    CLEAR = os.path.join(ICONS_DIR, "stop.svg")      # Using stop.svg as a substitute
-    FINE_TUNE = os.path.join(ICONS_DIR, "check.svg") # Using check.svg as a substitute
 
 
 class ROI:
@@ -121,28 +104,19 @@ class ROI:
     CENTER_MARKER_COLOR = (255, 255, 255)  # BGR format (White)
 
 
-class Calibration:
-    """Calibration constants"""
+class CalibrationTab:
+    """Calibration tab constants"""
     POINT_RADIUS = 5
-    ORIGINAL_POINT_COLOR = (255, 0, 0)  # RGB format (Red)
-    ADJUSTED_POINT_COLOR = (0, 255, 0)  # RGB format (Green)
-    POINT_LABEL_OFFSET = (10, 10)
-    LINE_COLOR = (0, 0, 255)  # RGB format (Blue)
+    POINT_COLOR_ORIGINAL = (255, 0, 0)  # Red
+    POINT_COLOR_FINE_TUNED = (0, 255, 0)  # Green
+    LINE_COLOR = (0, 0, 255)  # Blue
     LINE_WIDTH = 1
+    ROI_SIZE_FACTOR = 2.5
+    ROI_MIN_SIZE = 40
+    MAX_POINTS = 14
+    BUTTON_WIDTH = 120
+    BUTTON_HEIGHT = 30
+    GRID_SPACING = 5
+    AUTO_SAVE_COOLDOWN = 2.0  # seconds
     Z_VALUE_ORIGINAL = 1.0
-    Z_VALUE_ADJUSTED = 0.0
-    
-    # Fine-tuning parameters
-    ROI_SIZE_MIN = 40  # Minimum ROI size in pixels
-    ROI_SIZE_FACTOR = 2.5  # Factor to multiply radius by for ROI size
-    
-    # Hough transform parameters
-    HOUGH_THRESHOLD_FACTOR = 0.005  # Threshold as fraction of ROI area
-    HOUGH_MIN_LINE_LENGTH_FACTOR = 0.5  # MinLineLength as fraction of ROI size
-    HOUGH_MAX_LINE_GAP_FACTOR = 0.167  # MaxLineGap as fraction of ROI size (1/6)
-    
-    # File path for configuration
-    CONFIG_FILE = os.path.join(ROOT_DIR, "config", "calibration.json")
-    
-    # Configuration save cooldown time (seconds)
-    CONFIG_SAVE_COOLDOWN = 2.0 
+    Z_VALUE_FINE_TUNED = 0.0 

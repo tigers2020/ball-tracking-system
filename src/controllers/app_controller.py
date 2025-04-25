@@ -20,8 +20,6 @@ from src.utils.ui_constants import Messages, Timing
 from src.utils.config_manager import ConfigManager
 from src.controllers.ball_tracking_controller import BallTrackingController
 from src.views.ball_tracking_settings_dialog import BallTrackingSettingsDialog
-from src.services.image_service import ImageService
-from src.services.service_manager import ServiceManager
 
 
 class FrameLoaderThread(QThread):
@@ -67,13 +65,6 @@ class AppController(QObject):
         
         # Create configuration manager
         self.config_manager = ConfigManager()
-        
-        # Initialize ImageService first
-        self.image_service = ImageService()
-        
-        # Register ImageService with ServiceManager
-        service_manager = ServiceManager()
-        service_manager.register_service("image_service", self.image_service)
         
         # Create model and view
         self.model = StereoImageModel()
@@ -139,7 +130,7 @@ class AppController(QObject):
         # Connect ball tracking button
         self.view.image_view.playback_controls.ball_tracking_clicked.connect(self._on_ball_tracking_button_clicked)
         
-        # Disable ball tracking button (initial state)
+        # 볼 트래킹 버튼 비활성화 (초기 상태)
         self.view.image_view.playback_controls.ball_tracking_button.setEnabled(False)
         
         # Connect ball_tracking signals to view
@@ -153,11 +144,6 @@ class AppController(QObject):
     
     def show(self):
         """Show the main window."""
-        # Connect ImageService to CalibrationController after MainWindow is fully initialized
-        if hasattr(self.view, 'calibration_controller'):
-            self.view.calibration_controller.set_image_service(self.image_service)
-            logging.info("Connected ImageService to CalibrationController")
-        
         self.view.show()
         
         # Load last folder if available
@@ -224,7 +210,7 @@ class AppController(QObject):
             self.view.image_view.playback_controls.set_total_frames(total_frames)
             self.view.image_view.enable_controls(True)
             
-            # Enable ball tracking button now that frames are loaded
+            # 현재 프레임이 로드되었으므로 볼 트래킹 버튼 활성화
             self.view.image_view.playback_controls.ball_tracking_button.setEnabled(True)
             
             # Initialize XML tracking for the current folder
@@ -235,17 +221,11 @@ class AppController(QObject):
             
             # Load the first frame
             self.model.set_current_frame_index(0)
-            
-            # Set initial frame paths to ImageService
-            first_frame = self.model.get_current_frame()
-            if first_frame and hasattr(first_frame, 'left_image_path') and hasattr(first_frame, 'right_image_path'):
-                self.image_service.set_current_frame_paths(first_frame.left_image_path, first_frame.right_image_path)
-                logging.info("Set initial frame paths to ImageService")
         else:
             self.view.update_status(Messages.NO_IMAGES_FOUND)
             self.view.show_warning_message(Messages.NO_IMAGES_FOUND)
             
-            # Keep ball tracking button disabled if no images
+            # 이미지가 없으면 볼 트래킹 버튼 비활성화 유지
             self.view.image_view.playback_controls.ball_tracking_button.setEnabled(False)
     
     @Slot(int)
@@ -265,10 +245,6 @@ class AppController(QObject):
             right_image = frame.get_right_image()
             
             self.view.image_view.set_images(left_image, right_image)
-            
-            # Update ImageService with current frame paths
-            if hasattr(frame, 'left_image_path') and hasattr(frame, 'right_image_path'):
-                self.image_service.set_current_frame_paths(frame.left_image_path, frame.right_image_path)
             
             # Update ball tracking controller with new images
             if self.ball_tracking_controller.is_enabled:
@@ -529,17 +505,17 @@ class AppController(QObject):
     @Slot()
     def _on_ball_tracking_button_clicked(self):
         """Handle ball tracking button click."""
-        # Check if current image is loaded
+        # 현재 이미지가 로드되었는지 확인
         current_frame = self.model.get_current_frame()
         if not current_frame:
-            self.view.show_warning_message("Please load images first.")
+            self.view.show_warning_message("이미지를 먼저 로드해주세요.")
             return
             
         left_image = current_frame.get_left_image()
         right_image = current_frame.get_right_image()
         
         if left_image is None and right_image is None:
-            self.view.show_warning_message("Image loading is not complete. Please try again later.")
+            self.view.show_warning_message("이미지 로딩이 완료되지 않았습니다. 잠시 후 다시 시도해주세요.")
             return
             
         # Create dialog if it doesn't exist
