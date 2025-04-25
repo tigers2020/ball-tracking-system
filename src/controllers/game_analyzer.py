@@ -24,6 +24,7 @@ class TrackingData:
     """Data class for 3D tracking data."""
     frame_index: int
     timestamp: float
+    detection_rate: float
     position_2d_left: Optional[Tuple[float, float]]
     position_2d_right: Optional[Tuple[float, float]]
     position_3d: Optional[np.ndarray]
@@ -182,14 +183,15 @@ class GameAnalyzer(QObject):
             
         return success
         
-    @Slot(int, float, object, object)
-    def on_ball_detected(self, frame_index, timestamp, left_point, right_point):
+    @Slot(int, float, float, object, object)
+    def on_ball_detected(self, frame_index, timestamp, detection_rate, left_point, right_point):
         """
         Handle ball detection events from BallTrackingController.
         
         Args:
             frame_index: Frame index
             timestamp: Timestamp in seconds
+            detection_rate: Detection confidence rate (0-1)
             left_point: (x, y) coordinates in left image, or None
             right_point: (x, y) coordinates in right image, or None
         """
@@ -202,12 +204,13 @@ class GameAnalyzer(QObject):
         
         # Process 2D detections if both points are available
         if left_point is not None and right_point is not None:
-            self._process_detections(frame_index, timestamp, left_point, right_point)
+            self._process_detections(frame_index, timestamp, detection_rate, left_point, right_point)
         else:
             # If points are missing, add invalid tracking data to maintain continuity
             tracking_data = TrackingData(
                 frame_index=frame_index,
                 timestamp=timestamp,
+                detection_rate=detection_rate,
                 position_2d_left=left_point,
                 position_2d_right=right_point,
                 position_3d=None,
@@ -218,13 +221,14 @@ class GameAnalyzer(QObject):
             
             logging.debug(f"Skipping frame {frame_index}: missing detection")
             
-    def _process_detections(self, frame_index, timestamp, left_point, right_point):
+    def _process_detections(self, frame_index, timestamp, detection_rate, left_point, right_point):
         """
         Process ball detections in both cameras.
         
         Args:
             frame_index: Frame index
             timestamp: Timestamp in seconds
+            detection_rate: Detection confidence rate (0-1)
             left_point: (x, y) coordinates in left image
             right_point: (x, y) coordinates in right image
         """
@@ -255,6 +259,7 @@ class GameAnalyzer(QObject):
         tracking_data = TrackingData(
             frame_index=frame_index,
             timestamp=timestamp,
+            detection_rate=detection_rate,
             position_2d_left=left_point,
             position_2d_right=right_point,
             position_3d=position_filtered,

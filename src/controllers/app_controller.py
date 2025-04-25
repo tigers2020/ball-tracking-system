@@ -201,7 +201,7 @@ class AppController(QObject):
             left_coords, right_coords = pixel_coords
             
             # Pass to game analyzer
-            self.game_analyzer.on_ball_detected(frame_index, timestamp, left_coords, right_coords)
+            self.game_analyzer.on_ball_detected(frame_index, timestamp, detection_rate, left_coords, right_coords)
     
     def show(self):
         """Show the main window."""
