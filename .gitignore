@@ -72,7 +72,6 @@ target/
 cache/
 exports/
 *.log
-config.json
 frames_info.xml
 
 # Windows
@@ -104,3 +103,6 @@ Icon
 *.qmlc
 *.jsc
 *_qmlcache.qrc
+
+
+debug_test_*.png
