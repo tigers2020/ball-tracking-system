@@ -31,26 +31,33 @@ class CalibrationModel:
         self.right_image_width = 0
         self.right_image_height = 0
 
-    def add_point(self, side: str, point: tuple[float, float]) -> None:
+    def add_point(self, side: str, point: tuple[float, float]) -> int:
         """
         Add a calibration point to the specified side.
 
         Args:
             side (str): 'left' or 'right'
             point (tuple[float, float]): (x, y) coordinates
+            
+        Returns:
+            int: Index of the added point
         """
         if side == 'left':
             # Only add if we haven't reached the maximum
             if len(self.left_pts) < self.MAX_POINTS:
                 self.left_pts.append(point)
+                return len(self.left_pts) - 1
             else:
                 logger.warning(f"Maximum number of points ({self.MAX_POINTS}) reached for left side. Point not added.")
+                return -1
         elif side == 'right':
             # Only add if we haven't reached the maximum
             if len(self.right_pts) < self.MAX_POINTS:
                 self.right_pts.append(point)
+                return len(self.right_pts) - 1
             else:
                 logger.warning(f"Maximum number of points ({self.MAX_POINTS}) reached for right side. Point not added.")
+                return -1
         else:
             raise ValueError(f"Invalid side: {side}")
 

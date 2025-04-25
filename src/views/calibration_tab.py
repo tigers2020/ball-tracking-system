@@ -116,6 +116,16 @@ class CalibrationTab(QWidget):
         # Initialize grid lines
         self.left_grid_lines: List[QGraphicsPathItem] = []
         self.right_grid_lines: List[QGraphicsPathItem] = []
+        
+        # Initialize image pixmaps
+        self.left_pixmap = None
+        self.right_pixmap = None
+        
+        # Initialize image dimensions
+        self.left_image_width = 0
+        self.left_image_height = 0
+        self.right_image_width = 0
+        self.right_image_height = 0
     
     def _setup_ui(self):
         """Set up the user interface."""
@@ -229,6 +239,49 @@ class CalibrationTab(QWidget):
             # Emit signal for the new point
             logger.debug(f"Emitting point_added signal: {side}, {x}, {y}")
             self.point_added.emit(side, x, y)
+    
+    def add_point(self, side: str, point_id: int, scene_x: float, scene_y: float):
+        """
+        Add a calibration point to the specified view.
+        
+        Args:
+            side (str): 'left' or 'right'
+            point_id (int): Point identifier
+            scene_x (float): X-coordinate in scene coordinates
+            scene_y (float): Y-coordinate in scene coordinates
+        """
+        point = CalibrationPoint(scene_x, scene_y, point_id)
+        
+        if side == 'left':
+            self.left_scene.addItem(point)
+            self.left_points[point_id] = point
+        elif side == 'right':
+            self.right_scene.addItem(point)
+            self.right_points[point_id] = point
+        else:
+            logger.error(f"Invalid side: {side}")
+            return
+
+    def update_point(self, side: str, point_id: int, scene_x: float, scene_y: float):
+        """
+        Update an existing calibration point's position.
+        
+        Args:
+            side (str): 'left' or 'right'
+            point_id (int): Point identifier
+            scene_x (float): New X-coordinate in scene coordinates
+            scene_y (float): New Y-coordinate in scene coordinates
+        """
+        if side == 'left' and point_id in self.left_points:
+            point = self.left_points[point_id]
+            # Update position, accounting for point radius
+            point.setPos(scene_x - point.radius, scene_y - point.radius)
+        elif side == 'right' and point_id in self.right_points:
+            point = self.right_points[point_id]
+            # Update position, accounting for point radius
+            point.setPos(scene_x - point.radius, scene_y - point.radius)
+        else:
+            logger.error(f"Invalid side or point_id not found: {side}, {point_id}")
     
     def add_point_item(self, side: str, x: float, y: float, index: int):
         """
@@ -443,6 +496,18 @@ class CalibrationTab(QWidget):
         self.right_grid_lines.clear()
         self.left_roi_overlay = None
         self.right_roi_overlay = None
+        
+        # Store pixmaps for later reference
+        self.left_pixmap = left_image
+        self.right_pixmap = right_image
+        
+        # Store image dimensions
+        self.left_image_width = left_image.width()
+        self.left_image_height = left_image.height()
+        self.right_image_width = right_image.width()
+        self.right_image_height = right_image.height()
+        
+        logger.info(f"Set images - Left: {self.left_image_width}x{self.left_image_height}, Right: {self.right_image_width}x{self.right_image_height}")
         
         # Add images to scenes
         self.left_scene.addPixmap(left_image)
