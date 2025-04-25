@@ -101,22 +101,4 @@ class ROI:
     BORDER_COLOR = (0, 0, 255)  # BGR format (Red)
     FILL_COLOR = (0, 0, 255, 64)  # BGRA format (Red with transparency)
     CENTER_MARKER_SIZE = 5
-    CENTER_MARKER_COLOR = (255, 255, 255)  # BGR format (White)
-
-
-class CalibrationTab:
-    """Calibration tab constants"""
-    POINT_RADIUS = 5
-    POINT_COLOR_ORIGINAL = (255, 0, 0)  # Red
-    POINT_COLOR_FINE_TUNED = (0, 255, 0)  # Green
-    LINE_COLOR = (0, 0, 255)  # Blue
-    LINE_WIDTH = 1
-    ROI_SIZE_FACTOR = 2.5
-    ROI_MIN_SIZE = 40
-    MAX_POINTS = 14
-    BUTTON_WIDTH = 120
-    BUTTON_HEIGHT = 30
-    GRID_SPACING = 5
-    AUTO_SAVE_COOLDOWN = 2.0  # seconds
-    Z_VALUE_ORIGINAL = 1.0
-    Z_VALUE_FINE_TUNED = 0.0 
+    CENTER_MARKER_COLOR = (255, 255, 255)  # BGR format (White) 

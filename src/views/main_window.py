@@ -19,10 +19,9 @@ from PySide6.QtWidgets import (
 from src.utils.ui_constants import WindowSize, Messages, Layout, FileDialog, Icons
 from src.views.image_view import ImageView
 from src.views.setting_view import SettingView
-from src.views.calibration_view import CalibrationView
+from src.views.calibration_tab import CalibrationTab
 from src.models.calibration_model import CalibrationModel
 from src.controllers.calibration_controller import CalibrationController
-from src.utils.config_manager import ConfigManager
 
 
 class MainWindow(QMainWindow):
@@ -50,9 +49,6 @@ class MainWindow(QMainWindow):
         # Set up UI
         self._setup_ui()
         
-        # Initialize controllers
-        self._setup_controllers()
-        
         # Show ready message
         self.status_bar.showMessage(Messages.READY)
     
@@ -79,8 +75,15 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self.setting_view, "Settings")
         
         # Create calibration tab
-        self.calibration_view = CalibrationView()
-        self.tab_widget.addTab(self.calibration_view, "Court Calibration")
+        self.calibration_tab = CalibrationTab()
+        self.tab_widget.addTab(self.calibration_tab, "Calibration")
+        
+        # Create calibration model and controller
+        self.calibration_model = CalibrationModel()
+        self.calibration_controller = CalibrationController(
+            self.calibration_model,
+            self.calibration_tab
+        )
         
         # Connect signals from settings view
         self.setting_view.settings_changed.connect(self._on_settings_changed)
@@ -91,21 +94,6 @@ class MainWindow(QMainWindow):
         # Set up status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-    
-    def _setup_controllers(self):
-        """Initialize and connect controllers."""
-        # Get config manager
-        config_manager = ConfigManager()
-        
-        # Calibration controller
-        self.calibration_model = CalibrationModel(config_manager)
-        self.calibration_controller = CalibrationController(
-            self.calibration_model,
-            self.calibration_view
-        )
-        
-        # Set reference to main window (self) in controller
-        self.calibration_controller.main_window = self
     
     def _setup_menu_bar(self):
         """Set up the menu bar."""
@@ -266,37 +254,14 @@ class MainWindow(QMainWindow):
         """
         # This will be overridden by the controller
         pass
-    
-    def get_current_frame_pixmaps(self):
+
+    def update_calibration_images(self, left_image, right_image):
         """
-        Get the pixmaps of the current left and right frames.
+        Update the images in the calibration tab.
         
-        Returns:
-            tuple: (left_pixmap, right_pixmap) or (None, None) if not available
+        Args:
+            left_image: QPixmap or QImage for the left view
+            right_image: QPixmap or QImage for the right view
         """
-        # This implementation depends on how the images are managed in the main application
-        # For now, we'll get them from the image view if available
-        try:
-            # Get pixmaps from image view
-            # This assumes the image view has methods to get the current image pixmaps
-            return self.image_view.get_left_pixmap(), self.image_view.get_right_pixmap()
-        except Exception as e:
-            logging.error(f"Error getting current frame pixmaps: {str(e)}")
-            return None, None
-    
-    def get_current_frame_info(self):
-        """
-        Get information about the current frame.
-        
-        Returns:
-            dict: Frame information including file paths, or None if not available
-        """
-        # This implementation depends on how frame information is managed in the main application
-        try:
-            # Get current frame information from image view or other source
-            # This assumes there's a method to get the current frame information
-            frame_info = self.image_view.get_current_frame_info()
-            return frame_info
-        except Exception as e:
-            logging.error(f"Error getting current frame info: {str(e)}")
-            return None 
+        if hasattr(self, 'calibration_controller'):
+            self.calibration_controller.set_images(left_image, right_image) 

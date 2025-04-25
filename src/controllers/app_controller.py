@@ -138,6 +138,9 @@ class AppController(QObject):
         self.ball_tracking_controller.roi_updated.connect(self._on_roi_updated)
         self.ball_tracking_controller.circles_processed.connect(self.view.image_view.set_images)
         
+        # Set the stereo image model to the calibration controller
+        self.view.calibration_controller.set_stereo_image_model(self.model)
+        
         # Tracking data save settings
         self.tracking_data_save_enabled = True  # Enable/disable saving
         self.tracking_data_folder = os.path.join(os.getcwd(), "tracking_data")  # Default folder
@@ -181,6 +184,13 @@ class AppController(QObject):
         
         # Load the folder in the model
         self.model.load_from_folder(folder_path)
+
+        # Update calibration tab with current images
+        if hasattr(self, 'current_left_image') and hasattr(self, 'current_right_image'):
+            self.view.update_calibration_images(
+                self.current_left_image,
+                self.current_right_image
+            )
     
     @Slot(int, int)
     def _on_loading_progress(self, current, total):
@@ -227,6 +237,13 @@ class AppController(QObject):
             
             # 이미지가 없으면 볼 트래킹 버튼 비활성화 유지
             self.view.image_view.playback_controls.ball_tracking_button.setEnabled(False)
+
+        # Update calibration tab with current images
+        if hasattr(self, 'current_left_image') and hasattr(self, 'current_right_image'):
+            self.view.update_calibration_images(
+                self.current_left_image,
+                self.current_right_image
+            )
     
     @Slot(int)
     def _on_frame_changed(self, frame_index):
@@ -271,6 +288,13 @@ class AppController(QObject):
         
         # Preload frames in background
         self._preload_frames_in_background(5)
+
+        # Update calibration tab with current images
+        if hasattr(self, 'current_left_image') and hasattr(self, 'current_right_image'):
+            self.view.update_calibration_images(
+                self.current_left_image,
+                self.current_right_image
+            )
     
     def _preload_frames_in_background(self, num_frames):
         """
@@ -644,4 +668,15 @@ class AppController(QObject):
             logging.error(f"Error during application cleanup: {e}")
             
         # Final log message
-        logging.info("Application closed") 
+        logging.info("Application closed")
+
+    def _update_current_frame(self):
+        """Update the current frame based on the slider position."""
+        # ... existing code to update frame ...
+
+        # Update calibration tab with current images
+        if hasattr(self, 'current_left_image') and hasattr(self, 'current_right_image'):
+            self.view.update_calibration_images(
+                self.current_left_image,
+                self.current_right_image
+            ) 

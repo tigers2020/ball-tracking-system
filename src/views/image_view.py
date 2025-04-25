@@ -195,48 +195,4 @@ class ImageView(QWidget):
             # Connect info view to controller
             self.info_view.connect_tracking_controller(controller)
             
-            logging.info("Connected to ball tracking controller")
-    
-    def get_left_pixmap(self):
-        """
-        Get the current left image pixmap.
-        
-        Returns:
-            QPixmap: The left image pixmap or None if not available
-        """
-        # Get the current pixmap from the stereo view
-        if hasattr(self, 'stereo_view') and self.stereo_view:
-            return self.stereo_view.left_image_view.image_label.pixmap()
-        return None
-    
-    def get_right_pixmap(self):
-        """
-        Get the current right image pixmap.
-        
-        Returns:
-            QPixmap: The right image pixmap or None if not available
-        """
-        # Get the current pixmap from the stereo view
-        if hasattr(self, 'stereo_view') and self.stereo_view:
-            return self.stereo_view.right_image_view.image_label.pixmap()
-        return None
-    
-    def get_current_frame_info(self):
-        """
-        Get information about the current frame.
-        
-        Returns:
-            dict: Frame information including file paths, or None if not available
-        """
-        # This implementation depends on how frame information is stored
-        # For now, we'll return a basic structure with just the availability status
-        if not self.get_left_pixmap() or not self.get_right_pixmap():
-            return None
-            
-        # In a full implementation, this would include actual file paths
-        # and other relevant frame information
-        return {
-            'has_images': True,
-            'left_path': None,  # Would typically come from a frame manager
-            'right_path': None  # Would typically come from a frame manager
-        } 
+            logging.info("Connected to ball tracking controller") 
