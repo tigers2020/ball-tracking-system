@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from src.models.calibration_model import CalibrationModel
 from src.views.calibration_tab import CalibrationTab
 from src.utils.config_manager import ConfigManager
+from src.utils.geometry import pixel_to_scene, scene_to_pixel
 import cv2
 from PySide6.QtGui import QImage, QPixmap
 
@@ -67,6 +68,17 @@ class CalibrationController(QObject):
         
         # Reference to the stereo image model (will be set from app_controller)
         self.stereo_image_model = None
+        
+        # Display scale for coordinate transformation
+        self.display_scale = 1.0
+        if self.config_manager:
+            camera_settings = self.config_manager.get_camera_settings()
+            if camera_settings and 'resizing_scale' in camera_settings:
+                self.display_scale = camera_settings['resizing_scale']
+        
+        # Offset values for coordinate transformations (will be updated if needed)
+        self.left_offset_y = 0
+        self.right_offset_y = 0
         
         # Try to load calibration points from config if available
         if self.config_manager:
@@ -250,15 +262,28 @@ class CalibrationController(QObject):
                     # Calculate the offset to convert ROI coordinates to image coordinates
                     roi_with_padding, (offset_x, offset_y) = crop_roi_with_padding(image, point, radius=25.0)
                     
-                    # Adjust intersection coordinates to image coordinates
+                    # Adjust intersection coordinates to image coordinates (original pixel space)
                     adjusted_x = best_x + offset_x
                     adjusted_y = best_y + offset_y
                     
-                    # Update the point in the model
+                    # Update the point in the model (store original pixel coordinates)
                     self.model.update_point(side, index, (adjusted_x, adjusted_y))
                     
-                    # Update the point in the view
-                    self.view.update_point_item(side, index, adjusted_x, adjusted_y)
+                    # Convert pixel coordinates to scene coordinates for display
+                    offset_y = self.left_offset_y if side == "left" else self.right_offset_y
+                    scene_x, scene_y = pixel_to_scene(adjusted_x, adjusted_y, self.display_scale, offset_y)
+                    
+                    # Check if point is within view boundaries and clamp if necessary
+                    display_width = self.view.left_scene.width() if side == "left" else self.view.right_scene.width()
+                    display_height = self.view.left_scene.height() if side == "left" else self.view.right_scene.height()
+                    
+                    if not (0 <= scene_x <= display_width and 0 <= scene_y <= display_height):
+                        logger.warning(f"Fine-tuned point out of bounds -> clamped")
+                        scene_x = min(max(0, scene_x), display_width)
+                        scene_y = min(max(0, scene_y), display_height)
+                    
+                    # Update the point in the view with scene coordinates
+                    self.view.update_point_item(side, index, scene_x, scene_y)
                     
                     logger.info(f"Fine-tuned {side} point {index} from {point} to ({adjusted_x}, {adjusted_y})")
                 else:
@@ -550,12 +575,16 @@ class CalibrationController(QObject):
         # Render left points
         left_points = self.model.get_points('left')
         for index, (x, y) in enumerate(left_points):
-            self.view.add_point_item('left', x, y, index)
+            # Convert original pixel coordinates to scene coordinates
+            scene_x, scene_y = pixel_to_scene(x, y, self.display_scale, self.left_offset_y)
+            self.view.add_point_item('left', scene_x, scene_y, index)
             
         # Render right points
         right_points = self.model.get_points('right')
         for index, (x, y) in enumerate(right_points):
-            self.view.add_point_item('right', x, y, index)
+            # Convert original pixel coordinates to scene coordinates
+            scene_x, scene_y = pixel_to_scene(x, y, self.display_scale, self.right_offset_y)
+            self.view.add_point_item('right', scene_x, scene_y, index)
             
         # Update grid lines
         if left_points:
@@ -641,6 +670,13 @@ class CalibrationController(QObject):
             config_manager (ConfigManager): ConfigManager instance
         """
         self.config_manager = config_manager
+        
+        # Update display scale from config
+        if self.config_manager:
+            camera_settings = self.config_manager.get_camera_settings()
+            if camera_settings and 'resizing_scale' in camera_settings:
+                self.display_scale = camera_settings['resizing_scale']
+                logger.info(f"Updated display scale to {self.display_scale} from config")
     
     @Slot()
     def on_load_current_frame(self):
