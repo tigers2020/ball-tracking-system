@@ -95,7 +95,18 @@ class CalibrationController(QObject):
             y (float): Y-coordinate
         """
         try:
-            # Add point to model
+            # 먼저 모델이 최대 포인트 수에 도달했는지 확인
+            points = self.model.get_points(side)
+            if len(points) >= self.model.MAX_POINTS:
+                logger.warning(f"Maximum number of points ({self.model.MAX_POINTS}) reached for {side} side. Point not added.")
+                QMessageBox.warning(
+                    self.view,
+                    "Maximum Points Reached",
+                    f"Maximum number of points ({self.model.MAX_POINTS}) reached for {side} side."
+                )
+                return
+            
+            # 최대치가 아니면 모델에 포인트 추가
             self.model.add_point(side, (x, y))
             
             # Get index of the newly added point
@@ -227,17 +238,30 @@ class CalibrationController(QObject):
             side (str): 'left' or 'right'
             image (np.ndarray): Image for the specified side
         """
+        # 이미지 크기에 따른 동적 ROI 반경 계산
+        img_height, img_width = image.shape[:2]
+        roi_radius = min(img_width, img_height) * 0.05  # 이미지 크기의 5%로 설정
+        
+        # 뷰의 크기 가져오기
+        scene = self.view.left_scene if side == "left" else self.view.right_scene
+        scene_width = scene.width()
+        scene_height = scene.height()
+        
+        # 스케일 계산 (뷰 크기와 이미지 크기의 비율)
+        width_scale = scene_width / img_width if img_width > 0 else 1.0
+        height_scale = scene_height / img_height if img_height > 0 else 1.0
+        
         # Get points for this side
         points = self.model.get_points(side)
         
         # Loop through each point
         for index, point in enumerate(points):
             try:
-                # Show ROI overlay to indicate processing
-                self.view.show_roi(side, point, 25.0)
+                # Show ROI overlay
+                self.view.show_roi(side, point, roi_radius)
                 
                 # Extract ROI around the point
-                roi = crop_roi(image, point, radius=25.0)
+                roi = crop_roi(image, point, radius=roi_radius)
                 
                 if roi is None:
                     logger.warning(f"Failed to crop ROI for {side} point {index}")
@@ -247,8 +271,6 @@ class CalibrationController(QObject):
                 skeleton = skeletonize_roi(roi)
                 
                 # Find intersections in skeletonized ROI
-                # We'll use the ROI center (half of width/height) as the origin reference 
-                # for sorting intersections by proximity
                 roi_height, roi_width = roi.shape[:2]
                 roi_center = (roi_width // 2, roi_height // 2)
                 
@@ -256,33 +278,30 @@ class CalibrationController(QObject):
                 
                 # If intersections found, use the closest one
                 if intersections:
-                    # Get the closest intersection (the first in the sorted list)
+                    # Get the closest intersection
                     best_x, best_y = intersections[0]
                     
                     # Calculate the offset to convert ROI coordinates to image coordinates
-                    roi_with_padding, (offset_x, offset_y) = crop_roi_with_padding(image, point, radius=25.0)
+                    roi_with_padding, (offset_x, offset_y) = crop_roi_with_padding(image, point, radius=roi_radius)
                     
-                    # Adjust intersection coordinates to image coordinates (original pixel space)
+                    # Adjust intersection coordinates to image coordinates
                     adjusted_x = best_x + offset_x
                     adjusted_y = best_y + offset_y
                     
-                    # Update the point in the model (store original pixel coordinates)
+                    # 이미지 경계 확인
+                    if not (0 <= adjusted_x < img_width and 0 <= adjusted_y < img_height):
+                        logger.warning(f"Fine-tuned pixel coordinates out of bounds -> clamped")
+                        adjusted_x = min(max(0, adjusted_x), img_width - 1)
+                        adjusted_y = min(max(0, adjusted_y), img_height - 1)
+                    
+                    # Update the point in the model
                     self.model.update_point(side, index, (adjusted_x, adjusted_y))
                     
-                    # Convert pixel coordinates to scene coordinates for display
-                    offset_y = self.left_offset_y if side == "left" else self.right_offset_y
-                    scene_x, scene_y = pixel_to_scene(adjusted_x, adjusted_y, self.display_scale, offset_y)
+                    # 이미지 좌표를 뷰 좌표로 직접 변환 (pixel_to_scene 대신 사용)
+                    scene_x = adjusted_x * width_scale
+                    scene_y = adjusted_y * height_scale
                     
-                    # Check if point is within view boundaries and clamp if necessary
-                    display_width = self.view.left_scene.width() if side == "left" else self.view.right_scene.width()
-                    display_height = self.view.left_scene.height() if side == "left" else self.view.right_scene.height()
-                    
-                    if not (0 <= scene_x <= display_width and 0 <= scene_y <= display_height):
-                        logger.warning(f"Fine-tuned point out of bounds -> clamped")
-                        scene_x = min(max(0, scene_x), display_width)
-                        scene_y = min(max(0, scene_y), display_height)
-                    
-                    # Update the point in the view with scene coordinates
+                    # Update the point in the view
                     self.view.update_point_item(side, index, scene_x, scene_y)
                     
                     logger.info(f"Fine-tuned {side} point {index} from {point} to ({adjusted_x}, {adjusted_y})")
@@ -294,11 +313,7 @@ class CalibrationController(QObject):
                 
             except Exception as e:
                 logger.error(f"Error fine-tuning {side} point {index}: {e}")
-                
-                # Hide ROI overlay on error
                 self.view.hide_roi(side)
-                
-                # Continue to next point rather than aborting
                 continue
                 
         logger.info(f"Completed fine-tuning {len(points)} {side} points")
@@ -572,18 +587,45 @@ class CalibrationController(QObject):
         Render points loaded from file in the view.
         Called after loading points from a file.
         """
+        # 현재 이미지의 실제 크기 가져오기
+        if self.stereo_image_model and self.stereo_image_model.get_current_frame():
+            current_frame = self.stereo_image_model.get_current_frame()
+            left_img = current_frame.get_left_image()
+            right_img = current_frame.get_right_image()
+            
+            if left_img is not None and right_img is not None:
+                # 실제 이미지 크기로 모델 업데이트
+                left_height, left_width = left_img.shape[:2]
+                right_height, right_width = right_img.shape[:2]
+                self.model.set_image_dimensions('left', left_width, left_height)
+                self.model.set_image_dimensions('right', right_width, right_height)
+        
+        # 렌더링할 뷰의 크기 가져오기
+        left_scene_width = self.view.left_scene.width()
+        left_scene_height = self.view.left_scene.height()
+        right_scene_width = self.view.right_scene.width()
+        right_scene_height = self.view.right_scene.height()
+        
+        # 스케일 계산 (실제 이미지 크기와 표시 크기의 비율)
+        left_width_scale = left_scene_width / self.model.left_image_width if self.model.left_image_width > 0 else 1.0
+        left_height_scale = left_scene_height / self.model.left_image_height if self.model.left_image_height > 0 else 1.0
+        right_width_scale = right_scene_width / self.model.right_image_width if self.model.right_image_width > 0 else 1.0
+        right_height_scale = right_scene_height / self.model.right_image_height if self.model.right_image_height > 0 else 1.0
+        
         # Render left points
         left_points = self.model.get_points('left')
         for index, (x, y) in enumerate(left_points):
-            # Convert original pixel coordinates to scene coordinates
-            scene_x, scene_y = pixel_to_scene(x, y, self.display_scale, self.left_offset_y)
+            # 이미지 좌표를 뷰 좌표로 직접 변환
+            scene_x = x * left_width_scale 
+            scene_y = y * left_height_scale
             self.view.add_point_item('left', scene_x, scene_y, index)
             
         # Render right points
         right_points = self.model.get_points('right')
         for index, (x, y) in enumerate(right_points):
-            # Convert original pixel coordinates to scene coordinates
-            scene_x, scene_y = pixel_to_scene(x, y, self.display_scale, self.right_offset_y)
+            # 이미지 좌표를 뷰 좌표로 직접 변환
+            scene_x = x * right_width_scale
+            scene_y = y * right_height_scale
             self.view.add_point_item('right', scene_x, scene_y, index)
             
         # Update grid lines
@@ -626,9 +668,20 @@ class CalibrationController(QObject):
         """
         self.view.set_images(left_image, right_image)
         
-        # After setting images, try to load points from config if available
-        if self.config_manager:
-            # Get the image dimensions from view's scenes
+        # 이미지 실제 크기 가져오기
+        if self.stereo_image_model and self.stereo_image_model.get_current_frame():
+            current_frame = self.stereo_image_model.get_current_frame()
+            left_img = current_frame.get_left_image()
+            right_img = current_frame.get_right_image()
+            
+            if left_img is not None and right_img is not None:
+                # 실제 이미지 크기로 모델 업데이트
+                left_height, left_width = left_img.shape[:2]
+                right_height, right_width = right_img.shape[:2]
+                self.model.set_image_dimensions('left', left_width, left_height)
+                self.model.set_image_dimensions('right', right_width, right_height)
+        else:
+            # 뷰 크기에서 정보 가져오기
             left_scene = self.view.left_scene
             right_scene = self.view.right_scene
             
@@ -637,10 +690,12 @@ class CalibrationController(QObject):
             right_width = right_scene.width()
             right_height = right_scene.height()
             
-            # Update model with current image dimensions
+            # 모델에 현재 뷰 크기 설정
             self.model.set_image_dimensions('left', left_width, left_height)
             self.model.set_image_dimensions('right', right_width, right_height)
-            
+        
+        # After setting images, try to load points from config if available
+        if self.config_manager:
             # Load calibration data from config
             calibration_data = self.config_manager.get_calibration_points()
             
@@ -652,7 +707,7 @@ class CalibrationController(QObject):
                 self._render_loaded_points()
                 
                 logger.info("Loaded calibration points from config after setting images")
-        
+    
     def set_stereo_image_model(self, stereo_image_model):
         """
         Set the stereo image model reference.
