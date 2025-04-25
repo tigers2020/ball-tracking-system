@@ -27,6 +27,7 @@ class Colors:
     BUTTON_PRESSED = QColor(30, 30, 30)
     SLIDER_HANDLE = QColor(60, 130, 200)
     SLIDER_GROOVE = QColor(60, 60, 60)
+    INFO = QColor(31, 111, 235)  # #1f6feb - Blue color for information highlighting
 
 
 class Fonts:

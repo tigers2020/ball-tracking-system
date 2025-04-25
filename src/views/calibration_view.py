@@ -12,10 +12,10 @@ import math
 import numpy as np
 
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
-from PySide6.QtGui import QImage, QPainter, QPen, QPixmap, QBrush, QCursor, QPainterPath
+from PySide6.QtGui import QImage, QPainter, QPen, QPixmap, QBrush, QCursor, QPainterPath, QColor
 from PySide6.QtWidgets import (QGraphicsPathItem, QGraphicsRectItem, QGraphicsScene,
                            QGraphicsView, QHBoxLayout, QLabel, QPushButton,
-                           QSplitter, QVBoxLayout, QWidget, QGraphicsEllipseItem)
+                           QSplitter, QVBoxLayout, QWidget, QGraphicsEllipseItem, QGraphicsSimpleTextItem)
 
 from src.utils.ui_constants import Layout, WindowSize
 from src.utils.ui_theme import Colors
@@ -32,13 +32,13 @@ class CalibrationPoint(QGraphicsEllipseItem):
     Supports moving and tracks its index.
     """
     
-    def __init__(self, index: int, radius: float = 10.0, parent_view=None, side=None):
+    def __init__(self, index: int, radius: float = 12.0, parent_view=None, side=None):
         """
         Initialize a calibration point.
         
         Args:
             index (int): Point index
-            radius (float): Point radius (default: 10.0)
+            radius (float): Point radius (default: 12.0)
             parent_view: Reference to the parent CalibrationView
             side: 'left' or 'right' indicating which side the point belongs to
         """
@@ -46,9 +46,12 @@ class CalibrationPoint(QGraphicsEllipseItem):
         self.setFlag(QGraphicsEllipseItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsEllipseItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
         self.setFlag(QGraphicsEllipseItem.GraphicsItemFlag.ItemIsSelectable, True)
-        self.setBrush(QBrush(Colors.ACCENT))
-        self.setPen(QPen(Colors.ACCENT.darker(120), 2))  # Increased pen width for better visibility
-        self.setZValue(1.0)  # Make points appear above the image
+        
+        # 포인트 색상을 빨간색으로 변경
+        self.setBrush(QBrush(QColor(255, 0, 0, 180)))  # 반투명 빨간색
+        self.setPen(QPen(QColor(200, 0, 0), 2))  # 진한 빨간색 테두리
+        
+        self.setZValue(2.0)  # Make points appear above other items
         self.index = index
         self.radius = radius
         self.is_moving = False
@@ -57,6 +60,15 @@ class CalibrationPoint(QGraphicsEllipseItem):
         
         # Set cursor to pointing hand
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        
+        # 텍스트 라벨 추가
+        self.label = QGraphicsSimpleTextItem(str(index), self)
+        self.label.setBrush(QBrush(Qt.white))
+        
+        # 중앙에 라벨 배치
+        label_width = self.label.boundingRect().width()
+        label_height = self.label.boundingRect().height()
+        self.label.setPos(radius - label_width / 2, radius - label_height / 2)
         
     def itemChange(self, change, value):
         """
@@ -82,8 +94,8 @@ class CalibrationPoint(QGraphicsEllipseItem):
                 # Set moving state
                 if not self.is_moving:
                     self.is_moving = True
-                    self.setBrush(QBrush(Colors.INFO))
-                    self.setPen(QPen(Colors.INFO.darker(120), 2))
+                    self.setBrush(QBrush(QColor(255, 165, 0, 200)))  # 드래그 중에는 주황색으로 변경
+                    self.setPen(QPen(QColor(255, 140, 0), 3))
         
         # Handle position changed event (after move is complete or during drag)
         elif change == QGraphicsEllipseItem.GraphicsItemChange.ItemPositionHasChanged and self.scene():
@@ -101,31 +113,31 @@ class CalibrationPoint(QGraphicsEllipseItem):
             # Reset moving state if this is end of movement
             if self.is_moving and not self.scene().mouseGrabberItem() == self:
                 self.is_moving = False
-                self.setBrush(QBrush(Colors.ACCENT))
-                self.setPen(QPen(Colors.ACCENT.darker(120), 2))
+                self.setBrush(QBrush(QColor(255, 0, 0, 180)))  # 빨간색으로 복귀
+                self.setPen(QPen(QColor(200, 0, 0), 2))
         
         # Handle selection change
         elif change == QGraphicsEllipseItem.GraphicsItemChange.ItemSelectedChange:
             # Change appearance when selected
             if value:
-                self.setBrush(QBrush(Colors.INFO))
-                self.setPen(QPen(Colors.INFO.darker(120), 3))
+                self.setBrush(QBrush(QColor(0, 255, 255, 200)))  # 선택시 청록색
+                self.setPen(QPen(QColor(0, 200, 200), 3))
             else:
-                self.setBrush(QBrush(Colors.ACCENT))
-                self.setPen(QPen(Colors.ACCENT.darker(120), 2))
+                self.setBrush(QBrush(QColor(255, 0, 0, 180)))  # 빨간색으로 복귀
+                self.setPen(QPen(QColor(200, 0, 0), 2))
             
         return super().itemChange(change, value)
         
     def mousePressEvent(self, event):
         """Handle mouse press events to provide visual feedback."""
-        self.setBrush(QBrush(Colors.INFO))
-        self.setPen(QPen(Colors.INFO.darker(120), 3))
+        self.setBrush(QBrush(QColor(255, 165, 0, 200)))  # 주황색으로 변경
+        self.setPen(QPen(QColor(255, 140, 0), 3))
         super().mousePressEvent(event)
         
     def mouseReleaseEvent(self, event):
         """Handle mouse release events to provide visual feedback."""
-        self.setBrush(QBrush(Colors.ACCENT))
-        self.setPen(QPen(Colors.ACCENT.darker(120), 2))
+        self.setBrush(QBrush(QColor(255, 0, 0, 180)))  # 빨간색으로 복귀
+        self.setPen(QPen(QColor(200, 0, 0), 2))
         super().mouseReleaseEvent(event)
 
 
@@ -439,7 +451,7 @@ class CalibrationView(QWidget):
     
     def draw_grid_lines(self, side: str, points: List[Tuple[float, float]], rows: int, cols: int):
         """
-        Draw grid lines connecting calibration points in a grid pattern.
+        Draw grid lines connecting calibration points in the specified pattern.
         
         Args:
             side (str): 'left' or 'right'
@@ -452,148 +464,159 @@ class CalibrationView(QWidget):
             for line in self.left_grid_lines:
                 self.left_scene.removeItem(line)
             self.left_grid_lines.clear()
+            scene = self.left_scene
+            grid_lines = self.left_grid_lines
         else:
             for line in self.right_grid_lines:
                 self.right_scene.removeItem(line)
             self.right_grid_lines.clear()
+            scene = self.right_scene
+            grid_lines = self.right_grid_lines
         
-        # Create path for horizontal lines
-        for row in range(rows):
-            path = QPainterPath()
-            for col in range(cols):
-                idx = row * cols + col
-                if idx >= len(points):
-                    break
-                
-                x, y = points[idx]
-                if col == 0:
-                    path.moveTo(x, y)
-                else:
-                    path.lineTo(x, y)
-            
-            # Create path item
-            path_item = QGraphicsPathItem(path)
-            path_item.setPen(QPen(Colors.WARNING, 1, Qt.PenStyle.DashLine))
-            path_item.setZValue(0.75)  # Between ROI overlay and points
-            
-            # Add to scene and store reference
-            if side == 'left':
-                self.left_scene.addItem(path_item)
-                self.left_grid_lines.append(path_item)
-            else:
-                self.right_scene.addItem(path_item)
-                self.right_grid_lines.append(path_item)
+        # 포인트가 14개 미만이면 그리드 라인을 그리지 않음
+        if len(points) < 14:
+            logger.warning(f"Not enough points to draw grid lines: {len(points)}/14")
+            return
         
-        # Create path for vertical lines
-        for col in range(cols):
-            path = QPainterPath()
-            for row in range(rows):
-                idx = row * cols + col
-                if idx >= len(points):
-                    break
+        # 현재 지정된 패턴대로 그리드 라인 그리기
+        # 가로 라인
+        horizontal_groups = [
+            [0, 1, 2, 3],     # 1-2-3-4
+            [4, 5, 6],        # 5-6-7
+            [7, 8, 9],        # 8-9-10
+            [10, 11, 12, 13]  # 11-12-13-14
+        ]
+        
+        # 세로 라인
+        vertical_groups = [
+            [0, 10],          # 1-11
+            [1, 4, 7, 10],    # 2-5-8-11
+            [5, 8],           # 6-9
+            [2, 6, 9, 12],    # 3-7-10-13
+            [3, 13]           # 4-14
+        ]
+        
+        # 펜 설정
+        pen = QPen(QColor(0, 180, 255, 200), 2.0)  # 파란색 라인
+        pen.setStyle(Qt.PenStyle.SolidLine)
+        
+        # 가로 라인 그리기
+        for group in horizontal_groups:
+            if all(idx < len(points) for idx in group):
+                path = QPainterPath()
+                first = True
+                for idx in group:
+                    x, y = points[idx]
+                    if first:
+                        path.moveTo(x, y)
+                        first = False
+                    else:
+                        path.lineTo(x, y)
                 
-                x, y = points[idx]
-                if row == 0:
-                    path.moveTo(x, y)
-                else:
-                    path.lineTo(x, y)
-            
-            # Create path item
-            path_item = QGraphicsPathItem(path)
-            path_item.setPen(QPen(Colors.WARNING, 1, Qt.PenStyle.DashLine))
-            path_item.setZValue(0.75)  # Between ROI overlay and points
-            
-            # Add to scene and store reference
-            if side == 'left':
-                self.left_scene.addItem(path_item)
-                self.left_grid_lines.append(path_item)
-            else:
-                self.right_scene.addItem(path_item)
-                self.right_grid_lines.append(path_item)
+                line_item = scene.addPath(path, pen)
+                line_item.setZValue(1.0)  # 포인트 아래, ROI 위
+                grid_lines.append(line_item)
+        
+        # 세로 라인 그리기
+        for group in vertical_groups:
+            if all(idx < len(points) for idx in group):
+                path = QPainterPath()
+                first = True
+                for idx in group:
+                    x, y = points[idx]
+                    if first:
+                        path.moveTo(x, y)
+                        first = False
+                    else:
+                        path.lineTo(x, y)
+                
+                line_item = scene.addPath(path, pen)
+                line_item.setZValue(1.0)
+                grid_lines.append(line_item)
+        
+        logger.debug(f"Drew custom grid lines for {side} side")
     
     def update_roi_overlay(self, side: str, roi):
         """
-        Add a ROI (Region of Interest) overlay to the specified view.
+        Update ROI overlay on the specified view.
         
         Args:
             side (str): 'left' or 'right'
-            roi: (x, y, width, height) tuple in pixel coordinates
+            roi: ROI data (center_x, center_y, radius)
         """
         if side not in ['left', 'right']:
             logger.error(f"Invalid side specified: {side}")
             return
         
-        # Remove existing ROI overlay if any
-        if side == 'left' and self.left_roi_overlay:
-            self.left_scene.removeItem(self.left_roi_overlay)
-            self.left_roi_overlay = None
-        elif side == 'right' and self.right_roi_overlay:
-            self.right_scene.removeItem(self.right_roi_overlay)
-            self.right_roi_overlay = None
+        # Clear existing ROI overlay
+        self.hide_roi(side)
         
-        # If no ROI is provided, just remove the existing one
-        if roi is None:
-            return
-        
-        # Unpack ROI coordinates
-        x, y, width, height = roi
-        
-        # Convert pixel coordinates to scene coordinates
-        if side == 'left':
-            width_scale, height_scale = self._get_scale_factors('left')
-            scene = self.left_scene
-        else:
-            width_scale, height_scale = self._get_scale_factors('right')
-            scene = self.right_scene
-        
-        scene_x, scene_y = pixel_to_scene((x, y), width_scale, height_scale)
-        scene_width = width * width_scale
-        scene_height = height * height_scale
-        
-        # Create ROI rectangle
-        rect_item = scene.addRect(QRectF(scene_x, scene_y, scene_width, scene_height), 
-                                 QPen(Colors.ACCENT, 2.0))
-        
-        # Store the ROI overlay
-        if side == 'left':
-            self.left_roi_overlay = rect_item
-        else:
-            self.right_roi_overlay = rect_item
+        # Create a new overlay if ROI data is provided
+        if roi:
+            center_x, center_y, radius = roi
+            
+            scene = self.left_scene if side == 'left' else self.right_scene
+            
+            # Create a semi-transparent yellow rect for the ROI
+            rect_x = center_x - radius
+            rect_y = center_y - radius
+            rect_width = radius * 2
+            rect_height = radius * 2
+            
+            rect_item = QGraphicsRectItem(rect_x, rect_y, rect_width, rect_height)
+            
+            # Semi-transparent yellow fill
+            rect_item.setBrush(QBrush(QColor(255, 255, 0, 60)))  # 반투명 노란색
+            
+            # Yellow border
+            rect_item.setPen(QPen(QColor(255, 255, 0, 180), 1.5))  # 반투명 노란색 테두리
+            
+            rect_item.setZValue(0.5)  # Between image and points
+            
+            # Add to scene and store reference
+            scene.addItem(rect_item)
+            if side == 'left':
+                self.left_roi_overlay = rect_item
+            else:
+                self.right_roi_overlay = rect_item
     
     def show_roi(self, side: str, center: Tuple[float, float], radius: float):
         """
-        Show a circular Region of Interest (ROI) on the specified view.
+        Show a ROI (Region of Interest) circle around a point.
         
         Args:
             side (str): 'left' or 'right'
-            center (Tuple[float, float]): Center point of the ROI in scene coordinates
+            center (Tuple[float, float]): (x, y) center of the ROI in scene coordinates
             radius (float): Radius of the ROI in scene units
         """
         if side not in ['left', 'right']:
-            logger.error(f"Invalid side: {side}")
+            logger.error(f"Invalid side specified: {side}")
             return
         
-        # Hide any existing ROI first
+        # Clear any existing ROI overlay
         self.hide_roi(side)
         
-        # Create ROI overlay
-        x, y = center
-        rect_x = x - radius
-        rect_y = y - radius
-        rect_width = radius * 2
-        rect_height = radius * 2
+        # Create a rectangle for the ROI
+        roi_x = center[0] - radius
+        roi_y = center[1] - radius
+        roi_width = radius * 2
+        roi_height = radius * 2
         
-        # Create ROI using a QGraphicsEllipseItem
+        # Create a rectangle item
         if side == 'left':
-            self.left_roi_overlay = QGraphicsEllipseItem(rect_x, rect_y, rect_width, rect_height)
-            self.left_roi_overlay.setPen(QPen(Colors.INFO, 2, Qt.PenStyle.DashLine))
-            self.left_roi_overlay.setZValue(0.5)  # Above image, below points
-            self.left_scene.addItem(self.left_roi_overlay)
+            rect_item = QGraphicsRectItem(roi_x, roi_y, roi_width, roi_height)
+            rect_item.setBrush(QBrush(QColor(255, 255, 0, 60)))  # 반투명 노란색
+            rect_item.setPen(QPen(QColor(255, 255, 0, 180), 1.5))  # 노란색 테두리
+            rect_item.setZValue(0.5)  # 이미지와 포인트 사이에 표시
+            self.left_scene.addItem(rect_item)
+            self.left_roi_overlay = rect_item
         else:
-            self.right_roi_overlay = QGraphicsEllipseItem(rect_x, rect_y, rect_width, rect_height)
-            self.right_roi_overlay.setPen(QPen(Colors.INFO, 2, Qt.PenStyle.DashLine))
-            self.right_roi_overlay.setZValue(0.5)  # Above image, below points
-            self.right_scene.addItem(self.right_roi_overlay)
+            rect_item = QGraphicsRectItem(roi_x, roi_y, roi_width, roi_height)
+            rect_item.setBrush(QBrush(QColor(255, 255, 0, 60)))  # 반투명 노란색
+            rect_item.setPen(QPen(QColor(255, 255, 0, 180), 1.5))  # 노란색 테두리
+            rect_item.setZValue(0.5)
+            self.right_scene.addItem(rect_item)
+            self.right_roi_overlay = rect_item
     
     def hide_roi(self, side: str):
         """
@@ -821,14 +844,24 @@ class CalibrationView(QWidget):
         # Convert QImage to numpy array
         width = image.width()
         height = image.height()
-        ptr = image.bits()
-        ptr.setsize(height * width * 4)  # 4 bytes per pixel (RGBA)
         
-        # Create numpy array from the image data (RGBA format)
-        arr = np.array(ptr).reshape(height, width, 4)
+        # Get the image format
+        format = image.format()
         
-        # Convert RGBA to RGB
-        rgb_arr = arr[:, :, :3].copy()
+        # Create numpy array from the image data
+        if format == QImage.Format_RGB32 or format == QImage.Format_ARGB32:
+            # For 32-bit formats (4 bytes per pixel)
+            buffer = image.constBits()
+            # Use buffer protocol to create numpy array directly
+            arr = np.array(buffer, dtype=np.uint8).reshape(height, width, 4)
+            # Convert RGBA/ARGB to RGB
+            rgb_arr = arr[:, :, :3]
+        else:
+            # Convert to RGB32 format first
+            image = image.convertToFormat(QImage.Format_RGB32)
+            buffer = image.constBits()
+            arr = np.array(buffer, dtype=np.uint8).reshape(height, width, 4)
+            rgb_arr = arr[:, :, :3]
         
         # Convert RGB to BGR (for OpenCV compatibility)
         bgr_arr = rgb_arr[:, :, ::-1].copy()
@@ -851,14 +884,24 @@ class CalibrationView(QWidget):
         # Convert QImage to numpy array
         width = image.width()
         height = image.height()
-        ptr = image.bits()
-        ptr.setsize(height * width * 4)  # 4 bytes per pixel (RGBA)
         
-        # Create numpy array from the image data (RGBA format)
-        arr = np.array(ptr).reshape(height, width, 4)
+        # Get the image format
+        format = image.format()
         
-        # Convert RGBA to RGB
-        rgb_arr = arr[:, :, :3].copy()
+        # Create numpy array from the image data
+        if format == QImage.Format_RGB32 or format == QImage.Format_ARGB32:
+            # For 32-bit formats (4 bytes per pixel)
+            buffer = image.constBits()
+            # Use buffer protocol to create numpy array directly
+            arr = np.array(buffer, dtype=np.uint8).reshape(height, width, 4)
+            # Convert RGBA/ARGB to RGB
+            rgb_arr = arr[:, :, :3]
+        else:
+            # Convert to RGB32 format first
+            image = image.convertToFormat(QImage.Format_RGB32)
+            buffer = image.constBits()
+            arr = np.array(buffer, dtype=np.uint8).reshape(height, width, 4)
+            rgb_arr = arr[:, :, :3]
         
         # Convert RGB to BGR (for OpenCV compatibility)
         bgr_arr = rgb_arr[:, :, ::-1].copy()

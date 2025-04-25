@@ -15,14 +15,17 @@ from src.utils.geometry import pixel_to_normalized, normalized_to_pixel
 
 logger = logging.getLogger(__name__)
 
+# Define the maximum number of points per side as a constant
+MAX_POINTS_PER_SIDE = 14
+
 class CalibrationModel:
     """
     Model for calibration points data.
     Stores and manages calibration points for left and right camera views.
     """
     
-    # Maximum number of calibration points
-    MAX_POINTS = 14
+    # Use the constant in the class
+    MAX_POINTS = MAX_POINTS_PER_SIDE
     
     def __init__(self):
         """Initialize the CalibrationModel with empty points lists and default image dimensions."""
@@ -42,21 +45,22 @@ class CalibrationModel:
     
     def add_point(self, side: str, point: Tuple[float, float]) -> int:
         """
-        Add a calibration point for the specified side.
+        Add a calibration point to the specified side.
         
         Args:
             side (str): 'left' or 'right'
             point (Tuple[float, float]): (x, y) coordinates in pixel space
             
         Returns:
-            int: Index of the added point
+            int: Index of the added point, or -1 if the point could not be added
         """
         if side not in ['left', 'right']:
-            logger.error(f"Invalid side specified: {side}")
+            logger.error(f"Invalid side: {side}")
             return -1
-            
-        if len(self._points[side]) >= self.MAX_POINTS:
-            logger.warning(f"Cannot add more than {self.MAX_POINTS} points to {side} side")
+        
+        # Check if we've reached the maximum number of points
+        if len(self._points[side]) >= MAX_POINTS_PER_SIDE:
+            logger.warning(f"Cannot add more than {MAX_POINTS_PER_SIDE} points to {side} side")
             return -1
             
         # Add the point to the list for the specified side

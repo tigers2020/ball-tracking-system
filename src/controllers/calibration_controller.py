@@ -11,8 +11,8 @@ import os
 from typing import List, Tuple, Dict, Optional, Any
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Slot
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtCore import QObject, Slot, QThread
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QApplication
 from PySide6.QtGui import QPen, QColor
 
 from src.models.calibration_model import CalibrationModel
@@ -209,43 +209,83 @@ class CalibrationController(QObject):
             )
             return
         
-        # Perform fine-tuning
-        results = self.fine_tuning_service.fine_tune_calibration_points(
-            left_image=left_image,
-            right_image=right_image,
-            left_points=left_points,
-            right_points=right_points
-        )
+        # Show progress dialog
+        progress_dialog = QMessageBox(self.view)
+        progress_dialog.setWindowTitle("Fine-Tuning in Progress")
+        progress_dialog.setText("Fine-tuning calibration points...\nPlease wait.")
+        progress_dialog.setStandardButtons(QMessageBox.NoButton)
+        progress_dialog.show()
+        QApplication.processEvents()
         
-        # Process results and update model/view
-        adjusted_count = 0
-        
-        # Update left points
-        for idx, result in results.get('left', {}).items():
-            if result.get('success', False):
-                adjusted_x, adjusted_y = result['adjusted']
-                self.model.update_point('left', idx, (adjusted_x, adjusted_y))
-                adjusted_count += 1
-                
-        # Update right points  
-        for idx, result in results.get('right', {}).items():
-            if result.get('success', False):
-                adjusted_x, adjusted_y = result['adjusted']
-                self.model.update_point('right', idx, (adjusted_x, adjusted_y))
-                adjusted_count += 1
-                
-        # Update the view
-        self._render_points()
-        self._update_grid_lines()
-        
-        logger.info(f"Fine-tuning complete. Adjusted {adjusted_count} points.")
-        
-        # Show success message
-        QMessageBox.information(
-            self.view,
-            "Fine Tuning Complete",
-            f"Fine-tuning complete. Adjusted {adjusted_count} points."
-        )
+        try:
+            # Each point processing code for left and right sides
+            # ...
+
+            # Perform actual fine-tuning
+            results = self.fine_tuning_service.fine_tune_calibration_points(
+                left_image=left_image,
+                right_image=right_image,
+                left_points=left_points,
+                right_points=right_points
+            )
+            
+            # Close progress dialog and refresh UI
+            progress_dialog.close()
+            QApplication.processEvents()
+            
+            # Process results and update model/view
+            adjusted_count = 0
+            
+            # Update left points
+            for idx, result in results.get('left', {}).items():
+                if result.get('success', False):
+                    adjusted_x, adjusted_y = result['adjusted']
+                    self.model.update_point('left', idx, (adjusted_x, adjusted_y))
+                    adjusted_count += 1
+                    
+            # Update right points  
+            for idx, result in results.get('right', {}).items():
+                if result.get('success', False):
+                    adjusted_x, adjusted_y = result['adjusted']
+                    self.model.update_point('right', idx, (adjusted_x, adjusted_y))
+                    adjusted_count += 1
+                    
+            # Hide ROI
+            self.view.hide_roi('left')
+            self.view.hide_roi('right')
+            
+            # Update the view
+            self._render_points()
+            self._update_grid_lines()
+            
+            logger.info(f"Fine-tuning complete. Adjusted {adjusted_count} points.")
+            
+            # Show success message
+            QMessageBox.information(
+                self.view,
+                "Fine Tuning Complete",
+                f"Fine-tuning complete. Adjusted {adjusted_count} points."
+            )
+        except Exception as e:
+            # Close progress dialog and refresh UI in case of error
+            progress_dialog.close()
+            QApplication.processEvents()
+            
+            # Hide ROI
+            self.view.hide_roi('left')
+            self.view.hide_roi('right')
+            
+            logger.error(f"Error during fine-tuning: {e}")
+            QMessageBox.critical(
+                self.view,
+                "Fine Tuning Error",
+                f"An error occurred during fine-tuning: {str(e)}"
+            )
+        finally:
+            # Ensure dialog is closed in all circumstances
+            if progress_dialog.isVisible():
+                progress_dialog.close()
+                QApplication.processEvents()
     
     @Slot()
     def on_save_to_config(self):
@@ -567,15 +607,6 @@ class CalibrationController(QObject):
                 # Filter out None values
                 points = [p for p in points if p is not None]
             
-            # Only draw grid lines if we have enough points
-            if len(points) < 4:
-                continue
-            
-            # Determine grid dimensions (assume square grid for now)
-            grid_size = int(len(points) ** 0.5)
-            rows = grid_size
-            cols = grid_size
-            
             # 각 포인트를 scene 좌표로 변환
             scene_points = []
             for point in points:
@@ -583,8 +614,9 @@ class CalibrationController(QObject):
                 scene_x, scene_y = self.view.pixel_to_scene(current_side, point[0], point[1])
                 scene_points.append((scene_x, scene_y))
             
-            # Draw grid lines
-            self.view.draw_grid_lines(current_side, scene_points, rows, cols)
+            # Draw grid lines with custom pattern
+            # 지정된 4x4 그리드 레이아웃으로 그리기
+            self.view.draw_grid_lines(current_side, scene_points, 4, 4)
     
     def set_images(self, left_image, right_image):
         """
