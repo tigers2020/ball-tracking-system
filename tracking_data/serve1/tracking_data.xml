@@ -1,5 +1,5 @@
 <?xml version="1.0" ?>
-<TrackingData folder="serve1" timestamp="2025-04-24 06:48:20" created="1745491700.4509234" finalized="2025-04-25 07:26:49" finalized_time="2025-04-24 10:37:29" total_frames="818" duration_seconds="13749.03" duration_formatted="03:49:09" resumed="1745580360.1129124" resume_time="2025-04-25 07:26:00">
+<TrackingData folder="serve1" timestamp="2025-04-24 06:48:20" created="1745491700.4509234" finalized="2025-04-25 08:22:26" finalized_time="2025-04-24 10:37:29" total_frames="818" duration_seconds="13749.03" duration_formatted="03:49:09" resumed="1745583598.5900736" resume_time="2025-04-25 08:19:58">
   <ProcessingStats/>
   <ProcessingStats/>
   <Image number="16" name="frame_000016.png" timestamp="2025-04-24 07:55:34" tracking_active="True">

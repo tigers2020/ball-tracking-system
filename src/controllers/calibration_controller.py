@@ -15,6 +15,7 @@ from PySide6.QtGui import QPixmap
 
 from src.models.calibration_model import CalibrationModel
 from src.views.calibration_view import CalibrationView
+from src.utils.ui_constants import CalibrationTab
 
 
 class CalibrationController(QObject):
@@ -36,6 +37,9 @@ class CalibrationController(QObject):
         self.model = model
         self.view = view
         
+        # Set controller reference in view for direct model access
+        self.view.controller = self
+        
         # Connect view signals to controller slots
         self.view.point_added.connect(self.add_point)
         self.view.point_moved.connect(self.update_point)
@@ -55,6 +59,12 @@ class CalibrationController(QObject):
         
         # Flag to indicate whether we should use the config manager (preferred) or direct file I/O
         self.use_config_manager = True
+        
+        # Current active point index for each side
+        self.active_index = {"left": 0, "right": 0}
+        
+        # Maximum number of points allowed per side
+        self.max_points = CalibrationTab.MAX_POINTS
     
     @Slot(str, QPointF)
     def add_point(self, side: str, position: QPointF) -> None:
@@ -65,7 +75,21 @@ class CalibrationController(QObject):
             side (str): 'left' or 'right'
             position (QPointF): Point position
         """
-        self.model.add_point(side, position)
+        points = self.model.left_points if side == "left" else self.model.right_points
+        
+        if len(points) < self.max_points:
+            # Add new point if we haven't reached the maximum
+            self.model.add_point(side, position)
+            # Update active index to the newly added point
+            self.active_index[side] = len(points) - 1
+            logging.info(f"Added new {side} point at index {self.active_index[side]}")
+        else:
+            # Maximum reached, overwrite the current active point
+            index = self.active_index[side]
+            logging.info(f"Maximum points ({self.max_points}) reached, overwriting {side} point at index {index}")
+            self.model.update_point(side, index, position)
+            # Increment active index for next overwrite
+            self.active_index[side] = (index + 1) % self.max_points
     
     @Slot(str, int, QPointF)
     def update_point(self, side: str, index: int, position: QPointF) -> None:
@@ -121,26 +145,50 @@ class CalibrationController(QObject):
         Args:
             file_path (str): File path
         """
+        success = False
+        
         if self.use_config_manager and self.model.config_manager:
             # Load using config manager
-            if self.model.load_from_config():
+            success = self.model.load_from_config()
+            if success:
                 logging.info("Calibration loaded from config")
-                
-                # Load images if paths are available
-                if self.model.left_image_path and self.model.right_image_path:
-                    self.load_images(self.model.left_image_path, self.model.right_image_path)
             else:
                 logging.error("Failed to load calibration from config")
         else:
             # Fall back to direct file loading if no config manager
-            if self.model.load_from_json(file_path):
+            success = self.model.load_from_json(file_path)
+            if success:
                 logging.info(f"Calibration loaded from {file_path}")
-                
-                # Load images if paths are available
-                if self.model.left_image_path and self.model.right_image_path:
-                    self.load_images(self.model.left_image_path, self.model.right_image_path)
             else:
                 logging.error(f"Failed to load calibration from {file_path}")
+                
+        if success:
+            # Try to load images if paths are available and files exist
+            if self.model.left_image_path and os.path.exists(self.model.left_image_path):
+                try:
+                    left_pixmap = QPixmap(self.model.left_image_path)
+                    if not left_pixmap.isNull():
+                        self.view.set_left_image(left_pixmap)
+                        logging.info(f"Successfully loaded left image from: {self.model.left_image_path}")
+                    else:
+                        logging.warning(f"Failed to create pixmap from left image path: {self.model.left_image_path}")
+                except Exception as e:
+                    logging.error(f"Error loading left image: {str(e)}")
+                
+            if self.model.right_image_path and os.path.exists(self.model.right_image_path):
+                try:
+                    right_pixmap = QPixmap(self.model.right_image_path)
+                    if not right_pixmap.isNull():
+                        self.view.set_right_image(right_pixmap)
+                        logging.info(f"Successfully loaded right image from: {self.model.right_image_path}")
+                    else:
+                        logging.warning(f"Failed to create pixmap from right image path: {self.model.right_image_path}")
+                except Exception as e:
+                    logging.error(f"Error loading right image: {str(e)}")
+                
+            # Update view with points even if image loading failed
+            self.update_view("left")
+            self.update_view("right")
     
     @Slot()
     def clear_points(self) -> None:
@@ -192,9 +240,11 @@ class CalibrationController(QObject):
         Args:
             side (str): 'left' or 'right' side that changed
         """
-        # This will be implemented to rebuild points when needed
-        # For now, it's a placeholder for future implementation
-        pass
+        # Call view's rebuild points method to update points from model data
+        if side == "left":
+            self.view._rebuild_points("left")
+        else:
+            self.view._rebuild_points("right")
     
     @Slot()
     def load_current_frame(self) -> None:

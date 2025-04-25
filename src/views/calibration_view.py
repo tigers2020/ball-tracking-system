@@ -362,9 +362,54 @@ class CalibrationView(QWidget):
         Args:
             side (str): 'left' or 'right'
         """
-        # This method will be implemented when needed
-        # It reconstructs points from model data when the scene is cleared
-        pass
+        # Get the scene and points list based on side
+        scene = self.left_scene if side == "left" else self.right_scene
+        points_list = self.left_points if side == "left" else self.right_points
+        
+        # Check if there's a controller reference
+        controller = getattr(self, "controller", None)
+        if not controller or not hasattr(controller, "model"):
+            logging.warning(f"Cannot rebuild points for {side} side: No controller or model available")
+            return
+        
+        # Get points from model
+        model_points = controller.model.get_points(side)
+        
+        # Clear existing points from the list
+        for point in points_list[:]:
+            scene.removeItem(point)
+        points_list.clear()
+        
+        # Add points from model data
+        for idx, point_data in enumerate(model_points):
+            position = point_data['position']
+            is_fine_tuned = point_data.get('is_fine_tuned', False)
+            
+            # Create visual representation
+            radius = CalibrationTab.POINT_RADIUS
+            ellipse = QGraphicsEllipseItem(position.x() - radius, position.y() - radius, radius * 2, radius * 2)
+            
+            # Set appearance
+            color = CalibrationTab.POINT_COLOR_FINE_TUNED if is_fine_tuned else CalibrationTab.POINT_COLOR_ORIGINAL
+            ellipse.setBrush(QBrush(QColor(*color)))
+            ellipse.setPen(QPen(QColor(*color)))
+            ellipse.setZValue(CalibrationTab.Z_VALUE_FINE_TUNED if is_fine_tuned else CalibrationTab.Z_VALUE_ORIGINAL)
+            ellipse.setFlag(QGraphicsEllipseItem.ItemIsMovable)
+            ellipse.setFlag(QGraphicsEllipseItem.ItemSendsGeometryChanges)
+            
+            # Store metadata
+            ellipse.setData(0, idx)
+            ellipse.setData(1, side)
+            
+            # Add to scene and list
+            scene.addItem(ellipse)
+            points_list.append(ellipse)
+            
+            # Connect move event
+            ellipse.itemChange = lambda change, value: self._on_item_moved(ellipse, change, value)
+        
+        # Update connection lines
+        self._update_connection_lines(side)
     
     def resizeEvent(self, event):
         """

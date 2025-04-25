@@ -45,6 +45,10 @@ class CalibrationModel(QObject):
         self.left_image_path = ""
         self.right_image_path = ""
         
+        # 하위 호환성을 위한 alias 속성 추가
+        self.left_pts = self.left_points
+        self.right_pts = self.right_points
+        
         # Load initial calibration if config manager is provided
         if self.config_manager:
             self._load_from_config()
@@ -101,16 +105,31 @@ class CalibrationModel(QObject):
     
     def clear_points(self) -> None:
         """Clear all calibration points."""
+        logger.info("Clearing calibration points")
+        
+        # Keep backup before clearing
+        old_left_points = self.left_points.copy()
+        old_right_points = self.right_points.copy()
+        
+        # Clear points
         self.left_points.clear()
         self.right_points.clear()
         
         # Save to config if available
+        success = False
         if self.config_manager:
-            self._save_to_config()
+            success = self._save_to_config()
+            if not success:
+                logger.warning("Failed to save after clearing points, restoring backup")
+                # Restore backup if save failed
+                self.left_points = old_left_points
+                self.right_points = old_right_points
         
         # Emit signals
         self.points_changed.emit("left")
         self.points_changed.emit("right")
+        
+        logger.info(f"Calibration points cleared, save success: {success}")
     
     def get_points(self, side: str) -> List[Dict[str, Union[QPointF, bool]]]:
         """
@@ -232,6 +251,63 @@ class CalibrationModel(QObject):
             normalized_point["y"] * height
         )
     
+    def _list_to_dict(self, points, image_size):
+        """
+        Convert list of points to dictionary format for storage.
+        
+        Args:
+            points (list): List of point data dictionaries
+            image_size (tuple): Image size as (width, height)
+            
+        Returns:
+            dict: Dictionary of normalized points with keys like "p00", "p01", etc.
+        """
+        result = {}
+        for idx, point in enumerate(points):
+            try:
+                normalized = self._get_normalized_point(point['position'], image_size)
+                result[f"p{idx:02d}"] = {
+                    "x": normalized["x"],
+                    "y": normalized["y"],
+                    "is_fine_tuned": point.get('is_fine_tuned', False)
+                }
+            except Exception as e:
+                logger.warning(f"Error converting point to dictionary: {e}")
+                # Use raw pixel coordinates if conversion fails
+                result[f"p{idx:02d}"] = {
+                    "x": point['position'].x(),
+                    "y": point['position'].y(),
+                    "is_fine_tuned": point.get('is_fine_tuned', False)
+                }
+        return result
+        
+    def _dict_to_list(self, points_dict, image_size):
+        """
+        Convert dictionary of points to list format for usage.
+        
+        Args:
+            points_dict (dict): Dictionary of normalized points
+            image_size (tuple): Image size as (width, height)
+            
+        Returns:
+            list: List of point data dictionaries
+        """
+        result = []
+        # Ensure points are processed in order (p00, p01, p02, ...)
+        for key in sorted(points_dict.keys()):
+            try:
+                point_data = points_dict[key]
+                normalized_point = {"x": point_data["x"], "y": point_data["y"]}
+                position = self._get_pixel_point(normalized_point, image_size)
+                result.append({
+                    'position': position,
+                    'is_fine_tuned': point_data.get('is_fine_tuned', False)
+                })
+            except Exception as e:
+                logger.warning(f"Error converting dictionary to point: {e}")
+                # Skip invalid points
+        return result
+
     def _save_to_config(self) -> bool:
         """
         Save calibration data to configuration.
@@ -256,41 +332,40 @@ class CalibrationModel(QObject):
                 right_size = (640, 480)  # Default size
                 logger.info("Using default right image size (640x480) for normalization")
                 
-            # Convert points to normalized format for storage (0-1 range)
-            left_normalized = []
-            for point in self.left_points:
-                try:
-                    left_normalized.append(self._get_normalized_point(point['position'], left_size))
-                except Exception as e:
-                    logger.warning(f"Error normalizing left point: {e}")
-                    # Use raw pixel coordinates if normalization fails
-                    left_normalized.append({"x": point['position'].x(), "y": point['position'].y()})
-                    
-            right_normalized = []
-            for point in self.right_points:
-                try:
-                    right_normalized.append(self._get_normalized_point(point['position'], right_size))
-                except Exception as e:
-                    logger.warning(f"Error normalizing right point: {e}")
-                    # Use raw pixel coordinates if normalization fails
-                    right_normalized.append({"x": point['position'].x(), "y": point['position'].y()})
+            # Debug points count before normalization
+            logger.info(f"Saving {len(self.left_points)} left points and {len(self.right_points)} right points")
+                
+            # Convert points to dictionary format for storage
+            left_dict = self._list_to_dict(self.left_points, left_size)
+            right_dict = self._list_to_dict(self.right_points, right_size)
+            
+            # Debug points count after conversion
+            logger.info(f"Converted points: {len(left_dict)} left and {len(right_dict)} right")
             
             calibration_data = {
-                'left': left_normalized,
-                'right': right_normalized,
+                'left': left_dict,
+                'right': right_dict,
                 'left_image_size': {'width': self.left_image_size[0], 'height': self.left_image_size[1]},
                 'right_image_size': {'width': self.right_image_size[0], 'height': self.right_image_size[1]},
                 'left_image_path': self.left_image_path if self.left_image_path else None,
                 'right_image_path': self.right_image_path if self.right_image_path else None,
-                'calib_ver': 1.1  # Version update (using normalized coordinates)
+                'calib_ver': 1.2  # Version update (using dictionary format)
             }
             
-            # Save to config
+            # Save to config - force immediate save
             self.config_manager.set_calibration_points(calibration_data)
-            logger.info("Calibration saved to config")
+            logger.info("set_calibration_points called with calibration data")
+            
+            # Force an immediate save to ensure data is persisted
+            self.config_manager.save_config(force=True)
+            logger.info("Forced immediate save of configuration")
+            
             return True
         except Exception as e:
             logger.error(f"Error saving calibration data to config: {str(e)}")
+            # Print full exception details for debugging
+            import traceback
+            logger.error(f"Full exception details: {traceback.format_exc()}")
             return False
     
     def _load_from_config(self) -> bool:
@@ -310,13 +385,9 @@ class CalibrationModel(QObject):
             
             # Debug logging for troubleshooting
             logger.info(f"Loading calibration data, keys found: {list(calibration_data.keys()) if calibration_data else 'None'}")
-            if calibration_data and 'left' in calibration_data:
-                logger.info(f"Left points count: {len(calibration_data['left'])}")
-            if calibration_data and 'right' in calibration_data:
-                logger.info(f"Right points count: {len(calibration_data['right'])}")
             
             # Check if data is empty - Fixed operator precedence with explicit parentheses
-            if (not calibration_data) or ((not calibration_data.get('left', [])) and (not calibration_data.get('right', []))):
+            if (not calibration_data) or ((not calibration_data.get('left', {})) and (not calibration_data.get('right', {}))):
                 logger.warning("No calibration data found in config")
                 return False
                 
@@ -335,94 +406,89 @@ class CalibrationModel(QObject):
                 size_data = calibration_data['right_image_size']
                 self.right_image_size = (size_data.get('width', 0), size_data.get('height', 0))
             
-            # Set default image size if needed
-            if self.left_image_size == (0, 0):
-                self.left_image_size = (640, 480)  # Default size
-                logger.info("Using default left image size (640x480)")
-                
-            if self.right_image_size == (0, 0):
-                self.right_image_size = (640, 480)  # Default size
-                logger.info("Using default right image size (640x480)")
-            
-            # Load image paths if available (handle null or empty string)
-            if 'left_image_path' in calibration_data and calibration_data['left_image_path']:
+            # Load image paths if available
+            if 'left_image_path' in calibration_data:
                 self.left_image_path = calibration_data['left_image_path']
             
-            if 'right_image_path' in calibration_data and calibration_data['right_image_path']:
+            if 'right_image_path' in calibration_data:
                 self.right_image_path = calibration_data['right_image_path']
             
             # Check calibration version
             calib_ver = calibration_data.get('calib_ver', 1.0)
-            is_normalized = calib_ver >= 1.1
-            logger.info(f"Calibration version: {calib_ver}, using normalized coordinates: {is_normalized}")
+            
+            # Process left points based on version
+            left_data = calibration_data.get('left', {})
+            right_data = calibration_data.get('right', {})
+            
+            if calib_ver >= 1.2:
+                # New dictionary format (version 1.2+)
+                logger.info(f"Loading calibration data in dictionary format (version {calib_ver})")
                 
-            # Convert vector format to point data for left side
-            left_points_loaded = 0
-            for point_vector in calibration_data.get('left', []):
-                if isinstance(point_vector, dict) and 'x' in point_vector and 'y' in point_vector:
-                    # For normalized coordinates (0-1 range)
-                    if is_normalized:
-                        pixel_point = self._get_pixel_point(point_vector, self.left_image_size)
-                    else:
-                        # Version 1.0 or earlier: considered raw pixel coordinates
-                        pixel_point = QPointF(point_vector["x"], point_vector["y"])
-                        
-                    self.left_points.append({
-                        'position': pixel_point,
-                        'is_fine_tuned': False
-                    })
-                    left_points_loaded += 1
-                elif isinstance(point_vector, list) and len(point_vector) >= 2:
-                    # Support for older format
-                    self.left_points.append({
-                        'position': QPointF(point_vector[0], point_vector[1]),
-                        'is_fine_tuned': False
-                    })
-                    left_points_loaded += 1
-            
-            # Convert vector format to point data for right side
-            right_points_loaded = 0
-            for point_vector in calibration_data.get('right', []):
-                if isinstance(point_vector, dict) and 'x' in point_vector and 'y' in point_vector:
-                    # For normalized coordinates (0-1 range)
-                    if is_normalized:
-                        pixel_point = self._get_pixel_point(point_vector, self.right_image_size)
-                    else:
-                        # Version 1.0 or earlier: considered raw pixel coordinates
-                        pixel_point = QPointF(point_vector["x"], point_vector["y"])
-                        
-                    self.right_points.append({
-                        'position': pixel_point,
-                        'is_fine_tuned': False
-                    })
-                    right_points_loaded += 1
-                elif isinstance(point_vector, list) and len(point_vector) >= 2:
-                    # Support for older format
-                    self.right_points.append({
-                        'position': QPointF(point_vector[0], point_vector[1]),
-                        'is_fine_tuned': False
-                    })
-                    right_points_loaded += 1
-            
-            logger.info(f"Loaded {left_points_loaded} left points and {right_points_loaded} right points")
-            
-            # Restore old data if no points were loaded
-            if not self.left_points and old_left_points:
-                logger.info("Restoring old left points data")
-                self.left_points = old_left_points
+                # Convert dictionary points to list format
+                self.left_points = self._dict_to_list(left_data, self.left_image_size)
+                self.right_points = self._dict_to_list(right_data, self.right_image_size)
+            else:
+                # Old list format (version 1.0 or 1.1)
+                logger.info(f"Loading calibration data in list format (version {calib_ver})")
                 
-            if not self.right_points and old_right_points:
-                logger.info("Restoring old right points data")
-                self.right_points = old_right_points
+                # Process left points
+                if isinstance(left_data, list):
+                    for point_data in left_data:
+                        try:
+                            if calib_ver >= 1.1:
+                                # Version 1.1 - normalized coordinates
+                                pixel_point = self._get_pixel_point(point_data, self.left_image_size)
+                                self.left_points.append({
+                                    'position': pixel_point,
+                                    'is_fine_tuned': False
+                                })
+                            else:
+                                # Version 1.0 - pixel coordinates as [x, y] list
+                                if isinstance(point_data, list) and len(point_data) == 2:
+                                    self.left_points.append({
+                                        'position': QPointF(point_data[0], point_data[1]),
+                                        'is_fine_tuned': False
+                                    })
+                        except Exception as e:
+                            logger.warning(f"Error loading left point: {e}")
+                
+                # Process right points
+                if isinstance(right_data, list):
+                    for point_data in right_data:
+                        try:
+                            if calib_ver >= 1.1:
+                                # Version 1.1 - normalized coordinates
+                                pixel_point = self._get_pixel_point(point_data, self.right_image_size)
+                                self.right_points.append({
+                                    'position': pixel_point,
+                                    'is_fine_tuned': False
+                                })
+                            else:
+                                # Version 1.0 - pixel coordinates as [x, y] list
+                                if isinstance(point_data, list) and len(point_data) == 2:
+                                    self.right_points.append({
+                                        'position': QPointF(point_data[0], point_data[1]),
+                                        'is_fine_tuned': False
+                                    })
+                        except Exception as e:
+                            logger.warning(f"Error loading right point: {e}")
             
-            # Emit signals
+            # Debug points count after loading
+            logger.info(f"Loaded {len(self.left_points)} left points and {len(self.right_points)} right points")
+            
+            # Emit signals for each side
             self.points_changed.emit("left")
             self.points_changed.emit("right")
             
             return True
         except Exception as e:
             logger.error(f"Error loading calibration data from config: {str(e)}")
-            # Keep existing data on exception
+            # Restore backup points if loading fails
+            self.left_points = old_left_points
+            self.right_points = old_right_points
+            # Print full exception details for debugging
+            import traceback
+            logger.error(f"Full exception details: {traceback.format_exc()}")
             return False
     
     def load_from_config(self) -> bool:
@@ -455,36 +521,44 @@ class CalibrationModel(QObject):
         Returns:
             bool: Success or failure
         """
-        data = {
-            'calib_ver': 1.0,
-            'left_image': self.left_image_path,
-            'right_image': self.right_image_path,
-            'points': {
-                'left': [
-                    {
-                        'x': point['position'].x(),
-                        'y': point['position'].y(),
-                        'is_fine_tuned': point['is_fine_tuned']
-                    }
-                    for point in self.left_points
-                ],
-                'right': [
-                    {
-                        'x': point['position'].x(),
-                        'y': point['position'].y(),
-                        'is_fine_tuned': point['is_fine_tuned']
-                    }
-                    for point in self.right_points
-                ]
-            }
-        }
-        
         try:
+            # Set default values for invalid image sizes
+            left_size = self.left_image_size
+            right_size = self.right_image_size
+            
+            if left_size[0] <= 0 or left_size[1] <= 0:
+                left_size = (640, 480)  # Default size
+                logger.info("Using default left image size (640x480) for normalization")
+                
+            if right_size[0] <= 0 or right_size[1] <= 0:
+                right_size = (640, 480)  # Default size
+                logger.info("Using default right image size (640x480) for normalization")
+            
+            # Convert points to dictionary format
+            left_dict = self._list_to_dict(self.left_points, left_size)
+            right_dict = self._list_to_dict(self.right_points, right_size)
+            
+            # Create data dictionary
+            data = {
+                'calib_ver': 1.2,  # Using dictionary format
+                'left': left_dict,
+                'right': right_dict,
+                'left_image_size': {'width': self.left_image_size[0], 'height': self.left_image_size[1]},
+                'right_image_size': {'width': self.right_image_size[0], 'height': self.right_image_size[1]},
+                'left_image_path': self.left_image_path if self.left_image_path else None,
+                'right_image_path': self.right_image_path if self.right_image_path else None
+            }
+            
+            # Save to file
             with open(file_path, 'w') as f:
                 json.dump(data, f, indent=4)
+            
+            logger.info(f"Calibration data saved to {file_path}")
             return True
         except Exception as e:
             logger.error(f"Error saving calibration data to file: {str(e)}")
+            import traceback
+            logger.error(f"Full exception details: {traceback.format_exc()}")
             return False
     
     def load_from_json(self, file_path: str) -> bool:
@@ -499,40 +573,104 @@ class CalibrationModel(QObject):
             bool: Success or failure
         """
         try:
+            # Backup existing points
+            old_left_points = self.left_points.copy()
+            old_right_points = self.right_points.copy()
+            
+            # Clear existing points
+            self.left_points = []
+            self.right_points = []
+            
+            # Load data from file
             with open(file_path, 'r') as f:
                 data = json.load(f)
             
-            # Check version and migrate if necessary
-            if 'calib_ver' not in data:
-                # Handle migration from old format
-                if 'raw_points' in data:
-                    return self._migrate_old_format(data)
-                else:
-                    logger.error("Unknown calibration data format")
-                    return False
+            # Set image sizes
+            if 'left_image_size' in data:
+                size_data = data['left_image_size']
+                self.left_image_size = (size_data.get('width', 0), size_data.get('height', 0))
+            else:
+                self.left_image_size = (640, 480)  # Default size
             
-            # Clear existing points
-            self.clear_points()
+            if 'right_image_size' in data:
+                size_data = data['right_image_size']
+                self.right_image_size = (size_data.get('width', 0), size_data.get('height', 0))
+            else:
+                self.right_image_size = (640, 480)  # Default size
             
             # Set image paths
-            self.left_image_path = data.get('left_image')
-            self.right_image_path = data.get('right_image')
+            self.left_image_path = data.get('left_image_path', data.get('left_image', None))
+            self.right_image_path = data.get('right_image_path', data.get('right_image', None))
             
-            # Load points
-            left_points = data['points']['left']
-            right_points = data['points']['right']
+            # Check calibration version
+            calib_ver = data.get('calib_ver', 1.0)
+            logger.info(f"Loading calibration data from file, version {calib_ver}")
             
-            for point_data in left_points:
-                self.left_points.append({
-                    'position': QPointF(point_data['x'], point_data['y']),
-                    'is_fine_tuned': point_data.get('is_fine_tuned', False)
-                })
+            # Process based on version
+            if calib_ver >= 1.2:
+                # New dictionary format (version 1.2+)
+                left_data = data.get('left', {})
+                right_data = data.get('right', {})
+                
+                # Convert to point list
+                self.left_points = self._dict_to_list(left_data, self.left_image_size)
+                self.right_points = self._dict_to_list(right_data, self.right_image_size)
+            elif calib_ver >= 1.1:
+                # Normalized list format (version 1.1)
+                left_data = data.get('left', [])
+                right_data = data.get('right', [])
+                
+                # Process left points
+                for point_data in left_data:
+                    try:
+                        pixel_point = self._get_pixel_point(point_data, self.left_image_size)
+                        self.left_points.append({
+                            'position': pixel_point,
+                            'is_fine_tuned': point_data.get('is_fine_tuned', False)
+                        })
+                    except Exception as e:
+                        logger.warning(f"Error loading left point: {e}")
+                
+                # Process right points
+                for point_data in right_data:
+                    try:
+                        pixel_point = self._get_pixel_point(point_data, self.right_image_size)
+                        self.right_points.append({
+                            'position': pixel_point,
+                            'is_fine_tuned': point_data.get('is_fine_tuned', False)
+                        })
+                    except Exception as e:
+                        logger.warning(f"Error loading right point: {e}")
+            else:
+                # Old v1.0 format or 'points' structure
+                if 'points' in data:
+                    points_data = data['points']
+                    
+                    # Load left points
+                    for point_data in points_data.get('left', []):
+                        if isinstance(point_data, dict) and 'x' in point_data and 'y' in point_data:
+                            self.left_points.append({
+                                'position': QPointF(point_data['x'], point_data['y']),
+                                'is_fine_tuned': point_data.get('is_fine_tuned', False)
+                            })
+                    
+                    # Load right points
+                    for point_data in points_data.get('right', []):
+                        if isinstance(point_data, dict) and 'x' in point_data and 'y' in point_data:
+                            self.right_points.append({
+                                'position': QPointF(point_data['x'], point_data['y']),
+                                'is_fine_tuned': point_data.get('is_fine_tuned', False)
+                            })
+                elif 'raw_points' in data:
+                    # Try to migrate old format
+                    if not self._migrate_old_format(data):
+                        # Restore backup on failure
+                        self.left_points = old_left_points
+                        self.right_points = old_right_points
+                        return False
             
-            for point_data in right_points:
-                self.right_points.append({
-                    'position': QPointF(point_data['x'], point_data['y']),
-                    'is_fine_tuned': point_data.get('is_fine_tuned', False)
-                })
+            # Debug points count
+            logger.info(f"Loaded {len(self.left_points)} left points and {len(self.right_points)} right points from file")
             
             # Emit signals
             self.points_changed.emit("left")
@@ -545,6 +683,9 @@ class CalibrationModel(QObject):
             return True
         except Exception as e:
             logger.error(f"Error loading calibration data from file: {str(e)}")
+            # Print full exception details for debugging
+            import traceback
+            logger.error(f"Full exception details: {traceback.format_exc()}")
             return False
     
     def _migrate_old_format(self, data: Dict) -> bool:

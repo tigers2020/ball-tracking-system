@@ -210,19 +210,19 @@ class ConfigManager:
         """
         settings = self.get("hsv_settings", self.default_config["hsv_settings"]).copy()
         
-        # 표준화된 키 매핑
+        # Standardized key mapping
         key_mapping = {
             "lower_h": "h_min", "upper_h": "h_max",
             "lower_s": "s_min", "upper_s": "s_max",
             "lower_v": "v_min", "upper_v": "v_max"
         }
         
-        # 이전 키들을 새 형식으로 변환하고 이전 키는 제거
+        # Convert old keys to new format and remove old keys
         for old_key, new_key in key_mapping.items():
             if old_key in settings:
                 if new_key not in settings:
                     settings[new_key] = settings[old_key]
-                # 이전 키는 항상 제거
+                # Always remove old key
                 del settings[old_key]
         
         return settings
@@ -236,26 +236,26 @@ class ConfigManager:
         """
         current_settings = self.get_hsv_settings().copy()
         
-        # 표준화된 키 매핑
+        # Standardized key mapping
         key_mapping = {
             "lower_h": "h_min", "upper_h": "h_max",
             "lower_s": "s_min", "upper_s": "s_max",
             "lower_v": "v_min", "upper_v": "v_max"
         }
         
-        # 이전 키들을 새 형식으로 변환
+        # Convert old keys to new format
         for old_key, new_key in key_mapping.items():
             if old_key in hsv_settings:
                 hsv_settings[new_key] = hsv_settings[old_key]
-                # 이전 키 제거
+                # Remove old key
                 if old_key in hsv_settings:
                     del hsv_settings[old_key]
             
-            # 이전 형식의 키가 현재 설정에 있으면 제거
+            # Remove old format keys from current settings if present
             if old_key in current_settings:
                 del current_settings[old_key]
         
-        # 업데이트된 설정 적용
+        # Apply updated settings
         current_settings.update(hsv_settings)
         self.set("hsv_settings", current_settings)
         # Don't save immediately, allow bundling of changes
@@ -522,11 +522,28 @@ class ConfigManager:
             calibration_data (dict): Calibration points data with 'left' and 'right' lists
                 of vector coordinates and optional 'calib_ver'
         """
+        import copy
+        
+        # Detailed debug logging
+        logging.info(f"Setting calibration points with data keys: {list(calibration_data.keys() if calibration_data else [])}")
+        
         # Ensure we have the minimum required structure
         if not isinstance(calibration_data, dict):
             logging.error("Invalid calibration data format. Must be a dictionary.")
-            return
+            return False
             
+        # Check if left and right points exist and have content
+        left_points = calibration_data.get("left", [])
+        right_points = calibration_data.get("right", [])
+        
+        if not left_points and not right_points:
+            logging.warning("Both left and right calibration points are empty or missing.")
+            # Don't overwrite existing data if new data is empty
+            existing_data = self.get("calibration_points")
+            if existing_data and (existing_data.get("left") or existing_data.get("right")):
+                logging.warning("Keeping existing calibration data instead of overwriting with empty data.")
+                return False
+        
         # Ensure 'left' and 'right' keys are present and are lists
         if "left" not in calibration_data or not isinstance(calibration_data["left"], list):
             calibration_data["left"] = []
@@ -537,12 +554,21 @@ class ConfigManager:
         if "calib_ver" not in calibration_data:
             calibration_data["calib_ver"] = 1.0
             
+        # Create a deep copy to avoid reference issues
+        data_to_store = copy.deepcopy(calibration_data)
+        
+        # Log point counts for debugging
+        logging.info(f"Storing calibration data with {len(data_to_store.get('left', []))} left points and {len(data_to_store.get('right', []))} right points")
+        
         # Store in the new format
-        self.set("calibration_points", calibration_data)
+        self.set("calibration_points", data_to_store)
         
-        # Save config
-        self.save_config()
+        # Save config immediately to ensure data persistence
+        self.save_config(force=True)
+        logging.info(f"Saved calibration data to config file with force=True")
         
+        return True
+    
     def get_left_calibration_points(self):
         """
         Get the left calibration points.
