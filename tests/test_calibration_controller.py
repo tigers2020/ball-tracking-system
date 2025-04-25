@@ -11,6 +11,8 @@ import json
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+import numpy as np
+import unittest
 
 from PySide6.QtCore import QPointF, Qt, QObject
 from PySide6.QtGui import QPixmap
@@ -19,6 +21,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from src.models.calibration_model import CalibrationModel
 from src.views.calibration_tab import CalibrationTab
 from src.controllers.calibration_controller import CalibrationController
+from src.utils.config_manager import ConfigManager
 
 
 class FakeSignal:
@@ -80,7 +83,8 @@ def setup_controller():
     """Set up the controller with fake models and views for testing."""
     model = CalibrationModel()
     view = FakeView()
-    controller = CalibrationController(model, view)
+    config_manager = MagicMock(spec=ConfigManager)
+    controller = CalibrationController(model, view, config_manager)
     return model, view, controller
 
 
@@ -328,3 +332,162 @@ def test_render_loaded_points(setup_controller):
     
     # Check that grid lines were not drawn for right side (only 2 points)
     assert 'right' not in view.grid_lines 
+
+
+class TestCalibrationController(unittest.TestCase):
+    """Test suite for the CalibrationController class."""
+    
+    def setUp(self):
+        """Set up test fixtures."""
+        # Create mocks
+        self.model = CalibrationModel()
+        self.view = MagicMock(spec=CalibrationTab)
+        self.config_manager = MagicMock(spec=ConfigManager)
+        
+        # Initialize controller
+        self.controller = CalibrationController(self.model, self.view, self.config_manager)
+        
+    def test_on_add_point(self):
+        """Test adding a point."""
+        # Call the method
+        self.controller.on_add_point('left', 10.0, 20.0)
+        
+        # Check model
+        self.assertEqual(self.model.get_points('left'), [(10.0, 20.0)])
+        
+        # Check view method calls
+        self.view.add_point_item.assert_called_with('left', 10.0, 20.0, 0)
+        
+    def test_on_move_point(self):
+        """Test moving a point."""
+        # Add a point first
+        self.model.add_point('left', (10.0, 20.0))
+        
+        # Call the method
+        self.controller.on_move_point('left', 0, 15.0, 25.0)
+        
+        # Check model
+        self.assertEqual(self.model.get_points('left'), [(15.0, 25.0)])
+        
+    def test_on_clear_points(self):
+        """Test clearing points."""
+        # Add some points
+        self.model.add_point('left', (10.0, 20.0))
+        self.model.add_point('right', (30.0, 40.0))
+        
+        # Call the method
+        self.controller.on_clear_points()
+        
+        # Check model
+        self.assertEqual(self.model.get_points('left'), [])
+        self.assertEqual(self.model.get_points('right'), [])
+        
+        # Check view method calls
+        self.view.clear_points.assert_called_once()
+        
+    @patch('src.services.roi_cropper.crop_roi')
+    @patch('src.services.roi_cropper.crop_roi_with_padding')
+    @patch('src.services.skeletonizer.skeletonize_roi')
+    @patch('src.services.intersection_finder.find_and_sort_intersections')
+    def test_fine_tune_points(self, mock_find_intersections, mock_skeletonize, 
+                             mock_crop_with_padding, mock_crop_roi):
+        """Test fine-tuning points with mocked service functions."""
+        # Mock stereo_image_model and current_frame
+        mock_stereo_model = MagicMock()
+        mock_frame = MagicMock()
+        
+        # Create a test image
+        test_image = np.zeros((100, 100), dtype=np.uint8)
+        
+        # Mock the get_left_image and get_right_image methods
+        mock_frame.get_left_image.return_value = test_image
+        mock_frame.get_right_image.return_value = test_image
+        
+        # Mock stereo_image_model to return the mock frame
+        mock_stereo_model.get_current_frame.return_value = mock_frame
+        
+        # Set stereo_image_model
+        self.controller.stereo_image_model = mock_stereo_model
+        
+        # Add points to the model
+        self.model.add_point('left', (50.0, 50.0))
+        self.model.add_point('right', (60.0, 60.0))
+        
+        # Set up mocks for services
+        roi = np.zeros((50, 50), dtype=np.uint8)
+        mock_crop_roi.return_value = roi
+        
+        skeleton = np.zeros((50, 50), dtype=np.uint8)
+        mock_skeletonize.return_value = skeleton
+        
+        # Mock intersection finder to return a better point
+        mock_find_intersections.return_value = [(25, 25)]  # First point in the ROI
+        
+        # Mock crop_roi_with_padding to return a padded ROI and offset
+        mock_crop_with_padding.return_value = (roi, (40, 40))
+        
+        # Call fine-tune method
+        self.controller.on_fine_tune()
+        
+        # Verify service calls
+        mock_crop_roi.assert_called()
+        mock_skeletonize.assert_called()
+        mock_find_intersections.assert_called()
+        mock_crop_with_padding.assert_called()
+        
+        # Verify points were updated in the model
+        # The new point should be at (40+25, 40+25) = (65, 65) for left point
+        left_points = self.model.get_points('left')
+        right_points = self.model.get_points('right')
+        
+        # Check if at least one point was updated
+        self.assertEqual(left_points[0], (65, 65))
+        self.assertEqual(right_points[0], (65, 65))
+        
+        # Verify view was updated
+        self.view.update_point_item.assert_called()
+        self.view.hide_roi.assert_called()  # Should hide ROI after processing
+        
+    def test_fine_tune_no_stereo_model(self):
+        """Test fine-tune handling when no stereo model is available."""
+        # Ensure no stereo model
+        self.controller.stereo_image_model = None
+        
+        # Call fine-tune method
+        self.controller.on_fine_tune()
+        
+        # Verify warning dialog was shown
+        self.view.QMessageBox.warning.assert_called()
+        
+    def test_fine_tune_no_intersections(self):
+        """Test fine-tune when no intersections are found."""
+        # Mock stereo_image_model and current_frame
+        mock_stereo_model = MagicMock()
+        mock_frame = MagicMock()
+        
+        # Create a test image
+        test_image = np.zeros((100, 100), dtype=np.uint8)
+        
+        # Mock the get_left_image and get_right_image methods
+        mock_frame.get_left_image.return_value = test_image
+        mock_frame.get_right_image.return_value = test_image
+        
+        # Mock stereo_image_model to return the mock frame
+        mock_stereo_model.get_current_frame.return_value = mock_frame
+        
+        # Set stereo_image_model
+        self.controller.stereo_image_model = mock_stereo_model
+        
+        # Add a point to the model
+        self.model.add_point('left', (50.0, 50.0))
+        
+        # Mock the services to simulate no intersections found
+        with patch('src.services.roi_cropper.crop_roi', return_value=np.zeros((50, 50))), \
+             patch('src.services.skeletonizer.skeletonize_roi', return_value=np.zeros((50, 50))), \
+             patch('src.services.intersection_finder.find_and_sort_intersections', return_value=[]):
+            
+            # Call fine-tune method
+            self.controller.on_fine_tune()
+            
+            # Verify point wasn't updated (should remain at original position)
+            self.assertEqual(self.model.get_points('left')[0], (50.0, 50.0)) 

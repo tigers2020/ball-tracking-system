@@ -20,6 +20,13 @@ from src.utils.config_manager import ConfigManager
 import cv2
 from PySide6.QtGui import QImage, QPixmap
 
+# Import new services
+from src.services.roi_cropper import crop_roi, crop_roi_with_padding
+from src.services.skeletonizer import skeletonize_roi
+from src.services.intersection_finder import find_and_sort_intersections
+
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 
@@ -132,11 +139,144 @@ class CalibrationController(QObject):
     @Slot()
     def on_fine_tune(self):
         """
-        Handle fine-tuning points.
-        This is a placeholder for Week 3 implementation.
+        Handle fine-tuning points using computer vision techniques.
+        Extracts a Region of Interest (ROI) around each calibration point,
+        skeletonizes the ROI, finds intersections, and updates the point
+        to the nearest intersection.
         """
-        logger.info("Fine-tune functionality will be implemented in Week 3")
-        # To be implemented in Week 3
+        try:
+            # Get stereo image model to access images
+            if not self.stereo_image_model:
+                logger.warning("No stereo image model available, cannot fine-tune points")
+                QMessageBox.warning(
+                    self.view,
+                    "Fine-Tune Failed",
+                    "No stereo image model available. Load images first."
+                )
+                return
+                
+            # Get the current frame from stereo image model
+            current_frame = self.stereo_image_model.get_current_frame()
+            if not current_frame:
+                logger.warning("No current frame available, cannot fine-tune points")
+                QMessageBox.warning(
+                    self.view,
+                    "Fine-Tune Failed",
+                    "No current frame available. Load images first."
+                )
+                return
+                
+            # Get left and right images from the frame
+            left_img = current_frame.get_left_image()
+            right_img = current_frame.get_right_image()
+            
+            if left_img is None or right_img is None:
+                logger.warning("Failed to get images from current frame, cannot fine-tune points")
+                QMessageBox.warning(
+                    self.view,
+                    "Fine-Tune Failed",
+                    "Failed to get images from current frame."
+                )
+                return
+                
+            # Fine-tune left points
+            self._fine_tune_points('left', left_img)
+            
+            # Fine-tune right points
+            self._fine_tune_points('right', right_img)
+            
+            # Update grid lines
+            self._update_grid_lines('left')
+            self._update_grid_lines('right')
+            
+            # Show success message
+            QMessageBox.information(
+                self.view,
+                "Fine-Tune Successful",
+                "Calibration points have been fine-tuned.\n"
+                "Points may have been adjusted to nearby intersections."
+            )
+            
+            logger.info("Fine-tuned calibration points successfully")
+            
+        except Exception as e:
+            logger.error(f"Error fine-tuning points: {e}")
+            QMessageBox.critical(
+                self.view,
+                "Fine-Tune Error",
+                f"An error occurred while fine-tuning points: {str(e)}"
+            )
+            
+    def _fine_tune_points(self, side: str, image: np.ndarray):
+        """
+        Fine-tune points for a specific side using computer vision.
+        
+        Args:
+            side (str): 'left' or 'right'
+            image (np.ndarray): Image for the specified side
+        """
+        # Get points for this side
+        points = self.model.get_points(side)
+        
+        # Loop through each point
+        for index, point in enumerate(points):
+            try:
+                # Show ROI overlay to indicate processing
+                self.view.show_roi(side, point, 25.0)
+                
+                # Extract ROI around the point
+                roi = crop_roi(image, point, radius=25.0)
+                
+                if roi is None:
+                    logger.warning(f"Failed to crop ROI for {side} point {index}")
+                    continue
+                
+                # Skeletonize ROI
+                skeleton = skeletonize_roi(roi)
+                
+                # Find intersections in skeletonized ROI
+                # We'll use the ROI center (half of width/height) as the origin reference 
+                # for sorting intersections by proximity
+                roi_height, roi_width = roi.shape[:2]
+                roi_center = (roi_width // 2, roi_height // 2)
+                
+                intersections = find_and_sort_intersections(skeleton, roi_center, max_points=3)
+                
+                # If intersections found, use the closest one
+                if intersections:
+                    # Get the closest intersection (the first in the sorted list)
+                    best_x, best_y = intersections[0]
+                    
+                    # Calculate the offset to convert ROI coordinates to image coordinates
+                    roi_with_padding, (offset_x, offset_y) = crop_roi_with_padding(image, point, radius=25.0)
+                    
+                    # Adjust intersection coordinates to image coordinates
+                    adjusted_x = best_x + offset_x
+                    adjusted_y = best_y + offset_y
+                    
+                    # Update the point in the model
+                    self.model.update_point(side, index, (adjusted_x, adjusted_y))
+                    
+                    # Update the point in the view
+                    self.view.update_point_item(side, index, adjusted_x, adjusted_y)
+                    
+                    logger.info(f"Fine-tuned {side} point {index} from {point} to ({adjusted_x}, {adjusted_y})")
+                else:
+                    logger.warning(f"No intersections found for {side} point {index}")
+                
+                # Hide ROI overlay
+                self.view.hide_roi(side)
+                
+            except Exception as e:
+                logger.error(f"Error fine-tuning {side} point {index}: {e}")
+                
+                # Hide ROI overlay on error
+                self.view.hide_roi(side)
+                
+                # Continue to next point rather than aborting
+                continue
+                
+        logger.info(f"Completed fine-tuning {len(points)} {side} points")
     
     @Slot()
     def on_save_to_config(self):
