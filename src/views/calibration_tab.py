@@ -9,12 +9,12 @@ This module contains the CalibrationTab class which provides the UI for court ca
 import logging
 from typing import Dict, List, Tuple
 
-from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QObject, QEvent, QLine
-from PySide6.QtGui import QPen, QBrush, QColor, QPainterPath, QPainter, QPixmap, QFont
+from PySide6.QtCore import Qt, Signal, QRectF, QPointF
+from PySide6.QtGui import QPen, QBrush, QColor, QPainterPath, QPainter, QCursor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGraphicsView, QGraphicsScene, QGraphicsEllipseItem, QGraphicsRectItem,
-    QGraphicsPathItem, QSplitter, QGraphicsItem, QGraphicsObject, QGraphicsLineItem, QGraphicsSimpleTextItem
+    QGraphicsPathItem, QSplitter
 )
 
 from src.utils.ui_constants import Layout, WindowSize
@@ -24,120 +24,62 @@ logger = logging.getLogger(__name__)
 
 class CalibrationPoint(QGraphicsEllipseItem):
     """
-    Represents a calibration point that can be dragged on the scene.
+    Custom QGraphicsEllipseItem for calibration points.
+    Supports moving and tracks its index.
     """
-    # Constants
-    RADIUS = 12  # 포인터 크기 증가
-    HOVER_RADIUS = 15  # hover 시 크기
-
-    def __init__(self, x, y, index, side, radius=None, parent=None):
+    
+    def __init__(self, x: float, y: float, index: int, radius: float = 10.0):
         """
         Initialize a calibration point.
-
+        
         Args:
             x (float): X-coordinate
             y (float): Y-coordinate
-            index (int): Index of the point
-            side (str): Side ('left' or 'right')
-            radius (float): Radius of the point
-            parent (QGraphicsItem): Parent item
+            index (int): Point index
+            radius (float): Point radius (default increased from 5.0 to 10.0)
         """
-        radius = radius or self.RADIUS
-        super().__init__(x - radius, y - radius, 2 * radius, 2 * radius, parent)
-        
+        super().__init__(x - radius, y - radius, radius * 2, radius * 2)
+        self.setFlag(QGraphicsEllipseItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsEllipseItem.ItemSendsGeometryChanges, True)
+        self.setFlag(QGraphicsEllipseItem.ItemIsSelectable, True)
+        self.setBrush(QBrush(Colors.ACCENT))
+        self.setPen(QPen(Colors.ACCENT.darker(120), 2))  # Increased pen width for better visibility
+        self.setZValue(1.0)  # Make points appear above the image
         self.index = index
-        self.side = side
         self.radius = radius
-        self.point_id = None  # Will be set externally (p00, p01, etc.)
         
-        # Make it draggable and selectable
-        self.setFlag(QGraphicsItem.ItemIsMovable, True)
-        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        # Set cursor to pointing hand
+        self.setCursor(QCursor(Qt.PointingHandCursor))
         
-        # Set appearance
-        if self.side == 'left':
-            brush_color = Qt.green
-        else:
-            brush_color = Qt.blue
-        
-        self.setBrush(QBrush(brush_color))
-        self.setPen(QPen(Qt.black, 2))
-        
-        # Set cursor to hand when hovering
-        self.setCursor(Qt.PointingHandCursor)
-
-        # 호버 효과 활성화
-        self.setAcceptHoverEvents(True)
-
-        # Add text label for point ID
-        self.text_item = QGraphicsSimpleTextItem(self)
-        font = QFont()
-        font.setBold(True)
-        self.text_item.setFont(font)
-        if self.point_id:
-            self.text_item.setText(self.point_id)
-        self.text_item.setPos(radius, -radius * 2)
-        self.text_item.setBrush(QBrush(Qt.black))
-
-    def hoverEnterEvent(self, event):
-        """
-        마우스가 포인터 위에 올라왔을 때의 이벤트 처리
-        """
-        # 호버 상태에서 크기 증가
-        curr_x, curr_y = self.pos().x(), self.pos().y()
-        self.setRect(-self.HOVER_RADIUS, -self.HOVER_RADIUS, 
-                     self.HOVER_RADIUS * 2, self.HOVER_RADIUS * 2)
-        super().hoverEnterEvent(event)
-
-    def hoverLeaveEvent(self, event):
-        """
-        마우스가 포인터에서 벗어났을 때의 이벤트 처리
-        """
-        # 원래 크기로 복원
-        curr_x, curr_y = self.pos().x(), self.pos().y()
-        self.setRect(-self.radius, -self.radius, self.radius * 2, self.radius * 2)
-        super().hoverLeaveEvent(event)
-
-    def center(self):
-        """
-        Get the center point.
-        
-        Returns:
-            QPointF: Center point
-        """
-        return QPointF(self.rect().center())
-    
     def itemChange(self, change, value):
         """
-        Handle item changes.
+        Handle position change events to keep track of the point's position.
         
         Args:
-            change: Type of change
-            value: New value
+            change: The type of change
+            value: The new value
             
         Returns:
-            The adjusted value
+            The processed value
         """
-        if change == QGraphicsItem.ItemPositionChange and self.scene():
-            # Update the text position
-            self.text_item.setPos(self.radius, -self.radius * 2)
+        if change == QGraphicsEllipseItem.ItemPositionChange and self.scene():
+            # Get the parent view for this item's scene
+            for view in self.scene().views():
+                if isinstance(view.parent().parent(), CalibrationTab):
+                    parent = view.parent().parent()
+                    x = value.x() + self.radius
+                    y = value.y() + self.radius
+                    
+                    # Determine which view this point belongs to
+                    if view == parent.left_view:
+                        side = 'left'
+                    else:
+                        side = 'right'
+                    
+                    # Emit the point moved signal
+                    parent.point_moved.emit(side, self.index, x, y)
             
-            # Notify the parent class
-            self.scene().parent().point_moved.emit(self.side, self.index, value.x() + self.radius, value.y() + self.radius)
-        
         return super().itemChange(change, value)
-    
-    def setPointId(self, point_id):
-        """
-        Set the point ID and update the text label.
-        
-        Args:
-            point_id (str): Point ID (e.g., 'p00')
-        """
-        self.point_id = point_id
-        if self.text_item:
-            self.text_item.setText(point_id)
 
 
 class CalibrationTab(QWidget):
@@ -288,30 +230,27 @@ class CalibrationTab(QWidget):
             logger.debug(f"Emitting point_added signal: {side}, {x}, {y}")
             self.point_added.emit(side, x, y)
     
-    def add_point_item(self, side: str, x: float, y: float, index: int, point_id: str = None):
+    def add_point_item(self, side: str, x: float, y: float, index: int):
         """
-        Add a point to the specified scene.
+        Add a calibration point item to the specified view.
         
         Args:
             side (str): 'left' or 'right'
             x (float): X-coordinate
             y (float): Y-coordinate
             index (int): Point index
-            point_id (str, optional): Point ID (e.g., 'p00')
         """
-        point = CalibrationPoint(x, y, index, side)
-        
-        if point_id:
-            point.setPointId(point_id)
+        point = CalibrationPoint(x, y, index)
         
         if side == 'left':
             self.left_scene.addItem(point)
             self.left_points[index] = point
-        else:
+        elif side == 'right':
             self.right_scene.addItem(point)
             self.right_points[index] = point
-        
-        return point
+        else:
+            logger.error(f"Invalid side: {side}")
+            return
     
     def update_point_item(self, side: str, index: int, x: float, y: float):
         """

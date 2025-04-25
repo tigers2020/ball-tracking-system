@@ -141,6 +141,9 @@ class AppController(QObject):
         # Set the stereo image model to the calibration controller
         self.view.calibration_controller.set_stereo_image_model(self.model)
         
+        # Set the config manager to the calibration controller
+        self.view.calibration_controller.set_config_manager(self.config_manager)
+        
         # Tracking data save settings
         self.tracking_data_save_enabled = True  # Enable/disable saving
         self.tracking_data_folder = os.path.join(os.getcwd(), "tracking_data")  # Default folder

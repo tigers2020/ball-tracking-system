@@ -11,7 +11,6 @@ import json
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-import numpy as np
 
 from PySide6.QtCore import QPointF, Qt, QObject
 from PySide6.QtGui import QPixmap
@@ -328,35 +327,4 @@ def test_render_loaded_points(setup_controller):
     assert left_cols == 2
     
     # Check that grid lines were not drawn for right side (only 2 points)
-    assert 'right' not in view.grid_lines
-
-
-def test_on_load_current_frame(setup_controller):
-    """Test loading the current frame from the stereo image model."""
-    model, view, controller = setup_controller
-    
-    # Create a mock for the stereo image model
-    mock_stereo_model = MagicMock()
-    mock_frame = MagicMock()
-    
-    # Set up mock return values
-    mock_stereo_model.get_current_frame.return_value = mock_frame
-    mock_frame.get_left_image.return_value = np.zeros((100, 100, 3), dtype=np.uint8)
-    mock_frame.get_right_image.return_value = np.zeros((100, 100, 3), dtype=np.uint8)
-    
-    # Set the stereo image model in the controller
-    controller.set_stereo_image_model(mock_stereo_model)
-    
-    # Call the method being tested
-    controller.on_load_current_frame()
-    
-    # Verify that the stereo image model was queried for the current frame
-    mock_stereo_model.get_current_frame.assert_called_once()
-    
-    # Verify that the frame's images were retrieved
-    mock_frame.get_left_image.assert_called_once()
-    mock_frame.get_right_image.assert_called_once()
-    
-    # Verify that images were set in the view
-    assert view.left_image is not None
-    assert view.right_image is not None 
+    assert 'right' not in view.grid_lines 

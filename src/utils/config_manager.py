@@ -81,6 +81,15 @@ class ConfigManager:
                 "sensor_height": 24.0,
                 "principal_point_x": 320.0,
                 "principal_point_y": 240.0
+            },
+            "calibration_points": {
+                "left": {},
+                "right": {},
+                "left_image_size": {"width": 0, "height": 0},
+                "right_image_size": {"width": 0, "height": 0},
+                "left_image_path": None,
+                "right_image_path": None,
+                "calib_ver": 1.2
             }
         }
         
@@ -344,6 +353,57 @@ class ConfigManager:
         self.set("camera_settings", current_settings)
         # Don't save immediately, allow throttling
         self.save_config(force=False)
+        
+    def get_calibration_points(self):
+        """
+        Get the calibration points settings.
+        
+        Returns:
+            dict: Calibration points settings
+        """
+        return self.get("calibration_points", self.default_config["calibration_points"])
+    
+    def set_calibration_points(self, calibration_points):
+        """
+        Set the calibration points settings.
+        
+        Args:
+            calibration_points (dict): Calibration points settings
+        """
+        current_settings = self.get_calibration_points().copy()
+        current_settings.update(calibration_points)
+        self.set("calibration_points", current_settings)
+        # Don't save immediately, allow throttling
+        self.save_config(force=False)
+    
+    def set_calibration_points_with_image_size(self, left_points=None, right_points=None, 
+                                              left_image_size=None, right_image_size=None):
+        """
+        Set calibration points with image size information.
+        
+        Args:
+            left_points (dict, optional): Dictionary of left calibration points (key: point_id, value: {x, y})
+            right_points (dict, optional): Dictionary of right calibration points (key: point_id, value: {x, y})
+            left_image_size (dict, optional): Dictionary with width and height of left image
+            right_image_size (dict, optional): Dictionary with width and height of right image
+        """
+        calib_points = self.get_calibration_points()
+        
+        if left_points is not None:
+            calib_points["left"] = left_points
+        
+        if right_points is not None:
+            calib_points["right"] = right_points
+            
+        if left_image_size is not None:
+            calib_points["left_image_size"] = left_image_size
+            
+        if right_image_size is not None:
+            calib_points["right_image_size"] = right_image_size
+            
+        self.set_calibration_points(calib_points)
+        # Force immediate save for calibration data to avoid potential loss
+        self.save_config(force=True)
 
     def validate_roi(self, roi_settings=None, image_width=None, image_height=None):
         """

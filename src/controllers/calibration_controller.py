@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from src.models.calibration_model import CalibrationModel
 from src.views.calibration_tab import CalibrationTab
+from src.utils.config_manager import ConfigManager
 import cv2
 from PySide6.QtGui import QImage, QPixmap
 
@@ -28,14 +29,14 @@ class CalibrationController(QObject):
     Connects the calibration model and view.
     """
     
-    def __init__(self, model: CalibrationModel, view: CalibrationTab, config_manager=None):
+    def __init__(self, model: CalibrationModel, view: CalibrationTab, config_manager: ConfigManager = None):
         """
         Initialize the calibration controller.
         
         Args:
             model (CalibrationModel): The calibration model
             view (CalibrationTab): The calibration view
-            config_manager (ConfigManager, optional): Configuration manager instance
+            config_manager (ConfigManager, optional): The configuration manager
         """
         super().__init__()
         
@@ -50,8 +51,8 @@ class CalibrationController(QObject):
         # Set up button connections
         self.view.clear_button.clicked.connect(self.on_clear_points)
         self.view.fine_tune_button.clicked.connect(self.on_fine_tune)
-        self.view.save_button.clicked.connect(self.on_save)
-        self.view.load_button.clicked.connect(self.on_load)
+        self.view.save_button.clicked.connect(self.on_save_to_config)
+        self.view.load_button.clicked.connect(self.on_load_from_config)
         self.view.load_current_frame_button.clicked.connect(self.on_load_current_frame)
         
         # Default calibration file directory
@@ -60,11 +61,9 @@ class CalibrationController(QObject):
         # Reference to the stereo image model (will be set from app_controller)
         self.stereo_image_model = None
         
-        # Fixed number of calibration points
-        self.num_points = 14
-        
-        # Point IDs (p00, p01, etc.)
-        self.point_ids = [f"p{i:02d}" for i in range(self.num_points)]
+        # Try to load calibration points from config if available
+        if self.config_manager:
+            self._load_points_from_config()
     
     @Slot(str, float, float)
     def on_add_point(self, side: str, x: float, y: float):
@@ -77,45 +76,20 @@ class CalibrationController(QObject):
             y (float): Y-coordinate
         """
         try:
-            # Get image dimensions for normalization
-            scene_rect = self.view.left_scene.sceneRect() if side == 'left' else self.view.right_scene.sceneRect()
-            width = scene_rect.width()
-            height = scene_rect.height()
+            # Add point to model
+            self.model.add_point(side, (x, y))
             
-            # Normalize coordinates (0-1 range)
-            norm_x = x / width if width > 0 else 0
-            norm_y = y / height if height > 0 else 0
-            
-            # Determine which point to update (based on how many we have)
+            # Get index of the newly added point
             points = self.model.get_points(side)
-            index = min(len(points), self.num_points - 1)
-            point_id = self.point_ids[index]
+            index = len(points) - 1
             
-            # If we already have max points, replace the last one
-            if len(points) >= self.num_points:
-                # Remove the last point from view
-                if side == 'left' and index in self.view.left_points:
-                    self.view.left_scene.removeItem(self.view.left_points[index])
-                    del self.view.left_points[index]
-                elif side == 'right' and index in self.view.right_points:
-                    self.view.right_scene.removeItem(self.view.right_points[index])
-                    del self.view.right_points[index]
-                
-                # Update the point in the model with normalized coordinates
-                self.model.update_point(side, index, (norm_x, norm_y))
-            else:
-                # Add new point to model with normalized coordinates
-                self.model.add_point(side, (norm_x, norm_y))
-            
-            # Add point item to view (with scene coordinates)
-            point_item = self.view.add_point_item(side, x, y, index)
-            if point_item:
-                point_item.point_id = point_id
+            # Add point item to view
+            self.view.add_point_item(side, x, y, index)
             
             # Update grid lines if we have enough points
             self._update_grid_lines(side)
             
-            logger.info(f"Added/updated point {point_id} at ({norm_x:.4f}, {norm_y:.4f}) to {side} view")
+            logger.info(f"Added point at ({x}, {y}) to {side} view")
         except Exception as e:
             logger.error(f"Error adding point: {e}")
     
@@ -131,22 +105,13 @@ class CalibrationController(QObject):
             y (float): New Y-coordinate
         """
         try:
-            # Get image dimensions for normalization
-            scene_rect = self.view.left_scene.sceneRect() if side == 'left' else self.view.right_scene.sceneRect()
-            width = scene_rect.width()
-            height = scene_rect.height()
-            
-            # Normalize coordinates (0-1 range)
-            norm_x = x / width if width > 0 else 0
-            norm_y = y / height if height > 0 else 0
-            
-            # Update point in model with normalized coordinates
-            self.model.update_point(side, index, (norm_x, norm_y))
+            # Update point in model
+            self.model.update_point(side, index, (x, y))
             
             # Update grid lines
             self._update_grid_lines(side)
             
-            logger.info(f"Moved point {index} to ({norm_x:.4f}, {norm_y:.4f}) in {side} view")
+            logger.info(f"Moved point {index} to ({x}, {y}) in {side} view")
         except Exception as e:
             logger.error(f"Error moving point: {e}")
     
@@ -174,72 +139,153 @@ class CalibrationController(QObject):
         # To be implemented in Week 3
     
     @Slot()
-    def on_save(self):
+    def on_save_to_config(self):
         """
-        Handle saving calibration points to config.json.
-        Uses the ConfigManager if available, otherwise falls back to file dialog.
+        Save calibration points to the configuration file using ConfigManager.
+        Normalizes coordinates to 0-1 range before saving.
         """
         try:
-            # Get normalized points from model
-            left_points = self.model.get_points('left')
-            right_points = self.model.get_points('right')
-            
-            # Get image sizes
-            left_size = {
-                "width": int(self.view.left_scene.sceneRect().width()),
-                "height": int(self.view.left_scene.sceneRect().height())
-            }
-            right_size = {
-                "width": int(self.view.right_scene.sceneRect().width()),
-                "height": int(self.view.right_scene.sceneRect().height())
-            }
-            
-            # Prepare calibration data in config.json format
-            calibration_data = {
-                "left": {},
-                "right": {},
-                "left_image_size": left_size,
-                "right_image_size": right_size,
-                "left_image_path": None,  # These could be set if needed
-                "right_image_path": None,
-                "calib_ver": 1.2
-            }
-            
-            # Convert points to the format used in config.json
-            for i, (x, y) in enumerate(left_points):
-                if i < self.num_points:
-                    point_id = self.point_ids[i]
-                    calibration_data["left"][point_id] = {
-                        "x": x,
-                        "y": y,
-                        "is_fine_tuned": False
-                    }
-            
-            for i, (x, y) in enumerate(right_points):
-                if i < self.num_points:
-                    point_id = self.point_ids[i]
-                    calibration_data["right"][point_id] = {
-                        "x": x,
-                        "y": y,
-                        "is_fine_tuned": False
-                    }
-            
-            # If we have a config manager, use it to save the data
-            if self.config_manager:
-                # Update the configuration
-                self.config_manager.set("calibration_points", calibration_data)
-                self.config_manager.save_config(force=True)
-                
-                # Show success message
-                QMessageBox.information(
+            if not self.config_manager:
+                logger.error("No ConfigManager available, cannot save to config")
+                QMessageBox.warning(
                     self.view,
-                    "Save Successful",
-                    "Calibration data saved to configuration."
+                    "Save Failed",
+                    "Configuration manager not available"
                 )
-                logger.info("Calibration data saved to configuration")
                 return
+            
+            # Get the image dimensions from view's scenes
+            left_scene = self.view.left_scene
+            right_scene = self.view.right_scene
+            
+            left_width = left_scene.width()
+            left_height = left_scene.height()
+            right_width = right_scene.width()
+            right_height = right_scene.height()
+            
+            # Update model with image dimensions
+            self.model.set_image_dimensions('left', left_width, left_height)
+            self.model.set_image_dimensions('right', right_width, right_height)
+            
+            # Get normalized calibration data
+            normalized_data = self.model.to_normalized_dict()
+            
+            # Check if we have all 14 points for both sides
+            left_point_count = len(self.model.get_points('left'))
+            right_point_count = len(self.model.get_points('right'))
+            
+            if left_point_count < self.model.MAX_POINTS or right_point_count < self.model.MAX_POINTS:
+                warning_msg = (f"Warning: Incomplete calibration points.\n"
+                              f"Left: {left_point_count}/{self.model.MAX_POINTS}\n"
+                              f"Right: {right_point_count}/{self.model.MAX_POINTS}\n\n"
+                              f"Continue anyway?")
                 
-            # Fallback to file dialog if no config_manager
+                reply = QMessageBox.warning(
+                    self.view, 
+                    "Incomplete Calibration",
+                    warning_msg, 
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                
+                if reply == QMessageBox.No:
+                    return
+            
+            # Save to config
+            self.config_manager.set_calibration_points(normalized_data)
+            
+            # Show success message
+            QMessageBox.information(
+                self.view,
+                "Save Successful",
+                "Calibration points saved to configuration"
+            )
+            
+            logger.info(f"Saved {left_point_count} left points and {right_point_count} right points to config")
+        except Exception as e:
+            logger.error(f"Error saving calibration points to config: {e}")
+            QMessageBox.critical(
+                self.view,
+                "Save Error",
+                f"An error occurred while saving to config: {str(e)}"
+            )
+    
+    @Slot()
+    def on_load_from_config(self):
+        """
+        Load calibration points from the configuration file using ConfigManager.
+        Converts normalized coordinates (0-1) to pixel coordinates.
+        """
+        try:
+            if not self.config_manager:
+                logger.error("No ConfigManager available, cannot load from config")
+                QMessageBox.warning(
+                    self.view,
+                    "Load Failed",
+                    "Configuration manager not available"
+                )
+                return
+            
+            # Get calibration data from config
+            calibration_data = self.config_manager.get_calibration_points()
+            
+            if not calibration_data or not calibration_data.get("left") or not calibration_data.get("right"):
+                logger.warning("No calibration points found in configuration")
+                QMessageBox.warning(
+                    self.view,
+                    "Load Failed",
+                    "No calibration points found in configuration"
+                )
+                return
+            
+            # Get the image dimensions from view's scenes
+            left_scene = self.view.left_scene
+            right_scene = self.view.right_scene
+            
+            left_width = left_scene.width()
+            left_height = left_scene.height()
+            right_width = right_scene.width()
+            right_height = right_scene.height()
+            
+            # Update model with current image dimensions
+            self.model.set_image_dimensions('left', left_width, left_height)
+            self.model.set_image_dimensions('right', right_width, right_height)
+            
+            # Clear existing points
+            self.model.clear_points()
+            self.view.clear_points()
+            
+            # Load normalized data into model
+            self.model.from_normalized_dict(calibration_data)
+            
+            # Update view with loaded points
+            self._render_loaded_points()
+            
+            # Show success message
+            left_point_count = len(self.model.get_points('left'))
+            right_point_count = len(self.model.get_points('right'))
+            
+            QMessageBox.information(
+                self.view,
+                "Load Successful",
+                f"Loaded {left_point_count} left points and {right_point_count} right points from configuration"
+            )
+            
+            logger.info(f"Loaded {left_point_count} left points and {right_point_count} right points from config")
+        except Exception as e:
+            logger.error(f"Error loading calibration points from config: {e}")
+            QMessageBox.critical(
+                self.view,
+                "Load Error",
+                f"An error occurred while loading from config: {str(e)}"
+            )
+    
+    @Slot()
+    def on_save(self):
+        """
+        Handle saving calibration points to a JSON file.
+        Opens a file dialog for the user to choose the save location.
+        """
+        try:
             # Ensure default save directory exists
             self.default_save_dir.mkdir(parents=True, exist_ok=True)
             
@@ -284,44 +330,10 @@ class CalibrationController(QObject):
     @Slot()
     def on_load(self):
         """
-        Handle loading calibration points from config.json.
-        Uses the ConfigManager if available, otherwise falls back to file dialog.
+        Handle loading calibration points from a file.
+        Opens a file dialog for the user to choose the file to load.
         """
         try:
-            # Clear existing points first
-            self.model.clear_points()
-            self.view.clear_points()
-            
-            # If we have a config manager, use it to load the data
-            if self.config_manager:
-                # Get the calibration data
-                calib_data = self.config_manager.get("calibration_points")
-                
-                if not calib_data:
-                    logger.warning("No calibration data found in configuration")
-                    QMessageBox.warning(
-                        self.view,
-                        "Load Failed",
-                        "No calibration data found in configuration."
-                    )
-                    return
-                
-                # Load points from config format
-                self._load_points_from_config(calib_data)
-                
-                # Update view with loaded points
-                self._render_loaded_points()
-                
-                # Show success message
-                QMessageBox.information(
-                    self.view,
-                    "Load Successful",
-                    "Calibration data loaded from configuration."
-                )
-                logger.info("Calibration data loaded from configuration")
-                return
-                
-            # Fallback to file dialog if no config_manager
             # Open file dialog
             file_path, _ = QFileDialog.getOpenFileName(
                 self.view,
@@ -334,6 +346,10 @@ class CalibrationController(QObject):
                 logger.info("Load operation canceled by user")
                 return
                 
+            # Clear existing points first
+            self.model.clear_points()
+            self.view.clear_points()
+            
             # Load calibration data
             success = self.model.load_from_file(file_path)
             
@@ -362,75 +378,44 @@ class CalibrationController(QObject):
                 "Load Error",
                 f"An error occurred while loading: {str(e)}"
             )
-    
-    def _load_points_from_config(self, calib_data):
-        """
-        Load calibration points from config data format.
-        
-        Args:
-            calib_data (dict): Calibration data from config
-        """
-        # Load left points
-        if "left" in calib_data:
-            left_points = []
-            # Sort by point IDs to maintain order
-            for point_id in sorted(calib_data["left"].keys()):
-                point = calib_data["left"][point_id]
-                left_points.append((point["x"], point["y"]))
             
-            # Add points to model
-            for x, y in left_points:
-                self.model.add_point("left", (x, y))
+    def _load_points_from_config(self):
+        """
+        Load calibration points from the configuration manager.
+        Called during initialization if config_manager is available.
+        """
+        try:
+            if not self.config_manager:
+                return
                 
-        # Load right points
-        if "right" in calib_data:
-            right_points = []
-            # Sort by point IDs to maintain order
-            for point_id in sorted(calib_data["right"].keys()):
-                point = calib_data["right"][point_id]
-                right_points.append((point["x"], point["y"]))
+            # Get calibration data from config
+            calibration_data = self.config_manager.get_calibration_points()
             
-            # Add points to model
-            for x, y in right_points:
-                self.model.add_point("right", (x, y))
+            if not calibration_data or not calibration_data.get("left") or not calibration_data.get("right"):
+                logger.debug("No calibration points found in configuration during initialization")
+                return
+                
+            # We'll defer loading the points until we have a valid scene with dimensions
+            # This will be triggered when the view is shown and images are loaded
+            logger.info("Calibration data found in config, will load when view is ready")
+            
+        except Exception as e:
+            logger.error(f"Error loading calibration points from config during initialization: {e}")
     
     def _render_loaded_points(self):
         """
         Render points loaded from file in the view.
         Called after loading points from a file.
-        Converts normalized coordinates back to scene coordinates.
         """
-        # Get scene dimensions
-        left_width = self.view.left_scene.sceneRect().width()
-        left_height = self.view.left_scene.sceneRect().height()
-        right_width = self.view.right_scene.sceneRect().width()
-        right_height = self.view.right_scene.sceneRect().height()
-        
         # Render left points
         left_points = self.model.get_points('left')
-        for index, (norm_x, norm_y) in enumerate(left_points):
-            # Convert normalized coordinates to scene coordinates
-            scene_x = norm_x * left_width
-            scene_y = norm_y * left_height
-            
-            # Add point to view
-            point_id = self.point_ids[index] if index < len(self.point_ids) else f"p{index:02d}"
-            point_item = self.view.add_point_item('left', scene_x, scene_y, index)
-            if point_item:
-                point_item.point_id = point_id
+        for index, (x, y) in enumerate(left_points):
+            self.view.add_point_item('left', x, y, index)
             
         # Render right points
         right_points = self.model.get_points('right')
-        for index, (norm_x, norm_y) in enumerate(right_points):
-            # Convert normalized coordinates to scene coordinates
-            scene_x = norm_x * right_width
-            scene_y = norm_y * right_height
-            
-            # Add point to view
-            point_id = self.point_ids[index] if index < len(self.point_ids) else f"p{index:02d}"
-            point_item = self.view.add_point_item('right', scene_x, scene_y, index)
-            if point_item:
-                point_item.point_id = point_id
+        for index, (x, y) in enumerate(right_points):
+            self.view.add_point_item('right', x, y, index)
             
         # Update grid lines
         if left_points:
@@ -453,17 +438,6 @@ class CalibrationController(QObject):
         if len(points) < 4:
             return
         
-        # Get scene dimensions for denormalization
-        if side == 'left':
-            width = self.view.left_scene.sceneRect().width()
-            height = self.view.left_scene.sceneRect().height()
-        else:
-            width = self.view.right_scene.sceneRect().width()
-            height = self.view.right_scene.sceneRect().height()
-        
-        # Denormalize coordinates for display
-        scene_points = [(x * width, y * height) for x, y in points]
-        
         # Determine grid dimensions (assume square grid for now)
         # We'll refine this in later weeks
         grid_size = int(len(points) ** 0.5)
@@ -471,7 +445,7 @@ class CalibrationController(QObject):
         cols = grid_size
         
         # Draw grid lines
-        self.view.draw_grid_lines(side, scene_points, rows, cols)
+        self.view.draw_grid_lines(side, points, rows, cols)
     
     def set_images(self, left_image, right_image):
         """
@@ -483,9 +457,32 @@ class CalibrationController(QObject):
         """
         self.view.set_images(left_image, right_image)
         
-        # Re-render points to update positions
-        if (self.model.get_points('left') or self.model.get_points('right')):
-            self._render_loaded_points()
+        # After setting images, try to load points from config if available
+        if self.config_manager:
+            # Get the image dimensions from view's scenes
+            left_scene = self.view.left_scene
+            right_scene = self.view.right_scene
+            
+            left_width = left_scene.width()
+            left_height = left_scene.height()
+            right_width = right_scene.width()
+            right_height = right_scene.height()
+            
+            # Update model with current image dimensions
+            self.model.set_image_dimensions('left', left_width, left_height)
+            self.model.set_image_dimensions('right', right_width, right_height)
+            
+            # Load calibration data from config
+            calibration_data = self.config_manager.get_calibration_points()
+            
+            if calibration_data and (calibration_data.get("left") or calibration_data.get("right")):
+                # Load normalized data into model
+                self.model.from_normalized_dict(calibration_data)
+                
+                # Update view with loaded points
+                self._render_loaded_points()
+                
+                logger.info("Loaded calibration points from config after setting images")
         
     def set_stereo_image_model(self, stereo_image_model):
         """
@@ -496,23 +493,14 @@ class CalibrationController(QObject):
         """
         self.stereo_image_model = stereo_image_model
     
-    def set_config_manager(self, config_manager):
+    def set_config_manager(self, config_manager: ConfigManager):
         """
         Set the configuration manager reference.
         
         Args:
-            config_manager: ConfigManager instance
+            config_manager (ConfigManager): ConfigManager instance
         """
         self.config_manager = config_manager
-        
-        # If we have config_manager, load calibration points if available
-        if self.config_manager:
-            calib_data = self.config_manager.get("calibration_points")
-            if calib_data:
-                self.model.clear_points()
-                self.view.clear_points()
-                self._load_points_from_config(calib_data)
-                self._render_loaded_points()
     
     @Slot()
     def on_load_current_frame(self):
@@ -570,7 +558,7 @@ class CalibrationController(QObject):
             right_pixmap = QPixmap.fromImage(right_qimg)
             
             # Set images in the view
-            self.set_images(left_pixmap, right_pixmap)
+            self.view.set_images(left_pixmap, right_pixmap)
             
             logger.info("Loaded current frame into calibration view")
             
