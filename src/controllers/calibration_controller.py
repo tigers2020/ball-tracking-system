@@ -8,16 +8,19 @@ This module contains the CalibrationController class which connects the calibrat
 
 import logging
 import os
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional, Any
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Slot
 from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtGui import QPen, QColor
 
 from src.models.calibration_model import CalibrationModel
-from src.views.calibration_tab import CalibrationTab
+from src.models.stereo_image_model import StereoImageModel
+from src.models.config_model import CalibrationConfig
+from src.views.calibration_view import CalibrationView
 from src.utils.config_manager import ConfigManager
-from src.utils.geometry import pixel_to_scene, scene_to_pixel
+from src.utils.geometry import pixel_to_scene, scene_to_pixel, get_scale_factors
 import cv2
 from PySide6.QtGui import QImage, QPixmap
 
@@ -25,6 +28,7 @@ from PySide6.QtGui import QImage, QPixmap
 from src.services.roi_cropper import crop_roi, crop_roi_with_padding
 from src.services.skeletonizer import skeletonize_roi
 from src.services.intersection_finder import find_and_sort_intersections
+from src.services.calibration_fine_tuning_service import CalibrationFineTuningService
 
 import numpy as np
 
@@ -37,20 +41,28 @@ class CalibrationController(QObject):
     Connects the calibration model and view.
     """
     
-    def __init__(self, model: CalibrationModel, view: CalibrationTab, config_manager: ConfigManager = None):
+    def __init__(self, 
+                model: StereoImageModel, 
+                view: CalibrationView, 
+                config_manager: Optional[ConfigManager] = None,
+                fine_tuning_service: Optional[CalibrationFineTuningService] = None):
         """
         Initialize the calibration controller.
         
         Args:
-            model (CalibrationModel): The calibration model
-            view (CalibrationTab): The calibration view
-            config_manager (ConfigManager, optional): The configuration manager
+            model: The stereo image model
+            view: The calibration view
+            config_manager: Optional configuration manager for loading/saving calibration
+            fine_tuning_service: Optional service for fine-tuning calibration points
         """
         super().__init__()
         
         self.model = model
         self.view = view
         self.config_manager = config_manager
+        
+        # Initialize the fine-tuning service (use provided one or create new)
+        self.fine_tuning_service = fine_tuning_service or CalibrationFineTuningService()
         
         # Set up point adding/moving connections
         self.view.point_added.connect(self.on_add_point)
@@ -85,84 +97,76 @@ class CalibrationController(QObject):
             self._load_points_from_config()
     
     @Slot(str, float, float)
-    def on_add_point(self, side, scene_x, scene_y):
+    def on_add_point(self, side: str, scene_x: float, scene_y: float):
         """
-        Add a point to the scene and update the model
+        Handle adding a point when the user clicks on one of the scenes.
         
         Args:
-            side (str): 'left' or 'right' to indicate which view
-            scene_x (float): x coordinate in scene coordinates
-            scene_y (float): y coordinate in scene coordinates
+            side (str): Which side the point was added on ('left' or 'right')
+            scene_x (float): The x-coordinate in the scene
+            scene_y (float): The y-coordinate in the scene
         """
         if side not in ['left', 'right']:
-            logger.error(f"Invalid side specified: {side}")
+            logger.error(f"Invalid side: {side}")
+            return
+        
+        # Convert scene coordinates to model coordinates (pixels) using view's method
+        pixel_x, pixel_y = self.view.scene_to_pixel(side, scene_x, scene_y)
+        
+        logger.info(f"Adding point on {side} side at scene coordinates: "
+                   f"({scene_x:.2f}, {scene_y:.2f}), pixel coordinates: ({pixel_x:.2f}, {pixel_y:.2f})")
+        
+        # Use add_point to add a new point to the model
+        point_id = self.model.add_point(side, (pixel_x, pixel_y))
+        if point_id < 0:
+            logger.error(f"Failed to add point to {side} side")
             return
             
-        width_scale, height_scale = self._get_view_scale(side)
-        if width_scale == 0 or height_scale == 0:
-            logger.error(f"Invalid scale calculated for {side} view: ({width_scale}, {height_scale})")
-            return
-
-        # Convert scene coordinates to model coordinates (pixels)
-        pixel_x = scene_x / width_scale
-        pixel_y = scene_y / height_scale
-        
-        logger.info(f"Adding point to {side} at scene({scene_x:.1f}, {scene_y:.1f}), "
-                   f"pixel({pixel_x:.1f}, {pixel_y:.1f})")
-        
-        # Add to model
-        point_id = self.model.add_point(side, (pixel_x, pixel_y))
-        
-        # Add to view - view works with scene coordinates
+        # Add the point directly to the view
         self.view.add_point(side, point_id, scene_x, scene_y)
         
         # Update grid lines after adding a point
-        self._update_grid_lines(side)
+        self._update_grid_lines()
     
     @Slot(str, int, float, float)
-    def on_move_point(self, side, point_id, scene_x, scene_y):
+    def on_move_point(self, side: str, point_id: int, scene_x: float, scene_y: float):
         """
-        Handle moving a point
+        Handle moving a point when the user drags it in the scene.
         
         Args:
-            side (str): 'left' or 'right' to indicate which view
-            point_id (int): The ID of the point to move
-            scene_x (float): New x coordinate in scene coordinates
-            scene_y (float): New y coordinate in scene coordinates
+            side (str): Which side the point was moved on ('left' or 'right')
+            point_id (int): The ID of the point being moved
+            scene_x (float): The new x-coordinate in the scene
+            scene_y (float): The new y-coordinate in scene coordinates
         """
         if side not in ['left', 'right']:
-            logger.error(f"Invalid side specified: {side}")
-            return
-            
-        width_scale, height_scale = self._get_view_scale(side)
-        if width_scale == 0 or height_scale == 0:
-            logger.error(f"Invalid scale calculated for {side} view: ({width_scale}, {height_scale})")
+            logger.error(f"Invalid side: {side}")
             return
         
-        # Convert scene coordinates to model coordinates (pixels)
-        pixel_x = scene_x / width_scale
-        pixel_y = scene_y / height_scale
+        # Convert scene coordinates to model coordinates (pixels) using view's method
+        pixel_x, pixel_y = self.view.scene_to_pixel(side, scene_x, scene_y)
         
-        logger.info(f"Moving point {point_id} in {side} to scene({scene_x:.1f}, {scene_y:.1f}), "
-                   f"pixel({pixel_x:.1f}, {pixel_y:.1f})")
+        logger.info(f"Moving point {point_id} on {side} side to scene coordinates: "
+                  f"({scene_x:.2f}, {scene_y:.2f}), pixel coordinates: ({pixel_x:.2f}, {pixel_y:.2f})")
         
-        # Update in model
+        # Update the point in the model based on side
         self.model.update_point(side, point_id, (pixel_x, pixel_y))
         
-        # Update in view (view uses scene coordinates)
-        self.view.update_point(side, point_id, scene_x, scene_y)
+        # 포인트 이동 도중에는 view를 다시 업데이트하지 않음
+        # CalibrationPoint 객체의 드래그는 사용자 입력에 의해 이미 처리되고 있음
+        # 드래그가 완료된 후에만 필요한 경우 그리드 라인을 업데이트
         
         # Update grid lines after moving a point
-        self._update_grid_lines(side)
+        self._update_grid_lines()
     
     @Slot()
     def on_clear_points(self):
         """Handle clearing all points."""
         try:
-            # Clear points in model
+            # Model에서 포인트 제거
             self.model.clear_points()
             
-            # Clear points in view
+            # View에서 포인트 제거
             self.view.clear_points()
             
             logger.info("Cleared all calibration points")
@@ -172,171 +176,76 @@ class CalibrationController(QObject):
     @Slot()
     def on_fine_tune(self):
         """
-        Handle fine-tuning points using computer vision techniques.
-        Extracts a Region of Interest (ROI) around each calibration point,
-        skeletonizes the ROI, finds intersections, and updates the point
-        to the nearest intersection.
+        Handle fine-tuning calibration points.
+        This processes both left and right images to improve the accuracy of calibration points.
         """
-        try:
-            # Get stereo image model to access images
-            if not self.stereo_image_model:
-                logger.warning("No stereo image model available, cannot fine-tune points")
-                QMessageBox.warning(
-                    self.view,
-                    "Fine-Tune Failed",
-                    "No stereo image model available. Load images first."
-                )
-                return
-                
-            # Get the current frame from stereo image model
-            current_frame = self.stereo_image_model.get_current_frame()
-            if not current_frame:
-                logger.warning("No current frame available, cannot fine-tune points")
-                QMessageBox.warning(
-                    self.view,
-                    "Fine-Tune Failed",
-                    "No current frame available. Load images first."
-                )
-                return
-                
-            # Get left and right images from the frame
-            left_img = current_frame.get_left_image()
-            right_img = current_frame.get_right_image()
-            
-            if left_img is None or right_img is None:
-                logger.warning("Failed to get images from current frame, cannot fine-tune points")
-                QMessageBox.warning(
-                    self.view,
-                    "Fine-Tune Failed",
-                    "Failed to get images from current frame."
-                )
-                return
-                
-            # Fine-tune left points
-            self._fine_tune_points('left', left_img)
-            
-            # Fine-tune right points
-            self._fine_tune_points('right', right_img)
-            
-            # Update grid lines
-            self._update_grid_lines('left')
-            self._update_grid_lines('right')
-            
-            # Show success message
-            QMessageBox.information(
+        # Get the current images from view
+        left_image = self.view.get_left_image()
+        right_image = self.view.get_right_image()
+        
+        if left_image is None or right_image is None:
+            logger.error("No images available for fine-tuning")
+            QMessageBox.warning(
                 self.view,
-                "Fine-Tune Successful",
-                "Calibration points have been fine-tuned.\n"
-                "Points may have been adjusted to nearby intersections."
+                "Fine Tuning Failed",
+                "No images available for fine-tuning"
             )
-            
-            logger.info("Fine-tuned calibration points successfully")
-            
-        except Exception as e:
-            logger.error(f"Error fine-tuning points: {e}")
-            QMessageBox.critical(
+            return
+        
+        # Get current points from model
+        left_points = [self.model.get_point('left', i) for i in range(self.model.get_point_count('left'))]
+        right_points = [self.model.get_point('right', i) for i in range(self.model.get_point_count('right'))]
+        
+        # Filter out None values
+        left_points = [p for p in left_points if p is not None]
+        right_points = [p for p in right_points if p is not None]
+        
+        if not left_points and not right_points:
+            logger.warning("No calibration points available for fine-tuning")
+            QMessageBox.warning(
                 self.view,
-                "Fine-Tune Error",
-                f"An error occurred while fine-tuning points: {str(e)}"
+                "Fine Tuning Failed",
+                "No calibration points available for fine-tuning"
             )
-            
-    def _fine_tune_points(self, side: str, image: np.ndarray):
-        """
-        Fine-tune points for a specific side using computer vision.
+            return
         
-        Args:
-            side (str): 'left' or 'right'
-            image (np.ndarray): Image for the specified side
-        """
-        # Get points for this side
-        points = self.model.get_points(side)
+        # Perform fine-tuning
+        results = self.fine_tuning_service.fine_tune_calibration_points(
+            left_image=left_image,
+            right_image=right_image,
+            left_points=left_points,
+            right_points=right_points
+        )
         
-        # Get image dimensions
-        img_height, img_width = image.shape[:2]
+        # Process results and update model/view
+        adjusted_count = 0
         
-        # Get scale factors for this view
-        w_scale, h_scale = self._get_view_scale(side)
+        # Update left points
+        for idx, result in results.get('left', {}).items():
+            if result.get('success', False):
+                adjusted_x, adjusted_y = result['adjusted']
+                self.model.update_point('left', idx, (adjusted_x, adjusted_y))
+                adjusted_count += 1
+                
+        # Update right points  
+        for idx, result in results.get('right', {}).items():
+            if result.get('success', False):
+                adjusted_x, adjusted_y = result['adjusted']
+                self.model.update_point('right', idx, (adjusted_x, adjusted_y))
+                adjusted_count += 1
+                
+        # Update the view
+        self._render_points()
+        self._update_grid_lines()
         
-        # Calculate dynamic ROI radius based on image size (approximately 2.5% of image width)
-        roi_radius = max(int(img_width * 0.025), 15)  # Min 15 pixels
-        logger.info(f"Using dynamic ROI radius of {roi_radius} pixels for {side} image ({img_width}x{img_height})")
+        logger.info(f"Fine-tuning complete. Adjusted {adjusted_count} points.")
         
-        # Loop through each point
-        for index, point in enumerate(points):
-            try:
-                # Show ROI overlay to indicate processing
-                # Convert model point to scene coordinates for display
-                scene_x = point[0] * w_scale
-                scene_y = point[1] * h_scale
-                self.view.show_roi(side, (scene_x, scene_y), roi_radius * w_scale)  # Scale ROI radius too
-                
-                # Extract ROI around the point (using model coordinates - original pixels)
-                roi = crop_roi(image, point, radius=roi_radius)
-                
-                if roi is None:
-                    logger.warning(f"Failed to crop ROI for {side} point {index}")
-                    continue
-                
-                # Skeletonize ROI
-                skeleton = skeletonize_roi(roi)
-                
-                # Find intersections in skeletonized ROI
-                # We'll use the ROI center (half of width/height) as the origin reference 
-                # for sorting intersections by proximity
-                roi_height, roi_width = roi.shape[:2]
-                roi_center = (roi_width // 2, roi_height // 2)
-                
-                intersections = find_and_sort_intersections(skeleton, roi_center, max_points=3)
-                
-                # If intersections found, use the closest one
-                if intersections:
-                    # Get the closest intersection (the first in the sorted list)
-                    best_x, best_y = intersections[0]
-                    
-                    # Calculate the offset to convert ROI coordinates to image coordinates
-                    roi_with_padding, (offset_x, offset_y) = crop_roi_with_padding(image, point, radius=roi_radius)
-                    
-                    # Adjust intersection coordinates to image coordinates (original pixel space)
-                    adjusted_x = best_x + offset_x
-                    adjusted_y = best_y + offset_y
-                    
-                    # Calculate adjustment distance for logging
-                    adjustment_distance = ((adjusted_x - point[0])**2 + (adjusted_y - point[1])**2)**0.5
-                    logger.info(f"Fine-tuned {side} point {index} from {point} to ({adjusted_x:.1f}, {adjusted_y:.1f}), "
-                               f"adjustment distance: {adjustment_distance:.2f} pixels")
-                    
-                    # Update the point in the model (store original pixel coordinates)
-                    self.model.update_point(side, index, (adjusted_x, adjusted_y))
-                    
-                    # Convert pixel coordinates to scene coordinates for display
-                    # Get the latest scale factors to ensure accuracy
-                    # Important: we need to recalculate scale after each point update
-                    # to ensure we're using the most accurate values
-                    current_w_scale, current_h_scale = self._get_view_scale(side)
-                    scene_x = adjusted_x * current_w_scale
-                    scene_y = adjusted_y * current_h_scale
-                    
-                    logger.debug(f"Converted pixel ({adjusted_x:.1f}, {adjusted_y:.1f}) to scene ({scene_x:.1f}, {scene_y:.1f}) "
-                                f"using scale factors ({current_w_scale:.3f}, {current_h_scale:.3f})")
-                    
-                    # Update the point position in the view (using scene coordinates)
-                    self.view.update_point(side, index, scene_x, scene_y)
-                else:
-                    logger.warning(f"No intersections found for {side} point {index}")
-                
-                # Hide ROI overlay
-                self.view.hide_roi(side)
-                
-            except Exception as e:
-                logger.error(f"Error fine-tuning {side} point {index}: {e}")
-                
-                # Hide ROI overlay on error
-                self.view.hide_roi(side)
-                
-                # Continue to next point rather than aborting
-                continue
-                
-        logger.info(f"Completed fine-tuning {len(points)} {side} points")
+        # Show success message
+        QMessageBox.information(
+            self.view,
+            "Fine Tuning Complete",
+            f"Fine-tuning complete. Adjusted {adjusted_count} points."
+        )
     
     @Slot()
     def on_save_to_config(self):
@@ -458,7 +367,7 @@ class CalibrationController(QObject):
             self.model.from_normalized_dict(calibration_data)
             
             # Update view with loaded points
-            self._render_loaded_points()
+            self._render_points()
             
             # Show success message
             left_point_count = len(self.model.get_points('left'))
@@ -555,7 +464,7 @@ class CalibrationController(QObject):
             
             if success:
                 # Update view with loaded points
-                self._render_loaded_points()
+                self._render_points()
                 
                 # Show success message
                 QMessageBox.information(
@@ -602,62 +511,80 @@ class CalibrationController(QObject):
         except Exception as e:
             logger.error(f"Error loading calibration points from config during initialization: {e}")
     
-    def _render_loaded_points(self):
-        """
-        Render points loaded from file in the view.
-        Called after loading points from a file.
-        """
-        # Get image dimensions
-        left_w_scale, left_h_scale = self._get_view_scale('left')
-        right_w_scale, right_h_scale = self._get_view_scale('right')
+    def _render_points(self):
+        """Render all points in the view."""
+        # Clear existing points from view
+        self.view.clear_points()
+        
+        # Get number of points from model
+        left_point_count = self.model.get_point_count('left')
+        right_point_count = self.model.get_point_count('right')
         
         # Render left points
-        left_points = self.model.get_points('left')
-        for index, (x, y) in enumerate(left_points):
-            # Scale original pixel coordinates to scene coordinates using the correct scale
-            scene_x = x * left_w_scale
-            scene_y = y * left_h_scale
-            
-            self.view.add_point('left', index, scene_x, scene_y)
+        for index in range(left_point_count):
+            point = self.model.get_point('left', index)
+            if point is not None:
+                # Convert pixel coordinates to scene coordinates using view's method
+                scene_x, scene_y = self.view.pixel_to_scene('left', point[0], point[1])
+                
+                # Add point to view
+                self.view.add_point('left', index, scene_x, scene_y)
             
         # Render right points
-        right_points = self.model.get_points('right')
-        for index, (x, y) in enumerate(right_points):
-            # Scale original pixel coordinates to scene coordinates using the correct scale
-            scene_x = x * right_w_scale
-            scene_y = y * right_h_scale
-            
-            self.view.add_point('right', index, scene_x, scene_y)
-            
+        for index in range(right_point_count):
+            point = self.model.get_point('right', index)
+            if point is not None:
+                # Convert pixel coordinates to scene coordinates using view's method
+                scene_x, scene_y = self.view.pixel_to_scene('right', point[0], point[1])
+                
+                # Add point to view
+                self.view.add_point('right', index, scene_x, scene_y)
+        
         # Update grid lines
-        if left_points:
-            self._update_grid_lines('left')
-        if right_points:
-            self._update_grid_lines('right')
+        self._update_grid_lines()
             
-        logger.info(f"Rendered {len(left_points)} left points and {len(right_points)} right points")
+        logger.info(f"Rendered {left_point_count} left points and {right_point_count} right points")
     
-    def _update_grid_lines(self, side: str):
+    def _update_grid_lines(self, side=None):
         """
-        Update grid lines for the specified side.
+        Update grid lines for the specified side or both sides if side is None.
         
         Args:
-            side (str): 'left' or 'right'
+            side (str, optional): 'left', 'right', or None for both sides
         """
-        points = self.model.get_points(side)
+        sides = [side] if side else ['left', 'right']
         
-        # Only draw grid lines if we have enough points
-        if len(points) < 4:
-            return
-        
-        # Determine grid dimensions (assume square grid for now)
-        # We'll refine this in later weeks
-        grid_size = int(len(points) ** 0.5)
-        rows = grid_size
-        cols = grid_size
-        
-        # Draw grid lines
-        self.view.draw_grid_lines(side, points, rows, cols)
+        for current_side in sides:
+            # Get points for the current side
+            if current_side == 'left':
+                point_count = self.model.get_point_count('left')
+                points = [self.model.get_point('left', i) for i in range(point_count)]
+                # Filter out None values
+                points = [p for p in points if p is not None]
+            else:  # 'right'
+                point_count = self.model.get_point_count('right')
+                points = [self.model.get_point('right', i) for i in range(point_count)]
+                # Filter out None values
+                points = [p for p in points if p is not None]
+            
+            # Only draw grid lines if we have enough points
+            if len(points) < 4:
+                continue
+            
+            # Determine grid dimensions (assume square grid for now)
+            grid_size = int(len(points) ** 0.5)
+            rows = grid_size
+            cols = grid_size
+            
+            # 각 포인트를 scene 좌표로 변환
+            scene_points = []
+            for point in points:
+                # 점들을 scene 좌표로 변환
+                scene_x, scene_y = self.view.pixel_to_scene(current_side, point[0], point[1])
+                scene_points.append((scene_x, scene_y))
+            
+            # Draw grid lines
+            self.view.draw_grid_lines(current_side, scene_points, rows, cols)
     
     def set_images(self, left_image, right_image):
         """
@@ -691,7 +618,7 @@ class CalibrationController(QObject):
                 self.model.from_normalized_dict(calibration_data)
                 
                 # Update view with loaded points
-                self._render_loaded_points()
+                self._render_points()
                 
                 logger.info("Loaded calibration points from config after setting images")
         
@@ -788,32 +715,127 @@ class CalibrationController(QObject):
                 f"An error occurred while loading the current frame: {str(e)}"
             )
     
-    def _get_view_scale(self, side):
+    def _render_point(self, side: str, point_id: int):
         """
-        Calculate the scaling factor between model coordinates (pixels) and view coordinates (scene).
+        Render a specific point in the view.
         
         Args:
-            side (str): 'left' or 'right' to indicate which view
+            side (str): 'left' or 'right'
+            point_id (int): The id of the point to render
+        """
+        try:
+            point = self.model.get_point(side, point_id)
+            
+            if point:
+                # Convert pixel coordinates to scene coordinates
+                scene_x, scene_y = self.view.pixel_to_scene(side, point[0], point[1])
+                
+                # Update the point view directly
+                self.view.update_point(side, point_id, scene_x, scene_y)
+                
+                logger.debug(f"Rendered point {point_id} on {side} side at scene({scene_x:.1f}, {scene_y:.1f}), pixel({point[0]:.1f}, {point[1]:.1f})")
+        except Exception as e:
+            logger.error(f"Failed to render point {point_id} on {side} side: {e}")
+    
+    def add_grid_line(self, side: str, start_point: tuple, end_point: tuple, color: str = None):
+        """
+        Add a grid line to the specified side.
+        
+        Args:
+            side (str): 'left' or 'right' side
+            start_point (tuple): (x, y) start point in scene coordinates
+            end_point (tuple): (x, y) end point in scene coordinates
+            color (str, optional): Color of the line, defaults to None which will use the default color
         
         Returns:
-            tuple: (width_scale, height_scale) - scale factors for width and height
+            The added line item
         """
-        if side == 'left':
-            scene = self.view.left_scene
-            pixmap = self.view.left_pixmap
-        else:
-            scene = self.view.right_scene
-            pixmap = self.view.right_pixmap
+        if side not in ['left', 'right']:
+            logger.error(f"Invalid side specified for grid line: {side}")
+            return None
+            
+        try:
+            # Create a pen for the line
+            pen = QPen(QColor(color) if color else QColor(255, 0, 0, 128))  # Semi-transparent red by default
+            pen.setWidth(1)
+            
+            # Create line in the appropriate scene
+            if side == 'left':
+                line = self.view.left_scene.addLine(
+                    start_point[0], start_point[1], 
+                    end_point[0], end_point[1], 
+                    pen
+                )
+                self.view.left_grid_lines.append(line)
+                return line
+            else:  # 'right'
+                line = self.view.right_scene.addLine(
+                    start_point[0], start_point[1], 
+                    end_point[0], end_point[1], 
+                    pen
+                )
+                self.view.right_grid_lines.append(line)
+                return line
+        except Exception as e:
+            logger.error(f"Failed to add grid line on {side} side: {e}")
+            return None
+            
+    def update_grid_lines(self, side: str = None):
+        """
+        Update grid lines for the specified side or both sides if side is None.
         
-        if pixmap is None or pixmap.width() == 0 or pixmap.height() == 0:
-            logger.warning(f"Cannot calculate scale for {side} view: pixmap is not available or has zero dimensions")
-            return 1.0, 1.0
+        Args:
+            side (str, optional): 'left', 'right', or None for both sides
+        """
+        # First clear existing grid lines
+        self.view.update_grid_lines(side)
         
-        # Calculate scale factors
-        width_scale = scene.width() / pixmap.width()
-        height_scale = scene.height() / pixmap.height()
+        # If no side specified or invalid side, update both sides
+        sides_to_update = [side] if side in ['left', 'right'] else ['left', 'right']
         
-        logger.debug(f"{side} view scale: pixmap({pixmap.width()}x{pixmap.height()}), "
-                    f"scene({scene.width():.1f}x{scene.height():.1f}), " 
-                    f"scale({width_scale:.3f}, {height_scale:.3f})")
-        return width_scale, height_scale 
+        for current_side in sides_to_update:
+            # Get calibration points for the current side
+            points = self.model.get_points(current_side)
+            if not points or len(points) < 2:
+                logger.debug(f"Not enough points to create grid lines for {current_side} side")
+                continue
+            
+            try:
+                # Create horizontal and vertical grid lines
+                for i in range(len(points)):
+                    for j in range(i + 1, len(points)):
+                        # Skip if points are not part of a grid structure
+                        if not self._are_points_in_grid(points[i], points[j]):
+                            continue
+                            
+                        # Convert to scene coordinates
+                        start_x, start_y = self.view.pixel_to_scene(current_side, points[i].x, points[i].y)
+                        end_x, end_y = self.view.pixel_to_scene(current_side, points[j].x, points[j].y)
+                        
+                        # Add the grid line
+                        self.add_grid_line(current_side, (start_x, start_y), (end_x, end_y))
+            except Exception as e:
+                logger.error(f"Error updating grid lines for {current_side} side: {e}")
+                
+    def _are_points_in_grid(self, point1, point2):
+        """
+        Determine if two points should be connected in a grid structure.
+        
+        Args:
+            point1: First calibration point
+            point2: Second calibration point
+            
+        Returns:
+            bool: True if points should be connected, False otherwise
+        """
+        # Simplified implementation - connect points that are approximately in the same row or column
+        # This can be enhanced with more sophisticated grid detection logic
+        GRID_TOLERANCE = 10  # pixels tolerance for alignment
+        
+        # Check if points are approximately in the same row (y-coordinate)
+        same_row = abs(point1.y - point2.y) < GRID_TOLERANCE
+        
+        # Check if points are approximately in the same column (x-coordinate)
+        same_column = abs(point1.x - point2.x) < GRID_TOLERANCE
+        
+        return same_row or same_column 

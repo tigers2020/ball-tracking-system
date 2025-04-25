@@ -10,7 +10,7 @@ import logging
 from typing import Dict, List, Tuple
 
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF
-from PySide6.QtGui import QPen, QBrush, QColor, QPainterPath, QPainter, QCursor
+from PySide6.QtGui import QPen, QBrush, QColor, QPainterPath, QPainter, QCursor, QPixmap, QImage
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGraphicsView, QGraphicsScene, QGraphicsEllipseItem, QGraphicsRectItem,
@@ -497,6 +497,12 @@ class CalibrationTab(QWidget):
         self.left_roi_overlay = None
         self.right_roi_overlay = None
         
+        # Convert to QPixmap if needed
+        if isinstance(left_image, QImage):
+            left_image = QPixmap.fromImage(left_image)
+        if isinstance(right_image, QImage):
+            right_image = QPixmap.fromImage(right_image)
+        
         # Store pixmaps for later reference
         self.left_pixmap = left_image
         self.right_pixmap = right_image
@@ -507,7 +513,8 @@ class CalibrationTab(QWidget):
         self.right_image_width = right_image.width()
         self.right_image_height = right_image.height()
         
-        logger.info(f"Set images - Left: {self.left_image_width}x{self.left_image_height}, Right: {self.right_image_width}x{self.right_image_height}")
+        logger.info(f"Set images - Left: {self.left_image_width}x{self.left_image_height}, "
+                   f"Right: {self.right_image_width}x{self.right_image_height}")
         
         # Add images to scenes
         self.left_scene.addPixmap(left_image)
@@ -515,4 +522,81 @@ class CalibrationTab(QWidget):
         
         # Fit views to content
         self.left_view.fitInView(self.left_scene.sceneRect(), Qt.KeepAspectRatio)
-        self.right_view.fitInView(self.right_scene.sceneRect(), Qt.KeepAspectRatio) 
+        self.right_view.fitInView(self.right_scene.sceneRect(), Qt.KeepAspectRatio)
+    
+    def get_image_dimension(self, side: str, dimension: str) -> int:
+        """
+        Get the dimension of an image.
+        
+        Args:
+            side (str): 'left' or 'right'
+            dimension (str): 'width' or 'height'
+            
+        Returns:
+            int: The requested dimension
+        """
+        if side == 'left':
+            if dimension == 'width':
+                return self.left_image_width
+            elif dimension == 'height':
+                return self.left_image_height
+        elif side == 'right':
+            if dimension == 'width':
+                return self.right_image_width
+            elif dimension == 'height':
+                return self.right_image_height
+        
+        logger.error(f"Invalid side or dimension: {side}, {dimension}")
+        return 0
+    
+    def get_view_width(self, side: str) -> float:
+        """
+        Get the width of a view.
+        
+        Args:
+            side (str): 'left' or 'right'
+            
+        Returns:
+            float: The view width
+        """
+        if side == 'left':
+            return self.left_scene.width()
+        elif side == 'right':
+            return self.right_scene.width()
+        
+        logger.error(f"Invalid side: {side}")
+        return 0.0
+    
+    def get_view_height(self, side: str) -> float:
+        """
+        Get the height of a view.
+        
+        Args:
+            side (str): 'left' or 'right'
+            
+        Returns:
+            float: The view height
+        """
+        if side == 'left':
+            return self.left_scene.height()
+        elif side == 'right':
+            return self.right_scene.height()
+        
+        logger.error(f"Invalid side: {side}")
+        return 0.0
+    
+    def update_grid_lines(self):
+        """Update grid lines for both views."""
+        # This is a placeholder for compatibility with the controller
+        # Actual implementation will be in the controller
+        pass
+    
+    def resizeEvent(self, event):
+        """Handle resize events to maintain aspect ratio."""
+        super().resizeEvent(event)
+        
+        # Maintain aspect ratio when resizing
+        if self.left_pixmap:
+            self.left_view.fitInView(self.left_scene.sceneRect(), Qt.KeepAspectRatio)
+        if self.right_pixmap:
+            self.right_view.fitInView(self.right_scene.sceneRect(), Qt.KeepAspectRatio) 

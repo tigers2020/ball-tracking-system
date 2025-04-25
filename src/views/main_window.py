@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 from src.utils.ui_constants import WindowSize, Messages, Layout, FileDialog, Icons
 from src.views.image_view import ImageView
 from src.views.setting_view import SettingView
-from src.views.calibration_tab import CalibrationTab
+from src.views.calibration_view import CalibrationView
 from src.models.calibration_model import CalibrationModel
 from src.controllers.calibration_controller import CalibrationController
 
@@ -74,15 +74,15 @@ class MainWindow(QMainWindow):
         self.setting_view = SettingView()
         self.tab_widget.addTab(self.setting_view, "Settings")
         
-        # Create calibration tab
-        self.calibration_tab = CalibrationTab()
-        self.tab_widget.addTab(self.calibration_tab, "Calibration")
+        # Create calibration view
+        self.calibration_view = CalibrationView()
+        self.tab_widget.addTab(self.calibration_view, "Calibration")
         
         # Create calibration model and controller
         self.calibration_model = CalibrationModel()
         self.calibration_controller = CalibrationController(
             self.calibration_model,
-            self.calibration_tab
+            self.calibration_view
         )
         
         # Connect signals from settings view
@@ -257,7 +257,7 @@ class MainWindow(QMainWindow):
 
     def update_calibration_images(self, left_image, right_image):
         """
-        Update the images in the calibration tab.
+        Update the images in the calibration view.
         
         Args:
             left_image: QPixmap or QImage for the left view

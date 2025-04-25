@@ -443,4 +443,224 @@ class StereoImageModel(QObject):
     def release_all_frames(self):
         """Release all loaded frames to free memory."""
         for frame in self.frames:
-            frame.release_images() 
+            frame.release_images()
+
+    # 이미지 관련 메서드
+    def get_left_image(self):
+        """
+        Get the left image from the current frame.
+        
+        Returns:
+            numpy.ndarray: The left image, or None if not available
+        """
+        current_frame = self.get_current_frame()
+        if current_frame:
+            return current_frame.get_left_image()
+        return None
+    
+    def get_right_image(self):
+        """
+        Get the right image from the current frame.
+        
+        Returns:
+            numpy.ndarray: The right image, or None if not available
+        """
+        current_frame = self.get_current_frame()
+        if current_frame:
+            return current_frame.get_right_image()
+        return None
+    
+    # 포인트 관련 메서드들 (이미지 보정 포인트)
+    def get_left_point_count(self):
+        """
+        Get the number of calibration points in the left image.
+        
+        Returns:
+            int: Number of left calibration points
+        """
+        if hasattr(self, 'left_points'):
+            return len(self.left_points)
+        return 0
+    
+    def get_right_point_count(self):
+        """
+        Get the number of calibration points in the right image.
+        
+        Returns:
+            int: Number of right calibration points
+        """
+        if hasattr(self, 'right_points'):
+            return len(self.right_points)
+        return 0
+    
+    def get_left_point(self, index):
+        """
+        Get a specific left calibration point by index.
+        
+        Args:
+            index (int): Index of the point to retrieve
+            
+        Returns:
+            tuple: (x, y) coordinates, or None if the point doesn't exist
+        """
+        if hasattr(self, 'left_points') and 0 <= index < len(self.left_points):
+            point = self.left_points[index]
+            if hasattr(point, 'x') and hasattr(point, 'y'):
+                return (point.x, point.y)
+            elif isinstance(point, tuple) and len(point) >= 2:
+                return point[:2]
+        return None
+    
+    def get_right_point(self, index):
+        """
+        Get a specific right calibration point by index.
+        
+        Args:
+            index (int): Index of the point to retrieve
+            
+        Returns:
+            tuple: (x, y) coordinates, or None if the point doesn't exist
+        """
+        if hasattr(self, 'right_points') and 0 <= index < len(self.right_points):
+            point = self.right_points[index]
+            if hasattr(point, 'x') and hasattr(point, 'y'):
+                return (point.x, point.y)
+            elif isinstance(point, tuple) and len(point) >= 2:
+                return point[:2]
+        return None
+    
+    def update_left_point(self, index, x, y):
+        """
+        Update a left calibration point's coordinates.
+        
+        Args:
+            index (int): Index of the point to update
+            x (float): New X coordinate
+            y (float): New Y coordinate
+            
+        Returns:
+            bool: True if update was successful, False otherwise
+        """
+        if not hasattr(self, 'left_points'):
+            self.left_points = []
+            
+        # Ensure the list is long enough
+        while len(self.left_points) <= index:
+            self.left_points.append(None)
+            
+        # Create or update the point
+        from collections import namedtuple
+        Point = namedtuple('Point', ['x', 'y'])
+        self.left_points[index] = Point(x, y)
+        
+        logging.info(f"Updated left point {index} to ({x}, {y})")
+        return True
+    
+    def update_right_point(self, index, x, y):
+        """
+        Update a right calibration point's coordinates.
+        
+        Args:
+            index (int): Index of the point to update
+            x (float): New X coordinate
+            y (float): New Y coordinate
+            
+        Returns:
+            bool: True if update was successful, False otherwise
+        """
+        if not hasattr(self, 'right_points'):
+            self.right_points = []
+            
+        # Ensure the list is long enough
+        while len(self.right_points) <= index:
+            self.right_points.append(None)
+            
+        # Create or update the point
+        from collections import namedtuple
+        Point = namedtuple('Point', ['x', 'y'])
+        self.right_points[index] = Point(x, y)
+        
+        logging.info(f"Updated right point {index} to ({x}, {y})")
+        return True
+    
+    def set_image_dimensions(self, side, width, height):
+        """
+        Set the dimensions for the current image.
+        
+        Args:
+            side (str): 'left' or 'right'
+            width (int): Image width in pixels
+            height (int): Image height in pixels
+        """
+        if side.lower() == 'left':
+            self.left_image_width = width
+            self.left_image_height = height
+        elif side.lower() == 'right':
+            self.right_image_width = width
+            self.right_image_height = height
+        else:
+            logging.error(f"Invalid side specified: {side}")
+            
+        logging.info(f"Set {side} image dimensions to {width}x{height}")
+    
+    def from_normalized_dict(self, data_dict):
+        """
+        Load calibration points from a normalized dictionary.
+        
+        Args:
+            data_dict (dict): Dictionary with normalized point data
+                {
+                    'left': [{'x': float, 'y': float}, ...],
+                    'right': [{'x': float, 'y': float}, ...]
+                }
+        """
+        try:
+            # Initialize points lists if needed
+            if not hasattr(self, 'left_points'):
+                self.left_points = []
+            if not hasattr(self, 'right_points'):
+                self.right_points = []
+                
+            # Process left points
+            if 'left' in data_dict and data_dict['left']:
+                left_points_data = data_dict['left']
+                for idx, point_data in enumerate(left_points_data):
+                    if isinstance(point_data, dict) and 'x' in point_data and 'y' in point_data:
+                        norm_x = point_data['x']
+                        norm_y = point_data['y']
+                        
+                        # Convert normalized coordinates (0-1) to pixel coordinates
+                        if hasattr(self, 'left_image_width') and hasattr(self, 'left_image_height'):
+                            pixel_x = norm_x * self.left_image_width
+                            pixel_y = norm_y * self.left_image_height
+                            self.update_left_point(idx, pixel_x, pixel_y)
+                
+            # Process right points
+            if 'right' in data_dict and data_dict['right']:
+                right_points_data = data_dict['right']
+                for idx, point_data in enumerate(right_points_data):
+                    if isinstance(point_data, dict) and 'x' in point_data and 'y' in point_data:
+                        norm_x = point_data['x']
+                        norm_y = point_data['y']
+                        
+                        # Convert normalized coordinates (0-1) to pixel coordinates
+                        if hasattr(self, 'right_image_width') and hasattr(self, 'right_image_height'):
+                            pixel_x = norm_x * self.right_image_width
+                            pixel_y = norm_y * self.right_image_height
+                            self.update_right_point(idx, pixel_x, pixel_y)
+            
+            logging.info(f"Loaded {len(data_dict.get('left', []))} left points and {len(data_dict.get('right', []))} right points from normalized data")
+            return True
+        except Exception as e:
+            logging.error(f"Error loading normalized calibration data: {e}")
+            return False
+    
+    def clear_points(self):
+        """
+        Clear all calibration points.
+        """
+        if hasattr(self, 'left_points'):
+            self.left_points = []
+        if hasattr(self, 'right_points'):
+            self.right_points = []
+        logging.info("Cleared all calibration points from model") 

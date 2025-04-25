@@ -37,19 +37,51 @@ def crop_roi(image: np.ndarray,
         # Get image dimensions
         height, width = image.shape[:2]
         
+        # Input validation
+        if not isinstance(center, tuple) or len(center) != 2:
+            logger.error(f"Invalid center point: {center}")
+            return None
+            
+        if radius <= 0:
+            logger.error(f"Invalid radius: {radius}")
+            return None
+            
         # Ensure center is within image bounds or clamp to boundary
-        x = min(max(0, int(center[0])), width - 1)
-        y = min(max(0, int(center[1])), height - 1)
+        x = min(max(0, int(round(center[0]))), width - 1)
+        y = min(max(0, int(round(center[1]))), height - 1)
         
         # Calculate ROI size (use max of radius*2.5 or min_size)
         roi_size = max(int(radius * 2.5), min_size)
         
-        # Calculate ROI boundaries
+        # Calculate ROI boundaries with improved boundary handling
         half_size = roi_size // 2
         left = max(0, x - half_size)
         top = max(0, y - half_size)
-        right = min(width, x + half_size)
-        bottom = min(height, y + half_size)
+        right = min(width, x + half_size + (roi_size % 2))  # Add 1 for odd sizes
+        bottom = min(height, y + half_size + (roi_size % 2))
+        
+        # Ensure ROI has consistent dimensions
+        actual_width = right - left
+        actual_height = bottom - top
+        
+        # If ROI is stretched near boundaries, adjust to maintain aspect ratio
+        if abs(actual_width - actual_height) > 2:
+            target_size = min(actual_width, actual_height)
+            if actual_width > actual_height:
+                # Adjust width
+                excess = actual_width - target_size
+                left += excess // 2
+                right = left + target_size
+            else:
+                # Adjust height
+                excess = actual_height - target_size
+                top += excess // 2
+                bottom = top + target_size
+        
+        # Verify all values are valid
+        if left < 0 or top < 0 or right > width or bottom > height or left >= right or top >= bottom:
+            logger.warning(f"Invalid ROI coordinates: ({left}, {top}, {right}, {bottom})")
+            return None
         
         # Crop the ROI
         roi = image[top:bottom, left:right]
@@ -90,15 +122,28 @@ def crop_roi_with_padding(image: np.ndarray,
             logger.error("Invalid image: None or empty")
             return None, (0, 0)
             
+        # Input validation
+        if not isinstance(center, tuple) or len(center) != 2:
+            logger.error(f"Invalid center point: {center}")
+            return None, (0, 0)
+            
+        if radius <= 0:
+            logger.error(f"Invalid radius: {radius}")
+            return None, (0, 0)
+            
         # Get image dimensions
         height, width = image.shape[:2]
         
         # Convert center coordinates to integers
-        x, y = int(center[0]), int(center[1])
+        x, y = int(round(center[0])), int(round(center[1]))
         
         # Calculate ROI size (use max of radius*2.5 or min_size)
         roi_size = max(int(radius * 2.5), min_size)
         
+        # Make sure ROI size is even for better center alignment
+        if roi_size % 2 != 0:
+            roi_size += 1
+            
         # Calculate ROI boundaries
         half_size = roi_size // 2
         left = x - half_size
@@ -109,8 +154,8 @@ def crop_roi_with_padding(image: np.ndarray,
         # Calculate padding if ROI extends beyond image boundaries
         pad_left = abs(min(0, left))
         pad_top = abs(min(0, top))
-        pad_right = abs(min(0, width - right))
-        pad_bottom = abs(min(0, height - bottom))
+        pad_right = max(0, right - width)
+        pad_bottom = max(0, bottom - height)
         
         # Adjust ROI boundaries to be within image
         left = max(0, left)
@@ -118,8 +163,17 @@ def crop_roi_with_padding(image: np.ndarray,
         right = min(width, right)
         bottom = min(height, bottom)
         
+        # Verify valid crop dimensions
+        if left >= right or top >= bottom:
+            logger.warning(f"Invalid crop dimensions: [{left}:{right}, {top}:{bottom}]")
+            # Create a black ROI with the desired dimensions
+            roi_shape = [roi_size, roi_size]
+            if len(image.shape) > 2:
+                roi_shape.append(image.shape[2])  # Add channel dimension
+            return np.zeros(roi_shape, dtype=image.dtype), (left - pad_left, top - pad_top)
+        
         # Crop the ROI
-        roi = image[top:bottom, left:right]
+        roi = image[top:bottom, left:right].copy()  # Make a copy to avoid reference issues
         
         # Apply padding if needed
         if pad_left > 0 or pad_top > 0 or pad_right > 0 or pad_bottom > 0:
