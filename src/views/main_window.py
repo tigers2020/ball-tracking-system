@@ -19,7 +19,9 @@ from PySide6.QtWidgets import (
 from src.utils.ui_constants import WindowSize, Messages, Layout, FileDialog, Icons
 from src.views.image_view import ImageView
 from src.views.setting_view import SettingView
-from src.views.calibration_tab import CourtCalibrationView
+from src.views.calibration_tab import CalibrationTab
+from src.models.calibration_model import CalibrationModel
+from src.controllers.calibration_controller import CalibrationController
 
 
 class MainWindow(QMainWindow):
@@ -47,6 +49,9 @@ class MainWindow(QMainWindow):
         # Set up UI
         self._setup_ui()
         
+        # Initialize controllers
+        self._init_controllers()
+        
         # Show ready message
         self.status_bar.showMessage(Messages.READY)
     
@@ -72,9 +77,9 @@ class MainWindow(QMainWindow):
         self.setting_view = SettingView()
         self.tab_widget.addTab(self.setting_view, "Settings")
         
-        # Create court calibration tab
-        self.calibration_view = CourtCalibrationView()
-        self.tab_widget.addTab(self.calibration_view, "Court Calibration")
+        # Create calibration tab
+        self.calibration_tab = CalibrationTab()
+        self.tab_widget.addTab(self.calibration_tab, "Court Calibration")
         
         # Connect signals from settings view
         self.setting_view.settings_changed.connect(self._on_settings_changed)
@@ -85,6 +90,18 @@ class MainWindow(QMainWindow):
         # Set up status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
+    
+    def _init_controllers(self):
+        """Initialize the controllers for the different tabs."""
+        # Initialize calibration controller
+        self.calibration_model = CalibrationModel()
+        self.calibration_controller = CalibrationController(self.calibration_model, self.calibration_tab)
+        
+        # Connect status signal from calibration controller to status bar
+        self.calibration_controller.status_updated.connect(self.update_status)
+        
+        # Initialize the controller
+        self.calibration_controller.initialize()
     
     def _setup_menu_bar(self):
         """Set up the menu bar."""

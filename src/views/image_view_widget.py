@@ -362,7 +362,7 @@ class ImageViewWidget(QWidget):
 
 class StereoImageViewWidget(QWidget):
     """
-    Widget for displaying stereo (left and right) images.
+    Widget for displaying stereo images (left and right) side by side.
     """
     
     def __init__(self, parent=None):
@@ -380,17 +380,19 @@ class StereoImageViewWidget(QWidget):
         self.layout.setSpacing(Layout.SPACING)
         
         # Left image view
-        self.left_view = ImageViewWidget("Left Image", self)
-        self.layout.addWidget(self.left_view)
+        self.left_image_view = ImageViewWidget("Left Image")
+        self.layout.addWidget(self.left_image_view)
         
         # Right image view
-        self.right_view = ImageViewWidget("Right Image", self)
-        self.layout.addWidget(self.right_view)
+        self.right_image_view = ImageViewWidget("Right Image")
+        self.layout.addWidget(self.right_image_view)
         
-        # Store original CV images for external access
-        self.left_cv_image = None
-        self.right_cv_image = None
+        # Flag to prevent duplicate signal connections
+        self._controller_connected = False
         
+        # Set size policy
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    
     def set_images(self, left_image, right_image):
         """
         Set the left and right images.
@@ -402,24 +404,14 @@ class StereoImageViewWidget(QWidget):
         Returns:
             tuple: (left_success, right_success) indicating if each image was successfully set
         """
-        # Store original CV images
-        self.left_cv_image = left_image.copy() if left_image is not None else None
-        self.right_cv_image = right_image.copy() if right_image is not None else None
-        
-        # Set images in view widgets
-        left_success = self.left_view.set_image_from_cv(left_image) if left_image is not None else False
-        right_success = self.right_view.set_image_from_cv(right_image) if right_image is not None else False
-        
-        return (left_success, right_success)
+        left_success = self.left_image_view.set_image_from_cv(left_image)
+        right_success = self.right_image_view.set_image_from_cv(right_image)
+        return left_success, right_success
     
     def clear_images(self):
         """Clear both the left and right images."""
-        self.left_view.clear_image()
-        self.right_view.clear_image()
-        
-        # Also clear stored CV images
-        self.left_cv_image = None
-        self.right_cv_image = None
+        self.left_image_view.clear_image()
+        self.right_image_view.clear_image()
     
     def set_masks(self, left_mask, right_mask, hsv_settings=None):
         """
@@ -433,8 +425,8 @@ class StereoImageViewWidget(QWidget):
         Returns:
             tuple: (left_success, right_success) indicating if each mask was successfully set
         """
-        left_success = self.left_view.set_mask(left_mask, hsv_settings)
-        right_success = self.right_view.set_mask(right_mask, hsv_settings)
+        left_success = self.left_image_view.set_mask(left_mask, hsv_settings)
+        right_success = self.right_image_view.set_mask(right_mask, hsv_settings)
         return left_success, right_success
     
     def set_rois(self, left_roi, right_roi):
@@ -448,8 +440,8 @@ class StereoImageViewWidget(QWidget):
         Returns:
             tuple: (left_success, right_success) indicating if each ROI was successfully set
         """
-        left_success = self.left_view.set_roi(left_roi)
-        right_success = self.right_view.set_roi(right_roi)
+        left_success = self.left_image_view.set_roi(left_roi)
+        right_success = self.right_image_view.set_roi(right_roi)
         return left_success, right_success
     
     def set_titles(self, left_title="Left Image", right_title="Right Image"):
@@ -460,8 +452,8 @@ class StereoImageViewWidget(QWidget):
             left_title (str): Title for left image
             right_title (str): Title for right image
         """
-        self.left_view.set_title(left_title)
-        self.right_view.set_title(right_title)
+        self.left_image_view.set_title(left_title)
+        self.right_image_view.set_title(right_title)
     
     def enable_mask_overlay(self, enable: bool = True):
         """
@@ -470,8 +462,8 @@ class StereoImageViewWidget(QWidget):
         Args:
             enable (bool): Whether to enable mask overlay
         """
-        self.left_view.enable_mask_overlay(enable)
-        self.right_view.enable_mask_overlay(enable)
+        self.left_image_view.enable_mask_overlay(enable)
+        self.right_image_view.enable_mask_overlay(enable)
     
     def display_roi_images(self, left_roi_image, right_roi_image):
         """
