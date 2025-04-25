@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
     QLabel, QGridLayout, QFormLayout
 )
+import numpy as np
 
 from src.utils.constants import LAYOUT
 from src.views.visualization.hsv_mask_visualizer import HSVMaskVisualizer
@@ -273,8 +274,11 @@ class InfoView(QWidget):
         if controller:
             self.controller = controller
             
-            # Connect detection update signal
-            controller.detection_updated.connect(self._on_detection_updated)
+            # Connect detection update signal with proper signature
+            controller.detection_updated.connect(
+                lambda frame_idx, detection_rate, left_coords, right_coords:
+                self._on_detection_updated(frame_idx, detection_rate, left_coords, right_coords)
+            )
             
             # Connect ROI update signal
             controller.roi_updated.connect(self._on_roi_updated)
@@ -307,36 +311,51 @@ class InfoView(QWidget):
         
         logging.info(f"Set up {len(self._visualizers)} visualizers")
     
-    def _on_detection_updated(self, detection_rate, left_coords, right_coords, position_coords=None):
+    def _on_detection_updated(self, frame_idx, detection_rate, left_coords, right_coords, position_coords=None):
         """
         Handle detection update signal from ball tracking controller.
         
         Args:
-            detection_rate (float): Current detection rate
-            left_coords (tuple): Left camera coordinates (x, y, r) or None
-            right_coords (tuple): Right camera coordinates (x, y, r) or None
-            position_coords (tuple, optional): 3D position coordinates (x, y, z) or None
+            frame_idx (int): Frame index
+            detection_rate (float): Detection rate between 0-1
+            left_coords (tuple): Coordinates in left image (x, y, r) or None
+            right_coords (tuple): Coordinates in right image (x, y, r) or None
+            position_coords (tuple, optional): 3D position coordinates (x, y, z)
         """
         # Update detection rate
         self.set_detection_rate(detection_rate)
         
-        # Update left pixel coordinates
-        if left_coords:
-            self.set_left_pixel_coords(left_coords[0], left_coords[1], left_coords[2] if len(left_coords) > 2 else 0)
+        # Safety check for left_coords - must be tuple-like (list, tuple, array)
+        if left_coords and isinstance(left_coords, (tuple, list, np.ndarray)):
+            try:
+                self.set_left_pixel_coords(left_coords[0], left_coords[1], left_coords[2] if len(left_coords) > 2 else 0)
+            except (IndexError, TypeError) as e:
+                logging.error(f"Error processing left_coords {left_coords}: {e}")
+                self.set_left_pixel_coords(0, 0, 0)
         else:
             self.set_left_pixel_coords(0, 0, 0)
             
-        # Update right pixel coordinates
-        if right_coords:
-            self.set_right_pixel_coords(right_coords[0], right_coords[1], right_coords[2] if len(right_coords) > 2 else 0)
+        # Safety check for right_coords - must be tuple-like
+        if right_coords and isinstance(right_coords, (tuple, list, np.ndarray)):
+            try:
+                self.set_right_pixel_coords(right_coords[0], right_coords[1], right_coords[2] if len(right_coords) > 2 else 0)
+            except (IndexError, TypeError) as e:
+                logging.error(f"Error processing right_coords {right_coords}: {e}")
+                self.set_right_pixel_coords(0, 0, 0)
         else:
             self.set_right_pixel_coords(0, 0, 0)
         
         # Update 3D position if provided
-        if position_coords:
-            self.set_position_coords(position_coords[0], position_coords[1], position_coords[2])
-            
-        logging.debug(f"Info view updated: rate={detection_rate:.2f}, left={left_coords}, right={right_coords}")
+        if position_coords and isinstance(position_coords, (tuple, list, np.ndarray)) and len(position_coords) >= 3:
+            try:
+                self.set_position_coords(position_coords[0], position_coords[1], position_coords[2])
+            except (IndexError, TypeError) as e:
+                logging.error(f"Error processing position_coords {position_coords}: {e}")
+        
+        # Log with proper type information
+        left_type = type(left_coords).__name__ if left_coords is not None else "None"
+        right_type = type(right_coords).__name__ if right_coords is not None else "None"
+        logging.debug(f"Info view updated: frame={frame_idx}, rate={detection_rate:.2f}, left=({left_type}){left_coords}, right=({right_type}){right_coords}")
     
     def _on_roi_updated(self, left_roi, right_roi):
         """

@@ -1,5 +1,5 @@
 <?xml version="1.0" ?>
-<TrackingData folder="serve1" timestamp="2025-04-24 06:48:20" created="1745491700.4509234" finalized="2025-04-25 19:18:43" finalized_time="2025-04-24 10:37:29" total_frames="861" duration_seconds="13749.03" duration_formatted="03:49:09" resumed="1745623060.20871" resume_time="2025-04-25 19:17:40">
+<TrackingData folder="serve1" timestamp="2025-04-24 06:48:20" created="1745491700.4509234" finalized="2025-04-25 19:45:09" finalized_time="2025-04-24 10:37:29" total_frames="875" duration_seconds="13749.03" duration_formatted="03:49:09" resumed="1745624674.4572792" resume_time="2025-04-25 19:44:34">
   <ProcessingStats/>
   <ProcessingStats/>
   <Image number="16" name="frame_000016.png" timestamp="2025-04-24 07:55:34" tracking_active="True">
@@ -8867,5 +8867,180 @@
       <Kalman x="1077.18310546875" y="658.8666381835938" vx="-3.7225842475891113" vy="48.11539077758789"/>
     </Right>
     <Mean x="616.0" y="566.9"/>
+  </Image>
+  <Image number="80" name="frame_000080.png" timestamp="2025-04-25 19:40:11" tracking_active="True">
+    <Left>
+      <HSV x="1196.0" y="43.0"/>
+      <Hough x="1195.0" y="41.0" radius="12.0"/>
+      <Kalman x="1194.6463623046875" y="42.56880187988281" vx="-1.5529747" vy="20.817589"/>
+    </Left>
+    <Right>
+      <HSV x="1126.0" y="40.0"/>
+      <Hough x="1126.0" y="40.0" radius="12.0"/>
+      <Kalman x="1125.646728515625" y="41.32231521606445" vx="-1.549789" vy="18.640135"/>
+    </Right>
+    <Mean x="1160.5" y="41.3"/>
+  </Image>
+  <Image number="160" name="frame_000160.png" timestamp="2025-04-25 19:40:14" tracking_active="True">
+    <Left>
+      <HSV x="1194.0" y="103.0"/>
+      <Hough x="1195.0" y="103.0" radius="13.0"/>
+      <Kalman x="1194.9791259765625" y="104.49297332763672" vx="-0.030238144" vy="22.443108"/>
+    </Left>
+    <Right>
+      <HSV x="1120.0" y="104.0"/>
+      <Hough x="1121.0" y="105.0" radius="12.0"/>
+      <Kalman x="1120.983154296875" y="106.28203582763672" vx="-2.3743582" vy="23.42796"/>
+    </Right>
+    <Mean x="1157.7" y="104.3"/>
+  </Image>
+  <Image number="0" name="frame_000000.png" timestamp="2025-04-25 19:40:14" tracking_active="True">
+    <Left>
+      <HSV x="176.0" y="848.0"/>
+      <Kalman x="1194.9395751953125" y="107.31465911865234" vx="-0.08903184533119202" vy="26.64129638671875"/>
+    </Left>
+    <Right>
+      <HSV x="27.0" y="105.0"/>
+      <Kalman x="1120.951416015625" y="108.70535278320312" vx="-2.4216365814208984" vy="27.033742904663086"/>
+    </Right>
+    <Mean x="629.7" y="292.3"/>
+  </Image>
+  <Image number="80" name="frame_000080.png" timestamp="2025-04-25 19:44:41" tracking_active="True">
+    <Left>
+      <HSV x="1196.0" y="43.0"/>
+      <Hough x="1195.0" y="41.0" radius="12.0"/>
+      <Kalman x="1194.6536865234375" y="42.57466125488281" vx="-1.4959571" vy="20.37843"/>
+    </Left>
+    <Right>
+      <HSV x="1126.0" y="40.0"/>
+      <Hough x="1126.0" y="40.0" radius="12.0"/>
+      <Kalman x="1125.6536865234375" y="41.329227447509766" vx="-1.4959571" vy="18.273804"/>
+    </Right>
+    <Mean x="1160.6" y="41.3"/>
+  </Image>
+  <Image number="160" name="frame_000160.png" timestamp="2025-04-25 19:44:44" tracking_active="True">
+    <Left>
+      <HSV x="1194.0" y="103.0"/>
+      <Hough x="1195.0" y="103.0" radius="13.0"/>
+      <Kalman x="1194.981689453125" y="104.62261199951172" vx="-0.018834854" vy="21.120628"/>
+    </Left>
+    <Right>
+      <HSV x="1120.0" y="104.0"/>
+      <Hough x="1121.0" y="105.0" radius="12.0"/>
+      <Kalman x="1120.9556884765625" y="106.44374084472656" vx="-2.2764673" vy="22.108685"/>
+    </Right>
+    <Mean x="1157.7" y="104.3"/>
+  </Image>
+  <Image number="240" name="frame_000240.png" timestamp="2025-04-25 19:44:47" tracking_active="True">
+    <Left>
+      <HSV x="1193.0" y="176.0"/>
+      <Kalman x="1193.3824462890625" y="148.8165740966797" vx="-0.54680997133255" vy="26.51638412475586"/>
+    </Left>
+    <Right>
+      <HSV x="1115.0" y="176.0"/>
+      <Hough x="1116.0" y="175.0" radius="12.0"/>
+      <Kalman x="1115.942138671875" y="176.75112915039062" vx="-1.2979071" vy="24.388609"/>
+    </Right>
+    <Mean x="1146.7" y="170.5"/>
+  </Image>
+  <Image number="320" name="frame_000320.png" timestamp="2025-04-25 19:44:50" tracking_active="True">
+    <Left>
+      <HSV x="1191.0" y="260.0"/>
+      <Hough x="1190.0" y="257.0" radius="12.0"/>
+      <Kalman x="1190.1494140625" y="259.3050842285156" vx="-2.9493499" vy="27.437763"/>
+    </Left>
+    <Right>
+      <HSV x="1108.0" y="259.0"/>
+      <Hough x="1110.0" y="259.0" radius="13.0"/>
+      <Kalman x="1109.9088134765625" y="260.8321533203125" vx="-1.5551696" vy="29.129354"/>
+    </Right>
+    <Mean x="1149.8" y="259.2"/>
+  </Image>
+  <Image number="400" name="frame_000400.png" timestamp="2025-04-25 19:44:52" tracking_active="True">
+    <Left>
+      <HSV x="1189.0" y="356.0"/>
+      <Hough x="1189.0" y="352.0" radius="13.0"/>
+      <Kalman x="1188.973388671875" y="354.4029235839844" vx="-1.4067179" vy="30.817633"/>
+    </Left>
+    <Right>
+      <HSV x="1101.0" y="353.0"/>
+      <Hough x="1102.0" y="353.0" radius="14.0"/>
+      <Kalman x="1101.689453125" y="355.4771728515625" vx="-1.2563775" vy="32.623554"/>
+    </Right>
+    <Mean x="1145.3" y="354.0"/>
+  </Image>
+  <Image number="480" name="frame_000480.png" timestamp="2025-04-25 19:44:55" tracking_active="True">
+    <Left>
+      <HSV x="1187.0" y="464.0"/>
+      <Hough x="1186.0" y="463.0" radius="14.0"/>
+      <Kalman x="1186.154052734375" y="465.592529296875" vx="-2.6626093" vy="37.95939"/>
+    </Left>
+    <Right>
+      <HSV x="1092.0" y="463.0"/>
+      <Hough x="1093.0" y="465.0" radius="15.0"/>
+      <Kalman x="1092.7252197265625" y="467.66973876953125" vx="-2.4910305" vy="39.44925"/>
+    </Right>
+    <Mean x="1139.5" y="464.7"/>
+  </Image>
+  <Image number="560" name="frame_000560.png" timestamp="2025-04-25 19:44:58" tracking_active="True">
+    <Left>
+      <HSV x="1184.0" y="593.0"/>
+      <Hough x="1184.0" y="593.0" radius="15.0"/>
+      <Kalman x="1183.947509765625" y="596.1200561523438" vx="-1.4613229" vy="45.781033"/>
+    </Left>
+    <Right>
+      <HSV x="1082.0" y="596.0"/>
+      <Hough x="1082.0" y="592.0" radius="16.0"/>
+      <Kalman x="1082.07421875" y="595.5203247070312" vx="-5.174332" vy="41.732483"/>
+    </Right>
+    <Mean x="1133.0" y="594.3"/>
+  </Image>
+  <Image number="640" name="frame_000640.png" timestamp="2025-04-25 19:45:01" tracking_active="True">
+    <Left>
+      <HSV x="1181.0" y="745.0"/>
+      <Hough x="1181.0" y="744.0" radius="17.0"/>
+      <Kalman x="1180.7257080078125" y="748.3533935546875" vx="-0.05934024" vy="47.70799"/>
+    </Left>
+    <Right>
+      <HSV x="1070.0" y="744.0"/>
+      <Hough x="1071.0" y="743.0" radius="17.0"/>
+      <Kalman x="1070.7821044921875" y="746.3211669921875" vx="-4.162772" vy="50.34155"/>
+    </Right>
+    <Mean x="1125.8" y="745.1"/>
+  </Image>
+  <Image number="720" name="frame_000720.png" timestamp="2025-04-25 19:45:03" tracking_active="True">
+    <Left>
+      <HSV x="1177.0" y="925.0"/>
+      <Hough x="1177.0" y="925.0" radius="20.0"/>
+      <Kalman x="1176.8428955078125" y="929.4616088867188" vx="-2.044842" vy="64.372116"/>
+    </Left>
+    <Right>
+      <HSV x="1057.0" y="925.0"/>
+      <Hough x="1058.0" y="924.0" radius="18.0"/>
+      <Kalman x="1057.576904296875" y="928.294921875" vx="-4.069654" vy="63.075825"/>
+    </Right>
+    <Mean x="1117.2" y="926.1"/>
+  </Image>
+  <Image number="800" name="frame_000800.png" timestamp="2025-04-25 19:45:06" tracking_active="True">
+    <Left>
+      <HSV x="176.0" y="848.0"/>
+      <Kalman x="1172.7193603515625" y="1082.18212890625" vx="-2.8838648796081543" vy="63.0089111328125"/>
+    </Left>
+    <Right>
+      <HSV x="27.0" y="105.0"/>
+      <Kalman x="1043.9122314453125" y="1080.673583984375" vx="-5.562183856964111" vy="60.867122650146484"/>
+    </Right>
+    <Mean x="604.9" y="779.0"/>
+  </Image>
+  <Image number="0" name="frame_000000.png" timestamp="2025-04-25 19:45:07" tracking_active="True">
+    <Left>
+      <HSV x="176.0" y="848.0"/>
+      <Kalman x="1172.7193603515625" y="1082.18212890625" vx="-2.8838648796081543" vy="63.0089111328125"/>
+    </Left>
+    <Right>
+      <HSV x="27.0" y="105.0"/>
+      <Kalman x="1043.9122314453125" y="1080.673583984375" vx="-5.562183856964111" vy="60.867122650146484"/>
+    </Right>
+    <Mean x="604.9" y="779.0"/>
   </Image>
 </TrackingData>

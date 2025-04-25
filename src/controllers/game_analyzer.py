@@ -195,7 +195,11 @@ class GameAnalyzer(QObject):
             left_point: (x, y) coordinates in left image, or None
             right_point: (x, y) coordinates in right image, or None
         """
+        # Log that we received the call
+        logging.debug(f"GameAnalyzer.on_ball_detected called: frame={frame_index}, left={left_point}, right={right_point}")
+        
         if not self.is_enabled:
+            logging.debug(f"GameAnalyzer is disabled, ignoring detection for frame {frame_index}")
             return
             
         # Update current frame info

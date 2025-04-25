@@ -49,7 +49,7 @@ class BallTrackingController(QObject):
     # Signals
     mask_updated = Signal(np.ndarray, np.ndarray, dict)  # left_mask, right_mask, hsv_settings
     roi_updated = Signal(dict, dict)  # left_roi, right_roi
-    detection_updated = Signal(float, tuple, tuple)  # detection_rate, left_coords, right_coords
+    detection_updated = Signal(int, float, tuple, tuple)  # frame_idx, detection_rate, left_coords, right_coords
     circles_processed = Signal(np.ndarray, np.ndarray)  # left_circle_image, right_circle_image
     tracking_updated = Signal(float, float, float)  # x, y, z
     prediction_updated = Signal(str, float, float, float, float)  # camera, x, y, vx, vy
@@ -1008,8 +1008,11 @@ class BallTrackingController(QObject):
             logging.debug(f"Right circle coordinates: {right_coords}")
             
         # Emit the signal with detection information
-        logging.debug(f"Emitting detection_updated signal: rate={detection_rate:.2f}, left={left_coords}, right={right_coords}")
-        self.detection_updated.emit(detection_rate, left_coords, right_coords)
+        current_frame = getattr(self.model, 'current_frame_index', self._frame_counter)
+        logging.debug(f"Emitting detection_updated signal: frame={current_frame}, rate={detection_rate:.2f}, left={left_coords}, right={right_coords}")
+        
+        # Add current frame counter to the emission
+        self.detection_updated.emit(current_frame, detection_rate, left_coords, right_coords)
     
     def detect_circles_in_roi(self):
         """

@@ -164,10 +164,13 @@ class AppController(QObject):
         Connect the ball tracking controller to game analyzer for 3D analysis.
         """
         # Connect ball tracking 2D detection signals to game analyzer
-        self.ball_tracking_controller.detection_updated.connect(
-            lambda detection_rate, pixel_coords, world_coords: 
-            self._on_ball_detection_updated(detection_rate, pixel_coords, world_coords)
+        connected = self.ball_tracking_controller.detection_updated.connect(
+            lambda frame_idx, detection_rate, left_coords, right_coords: 
+            self._on_ball_detection_updated(frame_idx, detection_rate, left_coords, right_coords)
         )
+        
+        # Check if connection was successful
+        logging.info(f"Ball tracking detection signal connected to game analyzer: {connected}")
         
         # Connect tracking update signals
         self.ball_tracking_controller.tracking_updated.connect(
@@ -182,26 +185,32 @@ class AppController(QObject):
         
         logging.info("Ball tracking controller connected to game analyzer")
     
-    @Slot(float, tuple, tuple)
-    def _on_ball_detection_updated(self, detection_rate, pixel_coords, world_coords):
+    @Slot(int, float, tuple, tuple)
+    def _on_ball_detection_updated(self, frame_idx, detection_rate, left_coords, right_coords):
         """
         Handle ball detection updates from ball tracking controller and pass to game analyzer.
         
         Args:
+            frame_idx (int): Frame index
             detection_rate (float): Detection confidence rate (0-1)
-            pixel_coords (tuple): (x, y) in pixel coordinates
-            world_coords (tuple): (x, y, z) in world coordinates
+            left_coords (tuple): (x, y, r) coordinates in left image, or None
+            right_coords (tuple): (x, y, r) coordinates in right image, or None
         """
-        if pixel_coords and len(pixel_coords) == 2:
-            # We have 2D pixel coordinates from both cameras
-            frame_index = self.model.current_frame_index
-            timestamp = time.time()
-            
-            # Get left and right pixel coordinates
-            left_coords, right_coords = pixel_coords
-            
-            # Pass to game analyzer
-            self.game_analyzer.on_ball_detected(frame_index, timestamp, detection_rate, left_coords, right_coords)
+        # Log that we received the signal
+        logging.debug(f"AppController received detection update: frame={frame_idx}, rate={detection_rate:.2f}")
+        
+        # Get current timestamp
+        timestamp = time.time()
+        
+        # Extract pixel coordinates from tuple (ignoring radius)
+        left_point = None if left_coords is None else (left_coords[0], left_coords[1])
+        right_point = None if right_coords is None else (right_coords[0], right_coords[1])
+        
+        # Log the call to GameAnalyzer
+        logging.debug(f"Calling GameAnalyzer.on_ball_detected with frame={frame_idx}, left={left_point}, right={right_point}")
+        
+        # Pass to game analyzer for 3D tracking
+        self.game_analyzer.on_ball_detected(frame_idx, timestamp, detection_rate, left_point, right_point)
     
     def show(self):
         """Show the main window."""
