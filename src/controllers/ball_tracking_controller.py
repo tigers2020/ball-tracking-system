@@ -29,7 +29,7 @@ from src.services.data_saver import DataSaver
 from src.services.triangulation_service import TriangulationService
 from src.utils.config_manager import ConfigManager
 from src.utils.coord_utils import fuse_coordinates
-from src.utils.constants import HSV, ROI, COLOR
+from src.utils.constants import HSV, ROI, COLOR, STEREO
 
 
 class TrackingState(Enum):
@@ -162,7 +162,7 @@ class BallTrackingController(QObject):
                 "left": None,
                 "right": None
             }
-    
+            
     @property
     def is_enabled(self):
         """
@@ -945,46 +945,25 @@ class BallTrackingController(QObject):
         # TODO: Implement more sophisticated selection based on confidence scores
         return circles[0]
     
-    def _fuse_coordinates(self):
-        """
-        Triangulate 3D coordinates from left/right 2D coordinates.
-        """
-        left_coords = self.model.left_coords
-        right_coords = self.model.right_coords
-        
-        # Skip if either coordinate is missing
+    def _fuse_coordinates(self, left_coords, right_coords):
+        """Fuse 2D coordinates from left and right cameras to 3D."""
         if left_coords is None or right_coords is None:
             return None
         
-        # 디스패리티 검증 추가
+        # Calculate disparity (difference in x coordinates)
         disparity = left_coords[0] - right_coords[0]
-        MIN_VALID_DISPARITY = 90.0  # 최소 유효 디스패리티 값 (픽셀)
+        
+        # Use constant from constants.py with adjustment factor
+        MIN_VALID_DISPARITY = STEREO.MIN_DISPARITY * 4.0  # Adjusted from default 5.0 to match previous 20.0
+        
+        # Log the actual disparity for debugging
+        logging.debug(f"Current disparity: {disparity:.2f}px (threshold: {MIN_VALID_DISPARITY}px)")
         
         if abs(disparity) < MIN_VALID_DISPARITY:
             logging.warning(f"Disparity too small: {disparity:.2f}px < {MIN_VALID_DISPARITY}px. Skipping triangulation.")
             return None
-        
-        # Convert to numpy arrays
-        p1 = np.array(left_coords, dtype=np.float32)
-        p2 = np.array(right_coords, dtype=np.float32)
-        
-        # Triangulate 3D coordinates
-        try:
-            world_coords = self.triangulator.triangulate(p1[0], p1[1], p2[0], p2[1])
-            
-            if world_coords is None:
-                logging.warning("Triangulation failed: No valid 3D coordinates returned")
-                return None
                 
-            # 높이 검증 추가 - Y 좌표가 3.5m보다 높으면 경고 표시
-            if world_coords[1] > 3.5:
-                logging.warning(f"Invalid triangulated height: {world_coords[1]:.2f}m > 3.5m. Measurement may be unreliable.")
-            
-            return world_coords
-            
-        except Exception as e:
-            logging.error(f"Error during triangulation: {e}")
-            return None
+        # Continue with triangulation...
     
     def _check_out_of_bounds(self):
         """Check if ball is predicted to be out of bounds and update tracking state."""

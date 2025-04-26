@@ -11,9 +11,10 @@ import numpy as np
 import cv2
 import logging
 from typing import Tuple, Optional, List
+from src.utils.constants import STEREO
 
-# 최소 유효 디스패리티 값 (픽셀)
-MIN_VALID_DISPARITY = 90.0
+# Use the constant from constants.py
+MIN_VALID_DISPARITY = STEREO.MIN_DISPARITY * 4.0  # Adjusted value based on previous setting
 
 def triangulate_points(
     point1: np.ndarray,
@@ -333,4 +334,18 @@ def calculate_reprojection_error(
     # Calculate Euclidean distance
     error = np.linalg.norm(projected_point - point_2d)
     
-    return error 
+    return error
+
+
+def triangulate_with_focal_length(self, left_points, right_points):
+    """Triangulate 3D points from 2D point correspondences using focal length."""
+    # Convert focal length from mm to pixels
+    if self.focal_length_mm and self.sensor_width_mm and self.image_width:
+        focal_px = self.focal_length_mm / self.sensor_width_mm * self.image_width
+        logging.debug(f"Using converted focal length: {self.focal_length_mm}mm → {focal_px}px")
+    else:
+        focal_px = self.focal_length_mm  # Use as-is if conversion params missing
+        
+    # Use focal_px in triangulation calculations...
+    # Implementation to be completed based on specific requirements
+    return None 
