@@ -31,9 +31,9 @@ class Kalman3DService:
         self.dt = settings.get("dt", 0.033)  # 30fps by default
         self.process_noise = settings.get("process_noise", 0.01)
         self.measurement_noise = settings.get("measurement_noise", 0.1)
-        self.reset_threshold = settings.get("reset_threshold", 5.0)  # m/s jump threshold
+        self.reset_threshold = 10.0  # Maximum distance between measurements (meters)
         self.velocity_decay = settings.get("velocity_decay", 0.98)
-        self.min_updates_required = settings.get("min_updates", 5)
+        self.min_updates_required = 2  # Minimum updates before filter is considered stable
         self.gravity = settings.get("gravity", 9.81)  # m/s^2
         self.use_physics_model = settings.get("use_physics_model", True)
         
@@ -72,8 +72,9 @@ class Kalman3DService:
             self.process_noise = settings["process_noise"]
         if "measurement_noise" in settings:
             self.measurement_noise = settings["measurement_noise"]
-        if "reset_threshold" in settings:
-            self.reset_threshold = settings["reset_threshold"]
+        # 고정된 reset_threshold를 유지하기 위해 설정에서 설정하지 않음
+        # if "reset_threshold" in settings:
+        #     self.reset_threshold = settings["reset_threshold"]
         if "velocity_decay" in settings:
             self.velocity_decay = settings["velocity_decay"]
         if "max_history_length" in settings:
@@ -89,6 +90,7 @@ class Kalman3DService:
         logging.info(f"3D Kalman parameters updated: dt={self.dt}, "
                    f"process_noise={self.process_noise}, "
                    f"measurement_noise={self.measurement_noise}, "
+                   f"reset_threshold={self.reset_threshold}, "
                    f"physics_model={'enabled' if self.use_physics_model else 'disabled'}")
 
     def _init_kalman_filter(self) -> None:
@@ -99,6 +101,10 @@ class Kalman3DService:
         """
         # Create 6D state Kalman filter (x, y, z, vx, vy, vz)
         self.kalman = cv2.KalmanFilter(6, 3)
+        
+        # Save critical parameters that should persist across reinitializations
+        saved_reset_threshold = self.reset_threshold
+        saved_min_updates = self.min_updates_required
         
         # Transition matrix (A) - with physics model if enabled
         if self.use_physics_model:
@@ -158,11 +164,15 @@ class Kalman3DService:
         self.last_pos = None
         self.last_vel = None
         
+        # 복원: 저장된 중요 매개변수 복원
+        self.reset_threshold = saved_reset_threshold
+        self.min_updates_required = saved_min_updates
+        
         # Clear history
         self.position_history = []
         self.velocity_history = []
         
-        logging.debug("3D Kalman filter initialized with appropriate noise matrices")
+        logging.debug(f"3D Kalman filter initialized with reset_threshold={self.reset_threshold}m and min_updates={self.min_updates_required}")
 
     def set_initial_state(self, position: np.ndarray, velocity: np.ndarray = None) -> None:
         """
@@ -296,8 +306,15 @@ class Kalman3DService:
             # Check if measurement is too far from prediction (possible outlier)
             if self.last_pos is not None:
                 distance = np.linalg.norm(position - self.last_pos)
-                if distance > self.reset_threshold:
-                    logging.warning(f"Measurement too far from prediction: {distance:.2f}m > {self.reset_threshold:.2f}m")
+                # 적응형 거리 계산 - 업데이트 횟수에 따라 더 관대하게 조정
+                adaptive_threshold = self.reset_threshold
+                if self.update_count > 10:
+                    adaptive_threshold *= 1.2  # 업데이트가 많을수록 더 관대하게
+                
+                logging.debug(f"Distance from previous position: {distance:.2f}m (threshold: {adaptive_threshold:.2f}m)")
+                
+                if distance > adaptive_threshold:
+                    logging.warning(f"Measurement too far from prediction: {distance:.2f}m > {adaptive_threshold:.2f}m")
                     
                     # If multiple consecutive large jumps, reinitialize the filter
                     if self.update_count > self.min_updates_required:

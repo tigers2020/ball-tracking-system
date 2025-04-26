@@ -240,6 +240,9 @@ class GameAnalyzer(QObject):
         left_np = np.array([left_point], dtype=np.float32)
         right_np = np.array([right_point], dtype=np.float32)
         
+        # 좌표 로깅 추가
+        logging.debug(f"Triangulating points - left: {left_point}, right: {right_point}")
+        
         # Triangulate 3D position
         points_3d = self.triangulation.triangulate_points(left_np, right_np)
         
@@ -249,10 +252,15 @@ class GameAnalyzer(QObject):
             
         position_3d = points_3d[0]
         
+        # 삼각측량 결과 로깅 추가
+        logging.debug(f"Triangulated 3D point: ({position_3d[0]:.2f}, {position_3d[1]:.2f}, {position_3d[2]:.2f})")
+        
         # Validate triangulated point (z should be positive and within reasonable range)
-        if position_3d[2] < 0 or position_3d[2] > 5.0:
+        if position_3d[2] < 0 or position_3d[2] > 10.0:  # 증가: 5.0 -> 10.0
             logging.warning(f"Invalid triangulated height: {position_3d[2]:.2f}m")
-            position_3d[2] = max(0.0, min(position_3d[2], 5.0))  # Clamp to reasonable range
+            # 더 유연한 클램핑 - 테니스 데이터의 현실적인 범위로 제한
+            position_3d[2] = max(0.0, min(position_3d[2], 10.0))  # 최대 높이 증가: 5.0 -> 10.0
+            logging.debug(f"Clamped height to: {position_3d[2]:.2f}m")
             
         # Update Kalman filter
         kalman_result = self.kalman.update(position_3d)
