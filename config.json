@@ -41,7 +41,7 @@
         "camera_location_x": 0.0,
         "camera_location_y": 29.09,
         "camera_location_z": 12.5,
-        "camera_rotation_x": -65.0,
+        "camera_rotation_x": 65.0,
         "camera_rotation_y": 0.0,
         "camera_rotation_z": 180.0,
         "focal_length_mm": 50.0,

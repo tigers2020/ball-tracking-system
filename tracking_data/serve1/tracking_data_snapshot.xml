@@ -1,0 +1,43 @@
+<?xml version="1.0" ?>
+<TrackingData folder="serve1" timestamp="2025-04-26 12:45:24" created="1745685924.7343452">
+  <Image number="80" name="frame_000080.png" timestamp="2025-04-26 12:45:30" tracking_active="True">
+    <Left>
+      <HSV x="1195.0" y="40.0"/>
+    </Left>
+  </Image>
+  <Image number="160" name="frame_000160.png" timestamp="2025-04-26 12:45:31" tracking_active="True">
+    <Left>
+      <HSV x="1194.0" y="103.0"/>
+    </Left>
+  </Image>
+  <Image number="240" name="frame_000240.png" timestamp="2025-04-26 12:45:33" tracking_active="True">
+    <Left>
+      <HSV x="1193.0" y="176.0"/>
+    </Left>
+  </Image>
+  <Image number="320" name="frame_000320.png" timestamp="2025-04-26 12:45:36" tracking_active="True">
+    <Left>
+      <HSV x="1191.0" y="258.0"/>
+    </Left>
+  </Image>
+  <Image number="400" name="frame_000400.png" timestamp="2025-04-26 12:45:38" tracking_active="True">
+    <Left>
+      <HSV x="1189.0" y="353.0"/>
+    </Left>
+  </Image>
+  <Image number="480" name="frame_000480.png" timestamp="2025-04-26 12:45:40" tracking_active="True">
+    <Left>
+      <HSV x="1186.0" y="461.0"/>
+    </Left>
+  </Image>
+  <Image number="560" name="frame_000560.png" timestamp="2025-04-26 12:45:42" tracking_active="True">
+    <Left>
+      <HSV x="1184.0" y="589.0"/>
+    </Left>
+  </Image>
+  <Image number="640" name="frame_000640.png" timestamp="2025-04-26 12:45:44" tracking_active="True">
+    <Left>
+      <HSV x="1182.0" y="738.0"/>
+    </Left>
+  </Image>
+</TrackingData>

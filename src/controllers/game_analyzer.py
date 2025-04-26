@@ -138,11 +138,14 @@ class GameAnalyzer(QObject):
             
         self.is_enabled = enabled
         
-        if not enabled:
+        if enabled:
+            # 디버깅용 코드 제거 - 초기 위치를 중앙으로 설정하지 않음
+            logging.info("Game analyzer enabled")
+        else:
             # Clear state when disabled
             self.reset()
             
-        logging.info(f"Game analyzer {'enabled' if enabled else 'disabled'}")
+            logging.info(f"Game analyzer {'enabled' if enabled else 'disabled'}")
         
     def reset(self):
         """Reset all tracking state."""
@@ -247,8 +250,8 @@ class GameAnalyzer(QObject):
         left_np = np.array([left_point], dtype=np.float32)
         right_np = np.array([right_point], dtype=np.float32)
         
-        # Log coordinates
-        logging.debug(f"Triangulating points - left: {left_point}, right: {right_point}")
+        # Log input coordinates for debugging
+        logging.info(f"[COORD DEBUG] Frame {frame_index} - Input coordinates: left={left_point}, right={right_point}")
         
         # Triangulate 3D position
         points_3d = self.triangulation.triangulate_points(left_np, right_np)
@@ -259,8 +262,9 @@ class GameAnalyzer(QObject):
             
         position_3d = points_3d[0]
         
-        # Log triangulated result
-        logging.debug(f"Triangulated 3D point: ({position_3d[0]:.2f}, {position_3d[1]:.2f}, {position_3d[2]:.2f})")
+        # Log triangulated result with detailed coordinates
+        logging.info(f"[COORD DEBUG] Frame {frame_index} - Original triangulated (world): "
+                    f"x={position_3d[0]:.3f}, y={position_3d[1]:.3f}, z={position_3d[2]:.3f}")
         
         # Initialize confidence score
         confidence_score = detection_rate  # Start with detection rate as base confidence
@@ -281,12 +285,22 @@ class GameAnalyzer(QObject):
         position_filtered = kalman_result["position"]
         velocity = kalman_result["velocity"]
         
+        # Log Kalman filtered coordinates
+        logging.info(f"[COORD DEBUG] Frame {frame_index} - After Kalman (world): "
+                    f"x={position_filtered[0]:.3f}, y={position_filtered[1]:.3f}, z={position_filtered[2]:.3f}, "
+                    f"vx={velocity[0]:.3f}, vy={velocity[1]:.3f}, vz={velocity[2]:.3f}")
+        
         # Only log warnings for filtered results exceeding limits (no clamping)
         if position_filtered[2] > ANALYSIS.MAX_VALID_HEIGHT:
             logging.info(f"Filtered height {position_filtered[2]:.2f}m exceeds threshold (debug-bypass for now)")
         
         # Convert to court coordinates
         court_x, court_y, court_z = self.coordinate_service.world_to_court(position_filtered)
+        
+        # Log court coordinates (after conversion from world)
+        logging.info(f"[COORD DEBUG] Frame {frame_index} - Court coordinates: "
+                    f"x={court_x:.3f}, y={court_y:.3f}, z={court_z:.3f} | "
+                    f"World->Court transformation applied")
         
         # Create tracking data object using filtered position
         tracking_data = TrackingData(

@@ -462,6 +462,8 @@ class AppController(QObject):
         
         # Reset ball tracking data
         self.ball_tracking_controller.reset_tracking()
+        # Disable game analyzer when stopping playback
+        self.game_analyzer.enable(False)
         
         # Reset detection rate and clear info view
         if hasattr(self.view, 'info_view'):
@@ -632,6 +634,8 @@ class AppController(QObject):
         
         # Enable ball tracking and mask overlay
         self.ball_tracking_controller.enable(True)
+        # Enable game analyzer to process 3D positions
+        self.game_analyzer.enable(True)
         self.view.image_view.enable_mask_overlay(True)
         
         # Show the dialog

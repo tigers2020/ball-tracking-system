@@ -348,7 +348,7 @@ class BallGraphicsItem(QGraphicsEllipseItem):
     
     def update_position(self, x: float, y: float, z: float):
         """
-        Update the ball position.
+        Update the ball position on the tennis court overlay.
         
         Args:
             x (float): X coordinate in court frame (meters)
@@ -360,11 +360,11 @@ class BallGraphicsItem(QGraphicsEllipseItem):
         self.y_pos = y
         self.z_pos = z
         
-        # Convert to view coordinates
+        # Convert court coordinates to scene coordinates
         px = x * self.scale_factor
         py = y * self.scale_factor
         
-        # Update position
+        # Update ball position
         self.setRect(px - self.radius, py - self.radius, 
                     self.radius * 2, self.radius * 2)
         
@@ -372,7 +372,10 @@ class BallGraphicsItem(QGraphicsEllipseItem):
         self.shadow.setRect(px - self.radius/2, py - self.radius/2, 
                            self.radius, self.radius)
         
-        # Show if ball is visible
+        # Log position update
+        logging.debug(f"Ball position updated: court=({x:.2f}, {y:.2f}, {z:.2f}), px={px:.1f}, py={py:.1f}")
+        
+        # Show ball only when it's above the ground
         if z >= 0:
             self.show()
             self.shadow.show()
@@ -523,37 +526,38 @@ class BounceOverlayWidget(QGraphicsView):
         # Add position to trajectory
         self.trajectory.add_position(x, y, z)
         
-    def connect_game_analyzer(self, analyzer):
+    def connect_game_analyzer(self, game_analyzer):
         """
-        Connect to a game analyzer to receive position updates and bounce events.
+        Connect signals from the GameAnalyzer to this widget.
         
         Args:
-            analyzer: GameAnalyzer instance
+            game_analyzer: The GameAnalyzer instance
         """
-        if analyzer:
-            # Store reference
-            self.game_analyzer = analyzer
+        # Disconnect any existing connections
+        if self.game_analyzer:
+            self.game_analyzer.court_position_updated.disconnect(self._on_ball_position_updated)
+            self.game_analyzer.bounce_detected.disconnect(self._on_bounce_detected)
+        
+        self.game_analyzer = game_analyzer
+        
+        if game_analyzer:
+            game_analyzer.court_position_updated.connect(self._on_ball_position_updated)
+            game_analyzer.bounce_detected.connect(self._on_bounce_detected)
             
-            # Connect signals
-            analyzer.court_position_updated.connect(self._on_ball_position_updated)
-            analyzer.bounce_detected.connect(self._on_bounce_detected)
-            # tracking_reset signal is removed temporarily due to compatibility issues
-            #analyzer.tracking_reset.connect(self.reset)
-            
-            logging.info("Bounce overlay connected to game analyzer")
-            
-    def _on_ball_position_updated(self, x, y, z):
+    def _on_ball_position_updated(self, x: float, y: float, z: float):
         """
-        Handle ball position updates from game analyzer.
+        Update the ball position when receiving a signal from the game analyzer.
         
         Args:
-            x: X coordinate in court frame
-            y: Y coordinate in court frame
-            z: Z coordinate in court frame
+            x (float): X position in court coordinates (meters)
+            y (float): Y position in court coordinates (meters)
+            z (float): Z position in court coordinates (meters)
         """
-        # Update ball position in overlay
+        logging.debug(f"Ball position update received: ({x:.2f}, {y:.2f}, {z:.2f})")
+        
+        # Update the ball position
         self.update_ball_position(x, y, z)
-        
+    
     def _on_bounce_detected(self, bounce_event):
         """
         Handle bounce events from game analyzer.

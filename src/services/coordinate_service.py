@@ -140,6 +140,10 @@ class CoordinateService(QObject):
             Tuple (x, y, z) in court coordinates
         """
         try:
+            # Log original position before transformation
+            logging.info(f"[TRANSFORM DEBUG] Before world_to_court - Input world coords: "
+                        f"({position_3d[0]:.3f}, {position_3d[1]:.3f}, {position_3d[2]:.3f})")
+                        
             # Sometimes we might get NaN or Inf values
             if position_3d is None or not np.all(np.isfinite(position_3d)):
                 # Return default valid values in this case
@@ -151,12 +155,15 @@ class CoordinateService(QObject):
             
             # Scale from pixels to meters
             p_cam_m = p_cam * self.scale
+            logging.info(f"[TRANSFORM DEBUG] After scaling - p_cam_m: ({p_cam_m[0]:.3f}, {p_cam_m[1]:.3f}, {p_cam_m[2]:.3f}), scale={self.scale}")
             
             # Apply rotation to convert from camera to world coordinates
             p_world = self.R @ p_cam_m + self.T
+            logging.info(f"[TRANSFORM DEBUG] After rotation and translation - p_world: ({p_world[0]:.3f}, {p_world[1]:.3f}, {p_world[2]:.3f})")
             
             # Apply camera height offset
             p_world[2] -= self.camera_height
+            logging.info(f"[TRANSFORM DEBUG] After height offset - p_world: ({p_world[0]:.3f}, {p_world[1]:.3f}, {p_world[2]:.3f}), camera_height={self.camera_height}")
             
             # 축 맵핑 수정: 원래 좌표계 유지 (y/z 맵핑 오류 수정)
             # 기존: court_x = world_y, court_y = world_z, court_z = world_x (잘못된 매핑)
@@ -165,15 +172,16 @@ class CoordinateService(QObject):
             court_y = float(p_world[1])  # y축은 그대로 (깊이)
             court_z = float(p_world[2])  # z축은 그대로 (높이)
             
-            # Log the coordinate transformation
+            # Log the final transformed coordinates
+            logging.info(f"[TRANSFORM DEBUG] Final court coordinates: ({court_x:.3f}, {court_y:.3f}, {court_z:.3f})")
+            
+            # Log the coordinate transformation (summary)
             logging.debug(f"Coordinate transformation: world ({position_3d[0]:.2f}, {position_3d[1]:.2f}, {position_3d[2]:.2f}) → "
-                        f"court ({court_x:.2f}, {court_y:.2f}, {court_z:.2f})")
-            
-            # Return the court coordinates as a tuple
+                         f"court ({court_x:.2f}, {court_y:.2f}, {court_z:.2f})")
+                         
             return court_x, court_y, court_z
-            
-        except (TypeError, IndexError) as e:
-            logging.error(f"Error in world_to_court transformation: {e}")
+        except Exception as e:
+            logging.error(f"Error in world_to_court: {e}")
             return 0.0, 0.0, 0.0
     
     def validate_3d_position(self, position_3d: np.ndarray, confidence: float) -> Tuple[np.ndarray, float]:

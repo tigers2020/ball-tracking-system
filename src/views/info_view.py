@@ -110,9 +110,9 @@ class InfoView(QWidget):
         # Add IN/OUT indicator
         self.in_out_led = InOutLED()
         
-        position_layout.addRow("X:", self.position_x_label)
-        position_layout.addRow("Y:", self.position_y_label)
-        position_layout.addRow("Z:", self.position_z_label)
+        position_layout.addRow("X (m):", self.position_x_label)
+        position_layout.addRow("Y (m):", self.position_y_label)
+        position_layout.addRow("Z (m):", self.position_z_label)
         position_layout.addRow("IN/OUT:", self.in_out_led)
         position_group.setLayout(position_layout)
         
@@ -191,12 +191,12 @@ class InfoView(QWidget):
     
     def set_position_coords(self, x, y, z):
         """
-        Set the 3D position coordinates.
+        Set the 3D world position coordinates in meters.
         
         Args:
-            x (float): X coordinate
-            y (float): Y coordinate
-            z (float): Z coordinate
+            x (float): X coordinate in world space (meters)
+            y (float): Y coordinate in world space (meters)
+            z (float): Z coordinate in world space (meters)
         """
         self.position_coords_3d["x"] = x
         self.position_coords_3d["y"] = y
@@ -309,7 +309,8 @@ class InfoView(QWidget):
             self.game_analyzer = analyzer
             
             # Connect to world position updates (x, y, z in world coordinate system)
-            analyzer.court_position_updated.connect(self._on_world_position_updated)
+            # Use tracking_updated signal instead of court_position_updated to get original world coordinates
+            analyzer.tracking_updated.connect(self._on_tracking_updated)
             
             # Connect to in/out signal for the LED indicator
             analyzer.in_out_detected.connect(self.in_out_led.on_in_out)
@@ -397,17 +398,27 @@ class InfoView(QWidget):
             
         logging.debug(f"ROI info updated: left={left_roi}, right={right_roi}")
     
-    def _on_world_position_updated(self, x, y, z):
+    def _on_tracking_updated(self, frame_index, timestamp, position, velocity, is_valid):
         """
-        Handle world position update signal from game analyzer.
+        Handle tracking updates from game analyzer to get the original world coordinates.
         
         Args:
-            x (float): X coordinate in world space
-            y (float): Y coordinate in world space
-            z (float): Z coordinate in world space
+            frame_index (int): Frame index
+            timestamp (float): Timestamp
+            position (numpy.ndarray): 3D position in world space [x, y, z]
+            velocity (numpy.ndarray): 3D velocity in world space [vx, vy, vz]
+            is_valid (bool): Whether the tracking data is valid
         """
-        self.set_position_coords(x, y, z)
-        logging.debug(f"World position updated: ({x:.3f}, {y:.3f}, {z:.3f})")
+        if position is not None and is_valid:
+            # Display original world coordinates directly
+            self.set_position_coords(position[0], position[1], position[2])
+            
+            # Detailed logging for UI displayed coordinates
+            logging.info(f"[UI COORD DEBUG] Frame {frame_index} - Displaying world coordinates in UI: "
+                       f"x={position[0]:.3f}m, y={position[1]:.3f}m, z={position[2]:.3f}m | "
+                       f"velocity: vx={velocity[0]:.3f}, vy={velocity[1]:.3f}, vz={velocity[2]:.3f}")
+            
+            logging.debug(f"World position updated: ({position[0]:.3f}m, {position[1]:.3f}m, {position[2]:.3f}m)")
     
     def _on_kalman_predicted(self, camera, x, y, vx, vy):
         """
@@ -435,4 +446,18 @@ class InfoView(QWidget):
         Returns:
             list: List of visualizer objects
         """
-        return self._visualizers 
+        return self._visualizers
+    
+    # This method will be kept for backward compatibility
+    def _on_world_position_updated(self, x, y, z):
+        """
+        Handle world position update signal from game analyzer.
+        This method is kept for backward compatibility but is no longer the primary method.
+        
+        Args:
+            x (float): X coordinate in court space (meters)
+            y (float): Y coordinate in court space (meters)
+            z (float): Z coordinate in court space (meters)
+        """
+        # We're now getting direct world coordinates from tracking_updated signal
+        pass 
