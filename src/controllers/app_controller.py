@@ -620,12 +620,15 @@ class AppController(QObject):
         current_hsv = self.ball_tracking_controller.get_hsv_values()
         self.ball_tracking_dialog.set_hsv_values(current_hsv)
         
-        # Enable ball tracking and mask overlay
-        self.ball_tracking_controller.enable(True)
-        self.view.image_view.enable_mask_overlay(True)
+        # 순서 변경: 이미지 먼저 설정 후 활성화
+        logging.info("Setting images before enabling ball tracking")
         
         # Set current images to the ball tracking controller
         self.ball_tracking_controller.set_images(left_image, right_image)
+        
+        # Enable ball tracking and mask overlay
+        self.ball_tracking_controller.enable(True)
+        self.view.image_view.enable_mask_overlay(True)
         
         # Show the dialog
         self.ball_tracking_dialog.exec()
