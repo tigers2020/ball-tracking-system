@@ -283,7 +283,7 @@ class ANALYSIS:
     MIN_FRAMES_BETWEEN_BOUNCES: int = 3  # Minimum frames between consecutive bounces
     
     # Ball height constraints
-    MAX_VALID_HEIGHT: float = 15.0  # Maximum valid height for ball detection (m)
+    MAX_VALID_HEIGHT: float = 999.0  # Maximum valid height for ball detection (m) - increased to allow all heights
     MIN_VALID_HEIGHT: float = -0.05  # Minimum valid height, slight negative allowed for measurement error (m)
     
     # Ball physics

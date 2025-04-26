@@ -251,7 +251,15 @@ class KalmanProcessor:
                 update_count = self.right_update_count
             else:
                 logging.error(f"Invalid camera identifier: {camera}")
-                return (x, y, 0.0, 0.0)
+                return (0, 0, 0, 0)
+            
+            # Check if we have a valid filter
+            if kalman is None:
+                logging.error(f"No Kalman filter found for camera {camera}")
+                return (0, 0, 0, 0)
+            
+            # Create measurement array and convert to float32 to ensure type consistency
+            measurement = np.array([[x], [y]], dtype=np.float32)
             
             # Skip first prediction if initialization state
             if update_count == 0:
@@ -283,9 +291,6 @@ class KalmanProcessor:
                 
             # Perform prediction and update
             prediction = kalman.predict()
-            
-            # Create a measurement vector from actual coordinates
-            measurement = np.array([x, y], dtype=np.float32).reshape(2, 1)
             
             # Perform the correction phase
             correction = kalman.correct(measurement)
@@ -335,7 +340,7 @@ class KalmanProcessor:
             
         except Exception as e:
             logging.error(f"Error updating Kalman filter for {camera} camera: {e}")
-            return (x, y, 0.0, 0.0)
+            return (0, 0, 0, 0)
 
     def get_position_history(self, camera: str) -> List[Tuple[int, int]]:
         """

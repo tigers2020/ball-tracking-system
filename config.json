@@ -21,7 +21,7 @@
         "dp": 1.3,
         "min_dist": 112,
         "param1": 64,
-        "param2": 31,
+        "param2": 42,
         "min_radius": 10,
         "max_radius": 25,
         "adaptive": false
@@ -39,8 +39,8 @@
     },
     "camera_settings": {
         "camera_location_x": 0.0,
-        "camera_location_y": 29.089,
-        "camera_location_z": 12.503,
+        "camera_location_y": 29.09,
+        "camera_location_z": 12.5,
         "camera_rotation_x": 65.0,
         "camera_rotation_y": 0.0,
         "camera_rotation_z": 180.0,

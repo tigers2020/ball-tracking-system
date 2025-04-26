@@ -194,7 +194,7 @@ class CoordinateService(QObject):
             confidence = confidence * height_confidence
             
             if adjusted_position[2] > ANALYSIS.EXTREME_HEIGHT_THRESHOLD:
-                logging.warning(f"Extremely high position detected: {adjusted_position[2]:.2f}m")
+                logging.info(f"Extremely high position detected: {adjusted_position[2]:.2f}m")
                 
             # Only log a warning and keep the original value
             logging.info(f"Height exceeds maximum valid value: {adjusted_position[2]:.2f}m")

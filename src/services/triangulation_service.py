@@ -86,33 +86,43 @@ class TriangulationService:
         self.h = int(h0 * self.scale)
 
         # Ensure sensor dimensions are set correctly for focal length calculation
-        sensor_width = cfg.get("sensor_width", 36.0)  # Default to full-frame 36mm if not specified
-        sensor_height = cfg.get("sensor_height", 24.0)  # Default to full-frame 24mm if not specified
+        sensor_width_mm = cfg.get("sensor_width_mm", 36.0)  # Default to full-frame 36mm if not specified
+        sensor_height_mm = cfg.get("sensor_height_mm", 24.0)  # Default to full-frame 24mm if not specified
         
         # Log sensor dimensions
-        logging.info(f"Using sensor dimensions: width={sensor_width}mm, height={sensor_height}mm")
+        logging.info(f"Using sensor dimensions: width={sensor_width_mm}mm, height={sensor_height_mm}mm")
 
-        # Create camera intrinsic matrix
-        fx = cfg["focal_length_mm"] / sensor_width * self.w
-        fy = cfg["focal_length_mm"] / sensor_height * self.h
-        self.K = np.array([[fx, 0, cfg["principal_point_x"] * self.scale],
-                           [0, fy, cfg["principal_point_y"] * self.scale],
-                           [0, 0, 1]], dtype=np.float64)
+        # Create camera intrinsic matrix - ensure all units are consistent
+        focal_length_mm = cfg.get("focal_length_mm", 50.0)
+        fx = focal_length_mm / sensor_width_mm * self.w
+        fy = focal_length_mm / sensor_height_mm * self.h
         
-        logging.info(f"Camera intrinsics calculated: fx={fx:.1f}, fy={fy:.1f}, focal_length={cfg['focal_length_mm']}mm")
+        # Ensure principal points are specified or use defaults
+        cx = cfg.get("principal_point_x", self.w / 2) * self.scale
+        cy = cfg.get("principal_point_y", self.h / 2) * self.scale
+        
+        # Store the computed intrinsic matrix
+        self.K = np.array([[fx, 0, cx],
+                           [0, fy, cy],
+                           [0, 0, 1]], dtype=np.float32)  # Use float32 consistently
+        
+        logging.info(f"Camera intrinsics calculated: fx={fx:.1f}, fy={fy:.1f}, focal_length={focal_length_mm}mm")
 
+        # Precise baseline measurement is critical for depth calculation
+        # Use the exact value from config or CAD measurement
+        baseline_m = cfg.get("baseline_m", 0.6)  # Use the exact measured value
+        
         # Left and right camera transforms
-        B = cfg["baseline_m"]
-        T_left = np.array([cfg["camera_location_x"] - B/2,
-                           cfg["camera_location_y"],
-                           cfg["camera_location_z"]])
-        T_right = T_left + np.array([B, 0, 0])
+        T_left = np.array([cfg.get("camera_location_x", 0.0) - baseline_m/2,
+                           cfg.get("camera_location_y", 0.0),
+                           cfg.get("camera_location_z", 0.0)], dtype=np.float32)
+        T_right = T_left + np.array([baseline_m, 0, 0], dtype=np.float32)
 
         # Rotation matrix from Euler angles
-        angles = np.array([cfg["camera_rotation_x"],
-                          cfg["camera_rotation_y"],
-                          cfg["camera_rotation_z"]]) * DEG2RAD
-        R = _rot_mat(*angles)
+        angles = np.array([cfg.get("camera_rotation_x", 0.0),
+                          cfg.get("camera_rotation_y", 0.0),
+                          cfg.get("camera_rotation_z", 0.0)]) * DEG2RAD
+        R = _rot_mat(*angles).astype(np.float32)  # Use float32 consistently
         
         # Camera projection matrices (legacy method)
         self.R_left = R
@@ -127,7 +137,7 @@ class TriangulationService:
         self.use_pnp = cfg.get("use_pnp", False)
         self.pnp_calibrated = False
         
-        logging.info(f"Triangulation service initialized with baseline: {B}m, scale: {self.scale}, "
+        logging.info(f"Triangulation service initialized with baseline: {baseline_m}m, scale: {self.scale}, "
                     f"use_pnp: {self.use_pnp}")
 
     def calibrate_from_pnp(self, left_image_points: np.ndarray, right_image_points: np.ndarray, 

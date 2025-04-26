@@ -283,7 +283,7 @@ class GameAnalyzer(QObject):
         
         # Only log warnings for filtered results exceeding limits (no clamping)
         if position_filtered[2] > ANALYSIS.MAX_VALID_HEIGHT:
-            logging.warning(f"Filtered height exceeds maximum valid value: {position_filtered[2]:.2f}m")
+            logging.info(f"Filtered height exceeds maximum valid value: {position_filtered[2]:.2f}m")
         
         # Convert to court coordinates
         court_x, court_y, court_z = self.coordinate_service.world_to_court(position_filtered)

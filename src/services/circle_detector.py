@@ -148,47 +148,48 @@ class CircleDetector:
                 # Scale min_dist proportional to ROI dimensions
                 settings['min_dist'] = max(5, int(settings['min_dist'] * np.sqrt(roi_area_ratio) * 1.2))
                 
-                # Scale param2 (accumulator threshold) based on ROI size
-                # For smaller ROIs, lower the threshold to detect circles more easily
-                settings['param2'] = max(5, int(settings['param2'] * (0.8 + roi_area_ratio * 0.4)))
-                
                 logging.debug(f"ROI-adaptive parameters: dp={settings['dp']:.2f}, min_dist={settings['min_dist']}, "
-                             f"param2={settings['param2']}, roi_ratio={roi_area_ratio:.3f}")
+                             f"roi_ratio={roi_area_ratio:.3f}")
             
             # Apply Gaussian blur to reduce noise
             blurred = cv2.GaussianBlur(roi_img, MORPHOLOGY.kernel_size, 0)
             
-            # 임계값 낮추기 (더 민감하게 원을 검출)
+            # 적응형 param2 램프 구현
+            # 높은 값에서 시작하여 원을 찾을 때까지 또는 최소값에 도달할 때까지 낮춤
             original_param2 = settings['param2']
-            settings['param2'] = min(original_param2, 25)  # 기존 임계값과 25 중 더 작은 값 사용
             
-            # Detect circles using Hough Circle Transform
-            circles = cv2.HoughCircles(
-                blurred,
-                cv2.HOUGH_GRADIENT,
-                dp=settings['dp'],
-                minDist=settings['min_dist'],
-                param1=settings['param1'],
-                param2=settings['param2'],
-                minRadius=settings['min_radius'],
-                maxRadius=settings['max_radius']
-            )
+            # 초기값 설정: 원래 값과 최대값 35 중 더 작은 값으로 시작
+            start_param2 = min(original_param2, 35)
+            min_param2 = 15  # 최소 임계값
+            circles = None
             
-            # 결과 로깅
-            if circles is not None:
-                logging.info(f"Detected {len(circles[0])} circles with param2={settings['param2']} (original: {original_param2})")
-            else:
-                logging.debug(f"No circles detected with param2={settings['param2']} (original: {original_param2})")
+            # 파라미터를 단계적으로 낮추면서 시도
+            for param2 in range(int(start_param2), int(min_param2)-1, -5):
+                settings['param2'] = param2
+                
+                # Detect circles using Hough Circle Transform
+                circles = cv2.HoughCircles(
+                    blurred,
+                    cv2.HOUGH_GRADIENT,
+                    dp=settings['dp'],
+                    minDist=settings['min_dist'],
+                    param1=settings['param1'],
+                    param2=param2,
+                    minRadius=settings['min_radius'],
+                    maxRadius=settings['max_radius']
+                )
+                
+                # 원을 찾으면 루프 중단
+                if circles is not None and len(circles[0]) > 0:
+                    logging.debug(f"Found {len(circles[0])} circles with param2={param2}")
+                    break
             
             # Process detected circles
-            circles_list = None
+            circles_list = []
             
             if circles is not None:
                 # Convert to integer coordinates
                 circles = np.uint16(np.around(circles))
-                
-                # Prepare circles list
-                circles_list = []
                 
                 # Process all circles
                 for i in range(len(circles[0])):
@@ -197,7 +198,11 @@ class CircleDetector:
                     center_y = int(circle[1]) + y
                     radius = int(circle[2])
                     
-                    # Store circle data
+                    # 반지름 유효성 검사: 너무 작거나 큰 원은 제외
+                    if radius < settings['min_radius'] or radius > settings['max_radius']:
+                        continue
+                    
+                    # 유효한 원 추가
                     circles_list.append((center_x, center_y, radius))
                     
                     if i == 0:
@@ -205,11 +210,18 @@ class CircleDetector:
                 
                 if side:
                     logging.debug(f"Detected {len(circles_list)} circles on {side} side")
-                
-                # Store circles in result
-                result['circles'] = circles_list
             else:
-                logging.debug(f"No circles detected{' on ' + side if side else ''}")
+                logging.debug(f"No circles detected{' on ' + side if side else ''} after param2 ramp")
+            
+            # 검출된 원이 있으면 결과에 추가
+            if circles_list:
+                result['circles'] = circles_list
+                
+                # 반지름이 비슷한 원만 하나 선택하는 추가 필터링 (다른 카메라의 원과 비교 위해)
+                if len(circles_list) > 1:
+                    logging.debug(f"Multiple circles detected ({len(circles_list)}), selecting best match")
+                    # 첫 번째 원을 기준으로 사용
+                    result['circles'] = [circles_list[0]]
             
             # If visualization is requested (legacy behavior), add visualization to result
             if visualize and output_img is not None:

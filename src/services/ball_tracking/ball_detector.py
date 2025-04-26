@@ -139,40 +139,140 @@ class BallDetector:
             radius: 볼의 반경
             frame_shape: 프레임 크기 (height, width)
         """
-        if not self.use_roi or center is None:
-            return
-            
         # 프레임 크기 가져오기
         height, width = frame_shape
         
-        # 속도 기반 ROI 예측
-        pred_x, pred_y = center
-        pred_size = max(radius * 4, self.roi_min_size)
-        
-        # 속도 정보가 있으면 예측 위치 조정
-        if self.velocity is not None:
-            # 속도에 따라 ROI 위치 예측 (0.1초 후 위치 예측)
-            vx, vy = self.velocity
-            pred_x += int(vx * 0.1)
-            pred_y += int(vy * 0.1)
+        # 검출 실패 시 이전 ROI 유지하거나 Kalman 예측 사용
+        if not self.use_roi:
+            return
             
-            # 속도 크기에 따라 ROI 크기 조정
-            velocity_magnitude = np.sqrt(vx**2 + vy**2)
-            if velocity_magnitude > 100:  # 빠르게 움직이는 경우
-                pred_size = min(pred_size * 1.5, self.roi_max_size)
+        # 이전 ROI가 없으면 초기화
+        if self.roi is None:
+            # 첫 검출 시 기본 ROI 설정
+            if center is not None:
+                # 초기 ROI 설정
+                half_size = max(radius * 4, self.roi_min_size) // 2
+                roi_x = max(0, center[0] - half_size)
+                roi_y = max(0, center[1] - half_size)
+                roi_w = min(width - roi_x, half_size * 2)
+                roi_h = min(height - roi_y, half_size * 2)
+                self.roi = (int(roi_x), int(roi_y), int(roi_w), int(roi_h))
+            else:
+                # 기본값: 화면 중앙
+                roi_size = min(width, height) // 3
+                self.roi = (width//2 - roi_size//2, height//2 - roi_size//2, roi_size, roi_size)
+            return
         
-        # ROI 여유 공간 추가
-        half_size = pred_size // 2 + self.roi_margin
+        # 현재 ROI 가져오기
+        curr_x, curr_y, curr_w, curr_h = self.roi
+        curr_center_x = curr_x + curr_w // 2
+        curr_center_y = curr_y + curr_h // 2
         
-        # ROI 계산
-        roi_x = max(0, pred_x - half_size)
-        roi_y = max(0, pred_y - half_size)
-        roi_w = min(width - roi_x, pred_size + self.roi_margin * 2)
-        roi_h = min(height - roi_y, pred_size + self.roi_margin * 2)
-        
-        # ROI 업데이트
-        self.roi = (int(roi_x), int(roi_y), int(roi_w), int(roi_h))
-        self.roi_failure_count = 0
+        # 새 ROI 중심 계산
+        if center is not None:
+            # 검출 성공: 실제 검출 위치 사용
+            target_x, target_y = center
+            
+            # 속도 기반 예측 조정
+            if self.velocity is not None:
+                vx, vy = self.velocity
+                # 속도에 따라 ROI 위치 예측 (0.1초 후 위치 예측)
+                pred_x = target_x + int(vx * 0.1)
+                pred_y = target_y + int(vy * 0.1)
+                # 예측값과 실제값 사이 중간값 사용
+                target_x = (target_x + pred_x) // 2
+                target_y = (target_y + pred_y) // 2
+                
+            # ROI 크기 계산 (속도에 따라 조정)
+            if self.velocity is not None:
+                velocity_magnitude = np.sqrt(self.velocity[0]**2 + self.velocity[1]**2)
+                target_size = max(radius * 4, min(int(self.roi_min_size * (1 + velocity_magnitude / 200)), self.roi_max_size))
+            else:
+                target_size = max(radius * 4, self.roi_min_size)
+                
+            # ROI 점프 제한 (최대 이동 거리 제한)
+            max_jump = 50  # 최대 ROI 점프 거리 (픽셀)
+            
+            # 현재 ROI 중심과 새 위치 사이의 거리 계산
+            dx = target_x - curr_center_x
+            dy = target_y - curr_center_y
+            dist = np.sqrt(dx**2 + dy**2)
+            
+            # 거리가 최대 점프 거리보다 크면 제한
+            if dist > max_jump:
+                # 방향은 유지하되 거리 제한
+                scale = max_jump / dist
+                dx *= scale
+                dy *= scale
+                
+                # 로그에 큰 점프 기록
+                logging.debug(f"Large ROI jump limited: original=({target_x-curr_center_x}, {target_y-curr_center_y}), "
+                              f"limited=({dx:.1f}, {dy:.1f})")
+                
+                # 제한된 새 위치
+                target_x = int(curr_center_x + dx)
+                target_y = int(curr_center_y + dy)
+                
+            # ROI 여유 공간 추가
+            half_size = target_size // 2 + self.roi_margin
+            
+            # 새 ROI 계산
+            new_x = max(0, target_x - half_size)
+            new_y = max(0, target_y - half_size)
+            new_w = min(width - new_x, target_size + self.roi_margin * 2)
+            new_h = min(height - new_y, target_size + self.roi_margin * 2)
+            
+            # ROI 업데이트
+            self.roi = (int(new_x), int(new_y), int(new_w), int(new_h))
+            self.roi_failure_count = 0
+            
+        else:
+            # 검출 실패: ROI 확장 또는 Kalman 예측 사용
+            if self.velocity is not None:
+                # Kalman 예측 기반 ROI 업데이트
+                vx, vy = self.velocity
+                pred_x = curr_center_x + int(vx * 0.1)  # 0.1초 후 예측 위치
+                pred_y = curr_center_y + int(vy * 0.1)
+                
+                # ROI 점프 제한 적용
+                max_jump = 50
+                dx = pred_x - curr_center_x
+                dy = pred_y - curr_center_y
+                dist = np.sqrt(dx**2 + dy**2)
+                
+                if dist > max_jump:
+                    scale = max_jump / dist
+                    dx *= scale
+                    dy *= scale
+                    pred_x = int(curr_center_x + dx)
+                    pred_y = int(curr_center_y + dy)
+                
+                # 이전 크기 유지하며 위치만 업데이트
+                half_w = curr_w // 2
+                half_h = curr_h // 2
+                new_x = max(0, pred_x - half_w)
+                new_y = max(0, pred_y - half_h)
+                new_w = min(width - new_x, curr_w)
+                new_h = min(height - new_y, curr_h)
+                
+                # 점진적으로 확장
+                expansion_factor = min(1.1 + (self.roi_failure_count * 0.1), self.roi_expansion_rate)
+                new_w = min(int(new_w * expansion_factor), width)
+                new_h = min(int(new_h * expansion_factor), height)
+                
+                # ROI 업데이트
+                self.roi = (int(new_x), int(new_y), int(new_w), int(new_h))
+            else:
+                # 예측 정보 없음: 기존 ROI 확장
+                self.expand_roi(frame_shape)
+            
+            # 실패 카운트 증가
+            self.roi_failure_count += 1
+            
+            # 연속 실패 한계 도달 시 전체 프레임으로 설정
+            if self.roi_failure_count >= self.roi_max_failures:
+                logging.debug(f"ROI tracking reset after {self.roi_failure_count} consecutive failures")
+                self.roi = (0, 0, width, height)
 
     def expand_roi(self, frame_shape: Tuple[int, int]):
         """

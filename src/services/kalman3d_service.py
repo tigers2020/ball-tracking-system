@@ -22,7 +22,7 @@ class Kalman3DService:
                  process_noise: float = 2.5,
                  measurement_noise: float = 0.5,
                  reset_threshold: float = ANALYSIS.RESET_THRESHOLD,
-                 min_updates_required: int = ANALYSIS.MIN_UPDATES_REQUIRED):
+                 min_updates_required: int = 3):
         """
         Initialize 3D Kalman filter for ball tracking.
         
@@ -450,8 +450,8 @@ class Kalman3DService:
                     logging.info(f"Reduced confidence to {confidence:.2f} due to large displacement")
                 
                 # 신뢰도가 매우 낮으면 재초기화 고려
-                if confidence < 0.1:
-                    logging.warning("Very low confidence measurement, resetting filter")
+                if confidence < 0.05:  # 임계값을 0.1에서 0.05로 낮춤 (더 낮은 신뢰도까지 허용)
+                    logging.debug("Very low confidence measurement, resetting filter")  # warning에서 debug로 변경
                     self.set_initial_state(position)
                     return {
                         "position": position,
