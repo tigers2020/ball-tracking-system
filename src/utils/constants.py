@@ -270,4 +270,29 @@ class ANALYSIS:
     BOUNCE_OUT_COLOR: Tuple[int, int, int] = COLOR.RED   # Color for OUT bounces
     TRAJECTORY_COLOR: Tuple[int, int, int] = COLOR.BLUE  # Color for ball trajectory
     COURT_LINE_COLOR: Tuple[int, int, int] = COLOR.WHITE  # Color for court lines
-    COURT_LINE_THICKNESS: int = 2  # Thickness of court lines 
+    COURT_LINE_THICKNESS: int = 2  # Thickness of court lines
+    
+    # Height confidence calculation
+    HEIGHT_CONFIDENCE_FACTOR: float = 5.0  # Divisor for height confidence calculation
+    MIN_HEIGHT_CONFIDENCE: float = 0.2  # Minimum confidence for height validation
+    
+    # Extremely high position threshold
+    EXTREME_HEIGHT_THRESHOLD: float = 10.0  # Threshold for logging extremely high positions
+    
+    # Position confidence factors
+    MIN_NEGATIVE_HEIGHT_CONFIDENCE: float = 0.9  # Confidence factor for negative heights
+    MIN_BOUNDARY_CONFIDENCE: float = 0.3  # Minimum confidence for boundary validation
+    
+    # Extreme boundary
+    EXTREME_BOUNDARY_FACTOR: float = 2.0  # Factor for extreme boundary positions
+    
+    # Z-axis noise multiplier
+    Z_AXIS_NOISE_MULTIPLIER: float = 1.5  # Multiplier for z-axis measurement noise
+    
+    # State uncertainty values
+    POSITION_UNCERTAINTY: Tuple[float, float, float] = (0.1, 0.1, 0.2)  # Initial position uncertainty
+    VELOCITY_UNCERTAINTY: Tuple[float, float, float] = (25.0, 25.0, 25.0)  # Initial velocity uncertainty
+    
+    # Confidence scaling
+    MIN_CONFIDENCE_SCALING: float = 0.05  # Minimum confidence scaling factor
+    MIN_CONFIDENCE_THRESHOLD: float = 0.1  # Minimum confidence threshold for measurements 

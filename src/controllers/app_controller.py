@@ -172,10 +172,8 @@ class AppController(QObject):
         # Check if connection was successful
         logging.info(f"Ball tracking detection signal connected to game analyzer: {connected}")
         
-        # Connect tracking update signals
-        self.ball_tracking_controller.tracking_updated.connect(
-            lambda x, y, z: self.game_analyzer.on_ball_position_updated(x, y, z, 0, 0, 0, time.time())
-        )
+        # No longer need to connect tracking_updated to on_ball_position_updated
+        # since GameAnalyzer now handles triangulation directly
         
         # Connect ball tracking controller signals
         self.ball_tracking_controller.tracking_enabled_changed.connect(

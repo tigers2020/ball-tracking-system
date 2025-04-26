@@ -3,23 +3,23 @@
 
 """
 Info View module.
-This module contains the InfoView class for displaying detection information.
+This module contains the InfoView class for displaying tracking information in a widget.
 """
 
 import logging
-from typing import Tuple, Optional
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
-    QLabel, QGridLayout, QFormLayout
-)
 import numpy as np
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+    QGroupBox, QFormLayout
+)
+from PySide6.QtCore import Qt, Slot
 
 from src.utils.constants import LAYOUT
 from src.views.visualization.hsv_mask_visualizer import HSVMaskVisualizer
 from src.views.visualization.roi_mask_visualizer import ROIMaskVisualizer
 from src.views.visualization.hough_circle_visualizer import HoughCircleVisualizer
 from src.views.visualization.kalman_path_visualizer import KalmanPathVisualizer
+from src.views.widgets.inout_indicator import InOutLED
 
 
 class InfoView(QWidget):
@@ -52,7 +52,8 @@ class InfoView(QWidget):
         self.right_state = {"pos": (0.0, 0.0), "vel": (0.0, 0.0)}
         
         # Controller reference (will be set later)
-        self.controller = None
+        self.tracking_controller = None
+        self.game_analyzer = None
         
         # Visualizers list (will be initialized in _setup_visualizers)
         self._visualizers = []
@@ -100,14 +101,19 @@ class InfoView(QWidget):
         right_pixel_group.setLayout(right_pixel_layout)
         
         # 3D position coordinates group
-        position_group = QGroupBox("3D Position Coordinates")
+        position_group = QGroupBox("3D Court Position")
         position_layout = QFormLayout()
         self.position_x_label = QLabel("0.000")
         self.position_y_label = QLabel("0.000")
         self.position_z_label = QLabel("0.000")
+        
+        # Add IN/OUT indicator
+        self.in_out_led = InOutLED()
+        
         position_layout.addRow("X:", self.position_x_label)
         position_layout.addRow("Y:", self.position_y_label)
         position_layout.addRow("Z:", self.position_z_label)
+        position_layout.addRow("IN/OUT:", self.in_out_led)
         position_group.setLayout(position_layout)
         
         # ROI information group
@@ -227,34 +233,32 @@ class InfoView(QWidget):
     
     def set_left_state(self, pos_x, pos_y, vel_x, vel_y):
         """
-        Set the left Kalman state.
+        Set the left camera Kalman state.
         
         Args:
-            pos_x (float): Position X
-            pos_y (float): Position Y
-            vel_x (float): Velocity X
-            vel_y (float): Velocity Y
+            pos_x (float): Position X coordinate
+            pos_y (float): Position Y coordinate
+            vel_x (float): Velocity X component
+            vel_y (float): Velocity Y component
         """
         self.left_state = {"pos": (pos_x, pos_y), "vel": (vel_x, vel_y)}
         self.left_state_label.setText(f"pos=({pos_x:.1f}, {pos_y:.1f}), vel=({vel_x:.1f}, {vel_y:.1f})")
     
     def set_right_state(self, pos_x, pos_y, vel_x, vel_y):
         """
-        Set the right Kalman state.
+        Set the right camera Kalman state.
         
         Args:
-            pos_x (float): Position X
-            pos_y (float): Position Y
-            vel_x (float): Velocity X
-            vel_y (float): Velocity Y
+            pos_x (float): Position X coordinate
+            pos_y (float): Position Y coordinate
+            vel_x (float): Velocity X component
+            vel_y (float): Velocity Y component
         """
         self.right_state = {"pos": (pos_x, pos_y), "vel": (vel_x, vel_y)}
         self.right_state_label.setText(f"pos=({pos_x:.1f}, {pos_y:.1f}), vel=({vel_x:.1f}, {vel_y:.1f})")
     
     def clear_info(self):
-        """
-        Clear all information and reset to default values.
-        """
+        """Reset all information displays."""
         self.set_detection_rate(0.0)
         self.set_left_pixel_coords(0, 0, 0)
         self.set_right_pixel_coords(0, 0, 0)
@@ -272,7 +276,7 @@ class InfoView(QWidget):
             controller: BallTrackingController instance
         """
         if controller:
-            self.controller = controller
+            self.tracking_controller = controller
             
             # Connect detection update signal with proper signature
             controller.detection_updated.connect(
@@ -283,8 +287,8 @@ class InfoView(QWidget):
             # Connect ROI update signal
             controller.roi_updated.connect(self._on_roi_updated)
             
-            # Connect tracking update signal for 3D position
-            controller.tracking_updated.connect(self._on_tracking_updated)
+            # We no longer connect to tracking_updated from BallTrackingController
+            # This is now handled by the GameAnalyzer connection
             
             # Connect prediction update signal for Kalman state
             controller.prediction_updated.connect(self._on_kalman_predicted)
@@ -293,6 +297,24 @@ class InfoView(QWidget):
             self._setup_visualizers_with_controller(controller)
             
             logging.info("InfoView connected to ball tracking controller")
+    
+    def connect_game_analyzer(self, analyzer):
+        """
+        Connect to a game analyzer to receive court position updates.
+        
+        Args:
+            analyzer: GameAnalyzer instance
+        """
+        if analyzer:
+            self.game_analyzer = analyzer
+            
+            # Connect to court position updates (x, y, z in court coordinate system)
+            analyzer.court_position_updated.connect(self._on_court_position_updated)
+            
+            # Connect to in/out signal for the LED indicator
+            analyzer.in_out_detected.connect(self.in_out_led.on_in_out)
+            
+            logging.info("InfoView connected to game analyzer")
     
     def _setup_visualizers_with_controller(self, controller):
         """
@@ -345,12 +367,8 @@ class InfoView(QWidget):
         else:
             self.set_right_pixel_coords(0, 0, 0)
         
-        # Update 3D position if provided
-        if position_coords and isinstance(position_coords, (tuple, list, np.ndarray)) and len(position_coords) >= 3:
-            try:
-                self.set_position_coords(position_coords[0], position_coords[1], position_coords[2])
-            except (IndexError, TypeError) as e:
-                logging.error(f"Error processing position_coords {position_coords}: {e}")
+        # We don't update 3D position from BallTrackingController anymore
+        # This is now handled by the GameAnalyzer's court_position_updated signal
         
         # Log with proper type information
         left_type = type(left_coords).__name__ if left_coords is not None else "None"
@@ -379,28 +397,17 @@ class InfoView(QWidget):
             
         logging.debug(f"ROI info updated: left={left_roi}, right={right_roi}")
     
-    def _on_tracking_updated(self, x, y, z):
+    def _on_court_position_updated(self, x, y, z):
         """
-        Handle tracking update signal for 3D position from ball tracking controller.
+        Handle court position update signal from game analyzer.
         
         Args:
-            x (float): X coordinate in 3D space
-            y (float): Y coordinate in 3D space
-            z (float): Z coordinate in 3D space
+            x (float): X coordinate in court space
+            y (float): Y coordinate in court space
+            z (float): Z coordinate in court space
         """
         self.set_position_coords(x, y, z)
-        
-        # Also update Kalman state if predictions are available
-        if self.controller and hasattr(self.controller, 'get_predictions'):
-            left_pred, right_pred = self.controller.get_predictions()
-            
-            if left_pred is not None and len(left_pred) >= 4:
-                self.set_left_state(left_pred[0], left_pred[1], left_pred[2], left_pred[3])
-            
-            if right_pred is not None and len(right_pred) >= 4:
-                self.set_right_state(right_pred[0], right_pred[1], right_pred[2], right_pred[3])
-        
-        logging.debug(f"3D position updated: ({x:.3f}, {y:.3f}, {z:.3f})")
+        logging.debug(f"Court position updated: ({x:.3f}, {y:.3f}, {z:.3f})")
     
     def _on_kalman_predicted(self, camera, x, y, vx, vy):
         """

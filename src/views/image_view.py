@@ -198,10 +198,10 @@ class ImageView(QWidget):
         
         # Adjust splitter sizes when toggling overlay
         if enabled:
-            self.splitter.setSizes([int(self.width() * 0.6), int(self.width() * 0.4)])
+            self.splitter.setSizes([int(self.width() * 0.5), int(self.width() * 0.5)])
         else:
-            self.splitter.setSizes([self.width(), 0])
-            
+            self.splitter.setSizes([int(self.width()), 0])
+    
     def enable_analysis_tabs(self, enabled=True):
         """
         Enable or disable analysis tabs.
@@ -210,22 +210,17 @@ class ImageView(QWidget):
             enabled (bool): True to enable, False to disable
         """
         self.analysis_tabs.setVisible(enabled)
-            
+    
     def set_circle_images(self, left_circle_image, right_circle_image):
         """
-        Set the images with detected circles.
+        Set the Hough circle detection images.
         
         Args:
-            left_circle_image (numpy.ndarray): Left image with circles drawn
-            right_circle_image (numpy.ndarray): Right image with circles drawn
+            left_circle_image (numpy.ndarray): Left image with circles
+            right_circle_image (numpy.ndarray): Right image with circles
         """
-        if left_circle_image is not None and right_circle_image is not None:
-            self.stereo_view.set_images(left_circle_image, right_circle_image)
-        elif left_circle_image is not None:
-            left_success, _ = self.stereo_view.set_images(left_circle_image, None)
-        elif right_circle_image is not None:
-            _, right_success = self.stereo_view.set_images(None, right_circle_image)
-            
+        self.stereo_view.set_images(left_circle_image, right_circle_image)
+    
     def connect_ball_tracking_controller(self, controller):
         """
         Connect to a ball tracking controller to receive updates.
@@ -266,26 +261,17 @@ class ImageView(QWidget):
             self.enable_bounce_overlay(True)
             self.enable_analysis_tabs(True)
             
-            # Connect court position updates to info view
-            analyzer.court_position_updated.connect(self._on_court_position_updated)
+            # Connect info view directly to game analyzer
+            self.info_view.connect_game_analyzer(analyzer)
+            
+            # No longer need to connect to court_position_updated separately 
+            # since InfoView now connects directly
             
             # Connect bounce events to info view
             analyzer.bounce_detected.connect(self._on_bounce_detected)
             
             logging.info("Connected to game analyzer")
-            
-    def _on_court_position_updated(self, x, y, z):
-        """
-        Handle court position updates from game analyzer.
-        
-        Args:
-            x: X coordinate in court frame
-            y: Y coordinate in court frame
-            z: Z coordinate in court frame
-        """
-        # Update position in info view
-        self.info_view.set_position_coords(x, y, z)
-        
+    
     def _on_bounce_detected(self, bounce_event):
         """
         Handle bounce events from game analyzer.
