@@ -958,7 +958,7 @@ class BallTrackingController(QObject):
         
         # 디스패리티 검증 추가
         disparity = left_coords[0] - right_coords[0]
-        MIN_VALID_DISPARITY = 15.0  # 최소 유효 디스패리티 값 (픽셀)
+        MIN_VALID_DISPARITY = 90.0  # 최소 유효 디스패리티 값 (픽셀)
         
         if abs(disparity) < MIN_VALID_DISPARITY:
             logging.warning(f"Disparity too small: {disparity:.2f}px < {MIN_VALID_DISPARITY}px. Skipping triangulation.")

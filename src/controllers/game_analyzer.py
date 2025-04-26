@@ -17,6 +17,7 @@ from src.services.triangulation_service import TriangulationService
 from src.services.kalman3d_service import Kalman3DService
 from src.services.bounce_detector import BounceDetector, BounceEvent
 from src.geometry.court_frame import is_point_inside_court, is_net_crossed
+from src.utils.constants import ANALYSIS, COURT
 
 
 @dataclass
@@ -69,8 +70,8 @@ class GameAnalyzer(QObject):
         self.current_frame_index = 0
         self.current_timestamp = 0.0
         self.tracking_history = []
-        self.max_history_size = 120  # 4 seconds at 30fps
-        self.last_net_cross_frame = -30  # Minimum frames between net cross detections
+        self.max_history_size = ANALYSIS.MAX_HISTORY_LENGTH  # 4 seconds at 30fps
+        self.last_net_cross_frame = -ANALYSIS.NET_CROSSING_FRAMES_THRESHOLD  # Minimum frames between net cross detections
         
         # Initialize services from config
         self._init_from_config()
@@ -143,7 +144,7 @@ class GameAnalyzer(QObject):
         self.current_frame_index = 0
         self.current_timestamp = 0.0
         self.tracking_history = []
-        self.last_net_cross_frame = -30
+        self.last_net_cross_frame = -ANALYSIS.NET_CROSSING_FRAMES_THRESHOLD
         
         # Reset services
         self.kalman.reset()
@@ -257,8 +258,8 @@ class GameAnalyzer(QObject):
         
         # 삼각측량 결과 검증 강화
         # 테니스 코트에서 볼의 현실적인 높이는 일반적으로 3m 미만임
-        MAX_VALID_HEIGHT = 5.0  # 최대 유효 높이 (미터)
-        MIN_VALID_HEIGHT = -0.05  # 약간의 음수 높이는 오차로 허용
+        MAX_VALID_HEIGHT = ANALYSIS.MAX_VALID_HEIGHT  # 최대 유효 높이 (미터)
+        MIN_VALID_HEIGHT = ANALYSIS.MIN_VALID_HEIGHT  # 약간의 음수 높이는 오차로 허용
         
         # 측정 신뢰도 점수 초기화
         confidence_score = detection_rate  # 기본 신뢰도는 검출률로 시작
@@ -278,8 +279,8 @@ class GameAnalyzer(QObject):
                 if position_3d[2] > 10.0:
                     logging.error(f"Extremely high triangulation result: {position_3d[2]:.2f}m. Possible calibration issue.")
                 
-                # 최대 허용 높이(5m)로 클램핑 대신 3m로 보정 (일반적인 테니스 환경 기준)
-                position_3d[2] = min(position_3d[2], 3.0)
+                # 최대 허용 높이로 클램핑 
+                position_3d[2] = min(position_3d[2], MAX_VALID_HEIGHT)
                 logging.info(f"Clamped excessive height to: {position_3d[2]:.2f}m, confidence: {confidence_score:.2f}")
                 
             elif position_3d[2] < MIN_VALID_HEIGHT:
@@ -289,9 +290,9 @@ class GameAnalyzer(QObject):
                 logging.info(f"Adjusted negative height to: {position_3d[2]:.2f}m")
             
         # x, y 좌표 유효성 검사 (코트 경계에서 과도하게 벗어난 경우)
-        COURT_WIDTH_HALF = 8.23 / 2  # 테니스 코트 폭의 절반 (미터)
-        COURT_LENGTH_HALF = 23.77 / 2  # 테니스 코트 길이의 절반 (미터)
-        BOUNDARY_MARGIN = 5.0  # 코트 경계 밖 허용 마진 (미터)
+        COURT_WIDTH_HALF = COURT.WIDTH_HALF  # 테니스 코트 폭의 절반 (미터)
+        COURT_LENGTH_HALF = COURT.LENGTH_HALF  # 테니스 코트 길이의 절반 (미터)
+        BOUNDARY_MARGIN = COURT.BOUNDARY_MARGIN  # 코트 경계 밖 허용 마진 (미터)
         
         # X축 검증 (코트 폭 방향)
         if abs(position_3d[0]) > (COURT_WIDTH_HALF + BOUNDARY_MARGIN):
@@ -323,12 +324,12 @@ class GameAnalyzer(QObject):
             distance = np.linalg.norm(position_3d - self.prev_position_3d)
             
             # 프레임 간 예상 가능한 최대 거리 계산 (60fps 기준, 최대 속도 50m/s 가정)
-            frame_time = 1.0/60.0  # 기본 프레임 간격
+            frame_time = 1.0/ANALYSIS.DEFAULT_FPS  # 기본 프레임 간격
             if hasattr(self, 'prev_timestamp') and self.prev_timestamp is not None:
-                frame_time = max(0.001, timestamp - self.prev_timestamp)  # 실제 프레임 간격 (너무 작은 값 방지)
+                frame_time = max(ANALYSIS.MIN_FRAME_TIME, timestamp - self.prev_timestamp)  # 실제 프레임 간격 (너무 작은 값 방지)
             
             # 프레임 간 예상 최대 변위 계산 (테니스 공 최대 속도 고려)
-            max_expected_displacement = 50.0 * frame_time  # 50 m/s * 시간
+            max_expected_displacement = ANALYSIS.MAX_BALL_SPEED * frame_time  # 50 m/s * 시간
             
             # 변위가 예상보다 큰 경우 신뢰도 감소
             if distance > max_expected_displacement:
@@ -391,8 +392,8 @@ class GameAnalyzer(QObject):
             position_filtered[0], position_filtered[1], position_filtered[2])
             
         # Update trajectory visualization
-        if frame_index % 3 == 0:  # Update trajectory every 3 frames to reduce overhead
-            self.trajectory_updated.emit(self.get_recent_positions(30))
+        if frame_index % ANALYSIS.TRAJECTORY_UPDATE_INTERVAL == 0:  # Update trajectory every 3 frames to reduce overhead
+            self.trajectory_updated.emit(self.get_recent_positions(ANALYSIS.TRAJECTORY_DISPLAY_POINTS))
             
         logging.debug(f"Processed frame {frame_index}: "
                      f"pos=({position_filtered[0]:.2f}, {position_filtered[1]:.2f}, {position_filtered[2]:.2f}), "
@@ -427,7 +428,7 @@ class GameAnalyzer(QObject):
         prev_position = self.tracking_history[-2].position_3d
         
         # Check for net crossing
-        if (frame_index - self.last_net_cross_frame) > 30 and is_net_crossed(prev_position[1], position[1]):
+        if (frame_index - self.last_net_cross_frame) > ANALYSIS.NET_CROSSING_FRAMES_THRESHOLD and is_net_crossed(prev_position[1], position[1]):
             # Direction: True if crossed from baseline to net
             direction = prev_position[1] < position[1]
             

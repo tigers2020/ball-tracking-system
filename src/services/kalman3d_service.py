@@ -10,6 +10,7 @@ import logging
 import numpy as np
 from typing import Dict, Tuple, List, Optional, Any
 import cv2
+from src.utils.constants import ANALYSIS
 
 
 class Kalman3DService:
@@ -17,11 +18,11 @@ class Kalman3DService:
     Service class for applying Kalman filtering to 3D ball tracking data.
     """
 
-    def __init__(self, dt: float = 1/60.0, 
+    def __init__(self, dt: float = 1/ANALYSIS.DEFAULT_FPS, 
                  process_noise: float = 2.5,
                  measurement_noise: float = 0.5,
-                 reset_threshold: float = 10.0,
-                 min_updates_required: int = 5):
+                 reset_threshold: float = ANALYSIS.RESET_THRESHOLD,
+                 min_updates_required: int = ANALYSIS.MIN_UPDATES_REQUIRED):
         """
         Initialize 3D Kalman filter for ball tracking.
         
@@ -40,9 +41,9 @@ class Kalman3DService:
         
         # 물리 모델 관련 변수 초기화
         self.use_physics_model = False
-        self.gravity = 9.81
-        self.velocity_decay = 0.99
-        self.max_history_length = 60
+        self.gravity = ANALYSIS.GRAVITY
+        self.velocity_decay = ANALYSIS.VELOCITY_DECAY
+        self.max_history_length = ANALYSIS.MAX_HISTORY_LENGTH
         self.gravity_vector = np.zeros((6, 1), np.float32)
         
         # State tracking variables
@@ -248,7 +249,7 @@ class Kalman3DService:
         self.update_count = 1
         
         # 유효성 검사: 높이(z)값이 현실적인지 확인
-        MAX_VALID_HEIGHT = 3.5  # 최대 유효 높이 (미터)
+        MAX_VALID_HEIGHT = ANALYSIS.MAX_VALID_HEIGHT  # 최대 유효 높이 (미터)
         if position[2] > MAX_VALID_HEIGHT:
             logging.warning(f"Initial height too high: {position[2]:.2f}m. Clamping to {MAX_VALID_HEIGHT}m.")
             position[2] = MAX_VALID_HEIGHT
@@ -276,7 +277,7 @@ class Kalman3DService:
                         distance = np.linalg.norm(displacement)
                         
                         # 합리적인 변위만 포함 (점프나 이상치 제외)
-                        if distance < 2.0:  # 2m/frame 이하만 고려
+                        if distance < ANALYSIS.REASONABLE_DISPLACEMENT:  # 2m/frame 이하만 고려
                             avg_displacement += displacement
                             count += 1
                     
@@ -287,9 +288,9 @@ class Kalman3DService:
                         
                         # 속도 크기 제한 (너무 빠른 초기 속도 방지)
                         speed = np.linalg.norm(initial_velocity)
-                        if speed > 30.0:  # 30 m/s (108 km/h) 이상은 제한
+                        if speed > ANALYSIS.MAX_BALL_SPEED:  # 30 m/s (108 km/h) 이상은 제한
                             logging.warning(f"Initial speed too high: {speed:.2f} m/s. Scaling down.")
-                            initial_velocity = initial_velocity * (30.0 / speed)
+                            initial_velocity = initial_velocity * (ANALYSIS.MAX_BALL_SPEED / speed)
             except Exception as e:
                 logging.warning(f"Error estimating initial velocity: {e}")
                 initial_velocity = np.zeros(3, dtype=np.float32)
@@ -490,7 +491,7 @@ class Kalman3DService:
         self.velocity_history.append(filtered_velocity.copy())
         
         # 역사 길이 제한
-        max_history = 120  # 2초 (60fps 기준)
+        max_history = ANALYSIS.MAX_HISTORY_LENGTH  # 2초 (60fps 기준)
         if len(self.position_history) > max_history:
             self.position_history.pop(0)
         if len(self.velocity_history) > max_history:

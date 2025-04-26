@@ -214,6 +214,9 @@ class XML:
 class COURT:
     """Tennis court dimensions and properties (in meters)"""
     LENGTH: float = 23.77  # Total court length
+    WIDTH: float = 8.23  # Total court width
+    WIDTH_HALF: float = 8.23 / 2  # Half court width
+    LENGTH_HALF: float = 23.77 / 2  # Half court length
     HALF_WIDTH: float = 11.885  # Half court width
     NET_HEIGHT: float = 0.914  # Height of the net
     NET_Y: float = 23.77 / 2  # Net position (y-coordinate)
@@ -223,6 +226,7 @@ class COURT:
     SIDELINE_WIDTH: float = 0.05  # Width of the sideline
     SINGLES_COURT_HALF_WIDTH: float = 4.115  # Half width of singles court
     INSIDE_EPS: float = 0.05  # 5 cm margin for IN/OUT decisions
+    BOUNDARY_MARGIN: float = 5.0  # Margin outside court bounds for valid ball position (m)
 
 # =============================================
 # Game Analysis Constants
@@ -236,12 +240,31 @@ class ANALYSIS:
     MAX_GROUND_HEIGHT: float = 0.03  # Maximum height to consider as ground contact (m)
     MIN_FRAMES_BETWEEN_BOUNCES: int = 3  # Minimum frames between consecutive bounces
     
+    # Ball height constraints
+    MAX_VALID_HEIGHT: float = 15.0  # Maximum valid height for ball detection (m)
+    MIN_VALID_HEIGHT: float = -0.05  # Minimum valid height, slight negative allowed for measurement error (m)
+    
+    # Ball physics
+    MAX_BALL_SPEED: float = 50.0  # Maximum expected tennis ball speed (m/s)
+    REASONABLE_DISPLACEMENT: float = 2.0  # Reasonable displacement per frame (m)
+    MAX_BALL_SPEED_KMH: float = 180.0  # ~50 m/s in km/h
+    DEFAULT_FPS: float = 60.0  # Default frame rate
+    MIN_FRAME_TIME: float = 0.001  # Minimum frame time to prevent division by zero
+    
+    # Trajectory analysis
+    NET_CROSSING_FRAMES_THRESHOLD: int = 30  # Minimum frames between net crossing detections
+    TRAJECTORY_UPDATE_INTERVAL: int = 3  # Update trajectory visualization every N frames
+    TRAJECTORY_DISPLAY_POINTS: int = 30  # Number of points to display in trajectory
+    
     # Kalman filter 3D
     PROCESS_NOISE_POS: float = 0.01  # Process noise for position
     PROCESS_NOISE_VEL: float = 0.1   # Process noise for velocity 
     MEASUREMENT_NOISE: float = 0.05  # Measurement noise (m)
-    
-    # Visualization
+    VELOCITY_DECAY: float = 0.99  # Velocity decay coefficient
+    GRAVITY: float = 9.81  # Gravitational acceleration (m/s²)
+    MIN_UPDATES_REQUIRED: int = 5  # Minimum updates before allowing filter reset
+    RESET_THRESHOLD: float = 10.0  # Distance threshold for filter reset (m)
+    MAX_HISTORY_LENGTH: int = 120  # Maximum history length (frames)
     BOUNCE_MARKER_SIZE: int = 8  # Size of bounce markers
     BOUNCE_IN_COLOR: Tuple[int, int, int] = COLOR.GREEN  # Color for IN bounces
     BOUNCE_OUT_COLOR: Tuple[int, int, int] = COLOR.RED   # Color for OUT bounces

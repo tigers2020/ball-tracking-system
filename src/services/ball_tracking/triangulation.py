@@ -13,7 +13,7 @@ import logging
 from typing import Tuple, Optional, List
 
 # 최소 유효 디스패리티 값 (픽셀)
-MIN_VALID_DISPARITY = 15.0
+MIN_VALID_DISPARITY = 90.0
 
 def triangulate_points(
     point1: np.ndarray,
