@@ -10,7 +10,7 @@ import logging
 import numpy as np
 from typing import Dict, Tuple, List, Optional, Any
 import cv2
-from src.utils.constants import ANALYSIS
+from src.utils.constants import ANALYSIS, STEREO
 
 
 class Kalman3DService:
@@ -44,7 +44,7 @@ class Kalman3DService:
         self.gravity = ANALYSIS.GRAVITY
         self.velocity_decay = ANALYSIS.VELOCITY_DECAY
         self.max_history_length = ANALYSIS.MAX_HISTORY_LENGTH
-        self.gravity_vector = np.zeros((6, 1), np.float32)
+        self.gravity_vector = np.zeros((6, 1), STEREO.DATA_TYPE)
         
         # State tracking variables
         self.is_initialized = False
@@ -164,7 +164,7 @@ class Kalman3DService:
         Measurement vector: [x, y, z]
         """
         # Create 6D state Kalman filter (x, y, z, vx, vy, vz)
-        self.kalman = cv2.KalmanFilter(6, 3)
+        self.kalman = cv2.KalmanFilter(6, 3, 0, cv2.CV_32F)
         
         # Save critical parameters that should persist across reinitializations
         saved_reset_threshold = self.reset_threshold
@@ -393,7 +393,7 @@ class Kalman3DService:
         Returns:
             dict: Dictionary containing filtered position and velocity
         """
-        position = np.array(position, dtype=np.float32)
+        position = np.array(position, dtype=STEREO.DATA_TYPE)
         
         # Ensure position has correct shape
         if position.shape != (3,):
@@ -409,7 +409,7 @@ class Kalman3DService:
                 position = self.last_pos.copy()
                 confidence *= 0.1  # Significantly reduce confidence
             else:
-                position = np.zeros(3, dtype=np.float32)  # Use zeros as a fallback
+                position = np.zeros(3, dtype=STEREO.DATA_TYPE)  # Use zeros as a fallback
                 confidence *= 0.1  # Significantly reduce confidence
             
         # First measurement - initialize filter
@@ -417,7 +417,7 @@ class Kalman3DService:
             self.set_initial_state(position)
             return {
                 "position": position,
-                "velocity": np.zeros(3, dtype=np.float32),
+                "velocity": np.zeros(3, dtype=STEREO.DATA_TYPE),
                 "is_reliable": True,
                 "measurement": position.copy(),
                 "confidence": confidence
@@ -455,7 +455,7 @@ class Kalman3DService:
                     self.set_initial_state(position)
                     return {
                         "position": position,
-                        "velocity": np.zeros(3, dtype=np.float32),
+                        "velocity": np.zeros(3, dtype=STEREO.DATA_TYPE),
                         "is_reliable": False,
                         "measurement": position.copy(),
                         "reset": True,
@@ -463,14 +463,13 @@ class Kalman3DService:
                     }
         
         # Adjust measurement noise based on confidence
-        # 낮은 신뢰도는 높은 측정 노이즈를 의미 (측정을 덜 신뢰)
         if confidence < 1.0:
             # 기본 노이즈에 신뢰도 반비례 가중치 적용
             adjusted_noise = self.measurement_noise / confidence
             original_noise = self.kalman.measurementNoiseCov.copy()
             
             # 측정 노이즈 공분산 임시 조정
-            self.kalman.measurementNoiseCov = np.eye(3, dtype=np.float32) * adjusted_noise
+            self.kalman.measurementNoiseCov = np.eye(3, dtype=STEREO.DATA_TYPE) * adjusted_noise
             # Z축(높이)에 더 높은 노이즈 적용
             self.kalman.measurementNoiseCov[2, 2] *= 1.5
             
@@ -480,8 +479,8 @@ class Kalman3DService:
         predicted_state = self.kalman.predict()
         
         try:
-            # 측정 업데이트 수행
-            measurement = np.array(position, dtype=np.float32).reshape(3, 1)
+            # 측정 업데이트 수행 - 명시적으로 float32 타입 지정
+            measurement = np.array(position, dtype=STEREO.DATA_TYPE).reshape(3, 1)
             corrected_state = self.kalman.correct(measurement)
             
             # 측정 노이즈 원래대로 복원 (신뢰도로 조정했던 경우)
@@ -501,8 +500,8 @@ class Kalman3DService:
             # Reduce confidence further
             confidence *= 0.2
         
-        # 현재 상태 저장
-        self.last_state = np.array(predicted_state.copy(), dtype=np.float32)
+        # 현재 상태 저장 - 명시적으로 float32 타입 지정
+        self.last_state = np.array(predicted_state.copy(), dtype=STEREO.DATA_TYPE)
         self.last_pos = filtered_position.copy()
         self.last_vel = filtered_velocity.copy()
         

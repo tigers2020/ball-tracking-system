@@ -11,7 +11,7 @@ import numpy as np
 from typing import Tuple
 from PySide6.QtCore import QObject, Signal
 
-from src.utils.constants import ANALYSIS, COURT
+from src.utils.constants import ANALYSIS, COURT, STEREO
 
 
 class CoordinateService(QObject):
@@ -36,11 +36,17 @@ class CoordinateService(QObject):
         self.pitch = 0.0  # rotation around X axis (in radians)
         self.roll = 0.0   # rotation around Y axis (in radians)
         self.yaw = 0.0    # rotation around Z axis (in radians)
-        self.scale = 1.0  # scale factor (pixels to meters)
-        self.camera_height = 3.0  # camera height in meters (default)
+        self.scale = STEREO.DEFAULT_SCALE  # scale factor (meters per pixel)
+        self.camera_height = STEREO.DEFAULT_CAMERA_HEIGHT_M  # camera height in meters
+        self.baseline = STEREO.DEFAULT_BASELINE_M  # stereo camera baseline in meters
         
-        # Initialize transformation matrix as identity
-        self.R = np.eye(3)
+        # Initialize transformation matrices
+        self.R = np.eye(3, dtype=STEREO.DATA_TYPE)  # Rotation matrix (camera to world)
+        self.T = np.array([0, 0, 0], dtype=STEREO.DATA_TYPE)  # Translation vector
+        
+        # Stereo calibration parameters
+        self.R_stereo = np.eye(3, dtype=STEREO.DATA_TYPE)  # Rotation between left and right cameras
+        self.T_stereo = np.array([self.baseline, 0, 0], dtype=STEREO.DATA_TYPE)  # Translation between cameras
         
         # Apply config if provided
         if config:
@@ -69,6 +75,27 @@ class CoordinateService(QObject):
             
         if "camera_height" in config:
             self.camera_height = config["camera_height"]
+        
+        # Handle stereo calibration parameters if available
+        if "stereo" in config:
+            stereo_config = config["stereo"]
+            
+            if "baseline_m" in stereo_config:
+                self.baseline = stereo_config["baseline_m"]
+                
+            if "camera_height_m" in stereo_config:
+                self.camera_height = stereo_config["camera_height_m"]
+                
+            # Load stereo rotation matrix if available
+            if "R_left_to_right" in stereo_config:
+                self.R_stereo = np.array(stereo_config["R_left_to_right"], dtype=STEREO.DATA_TYPE)
+                
+            # Load stereo translation vector if available
+            if "T_left_to_right" in stereo_config:
+                self.T_stereo = np.array(stereo_config["T_left_to_right"], dtype=STEREO.DATA_TYPE)
+            else:
+                # Default translation is along X-axis (baseline)
+                self.T_stereo = np.array([self.baseline, 0, 0], dtype=STEREO.DATA_TYPE)
             
         # Update rotation matrix
         self._update_rotation_matrix()
@@ -76,6 +103,7 @@ class CoordinateService(QObject):
         logging.info(f"Coordinate service updated with pitch={np.rad2deg(self.pitch):.1f}°, "
                    f"roll={np.rad2deg(self.roll):.1f}°, yaw={np.rad2deg(self.yaw):.1f}°, "
                    f"scale={self.scale:.4f}, camera_height={self.camera_height:.2f}m")
+        logging.info(f"Using stereo baseline: {self.baseline:.2f}m")
     
     def _update_rotation_matrix(self):
         """Calculate the 3x3 rotation matrix from Euler angles."""
@@ -84,19 +112,19 @@ class CoordinateService(QObject):
             [1, 0, 0],
             [0, np.cos(self.pitch), -np.sin(self.pitch)],
             [0, np.sin(self.pitch), np.cos(self.pitch)]
-        ])
+        ], dtype=STEREO.DATA_TYPE)
         
         Ry = np.array([
             [np.cos(self.roll), 0, np.sin(self.roll)],
             [0, 1, 0],
             [-np.sin(self.roll), 0, np.cos(self.roll)]
-        ])
+        ], dtype=STEREO.DATA_TYPE)
         
         Rz = np.array([
             [np.cos(self.yaw), -np.sin(self.yaw), 0],
             [np.sin(self.yaw), np.cos(self.yaw), 0],
             [0, 0, 1]
-        ])
+        ], dtype=STEREO.DATA_TYPE)
         
         # Combined rotation matrix (order: Rz * Ry * Rx)
         self.R = Rz @ Ry @ Rx
@@ -119,13 +147,13 @@ class CoordinateService(QObject):
                 return 0.0, 0.0, 0.0
                 
             # Convert to numpy array and ensure it's a vector
-            p_cam = np.array(position_3d, dtype=float).flatten()
+            p_cam = np.array(position_3d, dtype=STEREO.DATA_TYPE).flatten()
             
-            # Scale from pixels to meters if needed
-            p_cam = p_cam / self.scale
+            # Scale from pixels to meters
+            p_cam_m = p_cam * self.scale
             
             # Apply rotation to convert from camera to world coordinates
-            p_world = self.R @ p_cam
+            p_world = self.R @ p_cam_m + self.T
             
             # Apply camera height offset
             p_world[2] -= self.camera_height

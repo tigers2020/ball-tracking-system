@@ -11,6 +11,9 @@ from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Tuple, Dict, Any
+import numpy as np
+import logging
+import cv2
 
 
 # Get the absolute path to the root directory
@@ -69,6 +72,19 @@ class KALMAN:
 
 
 @dataclass
+class TRACKING:
+    """Tracking parameters"""
+    ENABLED: bool = True
+    MAX_LOST_FRAMES: int = 20
+    MIN_DETECTION_CONFIDENCE: float = 0.5
+    VALID_RADIUS_MIN: int = 10
+    VALID_RADIUS_MAX: int = 30
+    HISTORY_LENGTH: int = 120
+    DETECTION_INTERVAL: int = 1
+    PREDICTION_FRAMES: int = 5
+
+
+@dataclass
 class COLOR:
     """Color constants in BGR format (OpenCV standard)"""
     # Primary colors
@@ -89,6 +105,9 @@ class COLOR:
     RED_ALPHA: Tuple[int, int, int, int] = (0, 0, 255, 64)
     GREEN_ALPHA: Tuple[int, int, int, int] = (0, 255, 0, 64)
     BLUE_ALPHA: Tuple[int, int, int, int] = (255, 0, 0, 64)
+    ORANGE: Tuple[int, int, int] = (0, 165, 255)
+    PURPLE: Tuple[int, int, int] = (128, 0, 128)
+    LIME: Tuple[int, int, int] = (0, 255, 191)
 
 
 # =============================================
@@ -153,7 +172,12 @@ class ROI:
 class FILE_DIALOG:
     """File dialog constants"""
     DIALOG_CAPTION: str = "Select Stereo Images Folder"
-    DIALOG_FILTER: str = "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)"
+    IMAGES_FILTER: str = "Images (*.jpg *.jpeg *.png *.bmp);;All Files (*)"
+    XML_FILTER: str = "XML Files (*.xml);;All Files (*)"
+    CONFIG_FILTER: str = "JSON Files (*.json);;All Files (*)"
+    VIDEO_FILTER: str = "Video Files (*.mp4 *.avi *.mov);;All Files (*)"
+    DATA_FILTER: str = "Data Files (*.csv *.json);;All Files (*)"
+    ALL_FILES_FILTER: str = "All Files (*)"
 
 
 class PATHS:
@@ -190,6 +214,24 @@ class MESSAGES:
     PLAYBACK_PAUSED: str = "Playback paused"
     PLAYBACK_STOPPED: str = "Playback stopped"
     READY: str = "Ready"
+    LOADING_CONFIG: str = "Loading configuration..."
+    SAVING_CONFIG: str = "Saving configuration..."
+    ERROR_LOADING_CONFIG: str = "Error loading configuration"
+    ERROR_SAVING_CONFIG: str = "Error saving configuration"
+    CALIBRATION_STARTED: str = "Calibration started"
+    CALIBRATION_COMPLETED: str = "Calibration completed"
+    CALIBRATION_FAILED: str = "Calibration failed"
+    CALIBRATION_CANCELLED: str = "Calibration cancelled"
+    CALIBRATION_SAVING: str = "Saving calibration data..."
+    CALIBRATION_LOADING: str = "Loading calibration data..."
+    CALIBRATION_ERROR: str = "Error during calibration"
+    DETECTION_STARTED: str = "Ball detection started"
+    DETECTION_COMPLETED: str = "Ball detection completed"
+    DETECTION_FAILED: str = "Ball detection failed"
+    DETECTION_CANCELLED: str = "Ball detection cancelled"
+    DETECTION_SAVING: str = "Saving detection data..."
+    DETECTION_LOADING: str = "Loading detection data..."
+    DETECTION_ERROR: str = "Error during detection"
 
 
 # =============================================
@@ -296,3 +338,46 @@ class ANALYSIS:
     # Confidence scaling
     MIN_CONFIDENCE_SCALING: float = 0.05  # Minimum confidence scaling factor
     MIN_CONFIDENCE_THRESHOLD: float = 0.1  # Minimum confidence threshold for measurements 
+
+# =============================================
+# Region of Interest (ROI) Synchronization Constants
+# =============================================
+
+@dataclass
+class ROI_SYNC:
+    """ROI synchronization parameters"""
+    MAX_JUMP_PX: int = 40  # Maximum allowed ROI jump in pixels
+    SYNC_ROI: bool = True  # Whether to synchronize left and right ROI
+    SYNC_PARAMS: bool = True  # Whether to synchronize detection parameters
+    MASTER_CAMERA: str = "left"  # Which camera is the master for ROI tracking
+    SYNC_OFFSET_X: int = 0  # X-offset between left and right camera ROIs
+    SYNC_OFFSET_Y: int = 0  # Y-offset between left and right camera ROIs
+
+
+# =============================================
+# Stereo Calibration Constants
+# =============================================
+
+@dataclass
+class STEREO:
+    """Stereo calibration constants"""
+    DEFAULT_BASELINE_M: float = 0.60  # Default baseline in meters
+    DEFAULT_CAMERA_HEIGHT_M: float = 3.0  # Default camera height in meters
+    DEFAULT_SCALE: float = 0.00290  # Default scale (meters per pixel)
+    DATA_TYPE: type = np.float32  # Data type for matrices and vectors
+    
+    # Default rotation angles in degrees
+    DEFAULT_PITCH_DEG: float = 0.0  # Rotation around X-axis
+    DEFAULT_YAW_DEG: float = 0.0  # Rotation around Y-axis
+    DEFAULT_ROLL_DEG: float = 0.0  # Rotation around Z-axis
+    
+    # Rotation matrix calculation parameters
+    DEG_TO_RAD: float = np.pi / 180.0  # Conversion factor for degrees to radians
+    
+    # Data validation thresholds
+    MIN_VALID_DISTANCE: float = 0.5  # Minimum valid distance in meters
+    MAX_VALID_DISTANCE: float = 15.0  # Maximum valid distance in meters
+    
+    # Triangulation parameters
+    MIN_DISPARITY: float = 5.0  # Minimum disparity in pixels
+    TRIANGULATION_METHOD: int = 0  # Use cv2.triangulatePoints function instead of a constant 
