@@ -11,7 +11,7 @@ import os
 from typing import List, Tuple, Dict, Optional, Any
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Slot, QThread
+from PySide6.QtCore import QObject, Slot, QThread, QTimer
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QApplication
 from PySide6.QtGui import QPen, QColor
 
@@ -286,6 +286,9 @@ class CalibrationController(QObject):
             if progress_dialog.isVisible():
                 progress_dialog.close()
                 QApplication.processEvents()
+            
+            # Force additional event processing to ensure dialog is completely removed
+            QTimer.singleShot(100, lambda: QApplication.processEvents())
     
     @Slot()
     def on_save_to_config(self):

@@ -23,10 +23,83 @@ class CoordinateService(QObject):
     # Signal for notifying position updates in court coordinate system
     court_position_updated = Signal(float, float, float)  # x, y, z in court frame
     
-    def __init__(self):
-        """Initialize the coordinate service."""
+    def __init__(self, config=None):
+        """
+        Initialize the coordinate service.
+        
+        Args:
+            config (dict, optional): Configuration dictionary with camera and coordinate settings
+        """
         super(CoordinateService, self).__init__()
+        
+        # Default values
+        self.pitch = 0.0  # rotation around X axis (in radians)
+        self.roll = 0.0   # rotation around Y axis (in radians)
+        self.yaw = 0.0    # rotation around Z axis (in radians)
+        self.scale = 1.0  # scale factor (pixels to meters)
+        self.camera_height = 3.0  # camera height in meters (default)
+        
+        # Initialize transformation matrix as identity
+        self.R = np.eye(3)
+        
+        # Apply config if provided
+        if config:
+            self.update_config(config)
+            
         logging.info("Coordinate service initialized")
+    
+    def update_config(self, config):
+        """
+        Update coordinate system parameters from config.
+        
+        Args:
+            config (dict): Configuration dictionary
+        """
+        if "rotation" in config:
+            rot = config["rotation"]
+            if "x" in rot:
+                self.pitch = np.deg2rad(rot["x"])
+            if "y" in rot:
+                self.roll = np.deg2rad(rot["y"])
+            if "z" in rot:
+                self.yaw = np.deg2rad(rot["z"])
+        
+        if "scale" in config:
+            self.scale = config["scale"]
+            
+        if "camera_height" in config:
+            self.camera_height = config["camera_height"]
+            
+        # Update rotation matrix
+        self._update_rotation_matrix()
+        
+        logging.info(f"Coordinate service updated with pitch={np.rad2deg(self.pitch):.1f}°, "
+                   f"roll={np.rad2deg(self.roll):.1f}°, yaw={np.rad2deg(self.yaw):.1f}°, "
+                   f"scale={self.scale:.4f}, camera_height={self.camera_height:.2f}m")
+    
+    def _update_rotation_matrix(self):
+        """Calculate the 3x3 rotation matrix from Euler angles."""
+        # Rotation matrices for each axis
+        Rx = np.array([
+            [1, 0, 0],
+            [0, np.cos(self.pitch), -np.sin(self.pitch)],
+            [0, np.sin(self.pitch), np.cos(self.pitch)]
+        ])
+        
+        Ry = np.array([
+            [np.cos(self.roll), 0, np.sin(self.roll)],
+            [0, 1, 0],
+            [-np.sin(self.roll), 0, np.cos(self.roll)]
+        ])
+        
+        Rz = np.array([
+            [np.cos(self.yaw), -np.sin(self.yaw), 0],
+            [np.sin(self.yaw), np.cos(self.yaw), 0],
+            [0, 0, 1]
+        ])
+        
+        # Combined rotation matrix (order: Rz * Ry * Rx)
+        self.R = Rz @ Ry @ Rx
     
     def world_to_court(self, position_3d: np.ndarray) -> Tuple[float, float, float]:
         """
@@ -38,15 +111,6 @@ class CoordinateService(QObject):
         Returns:
             Tuple (x, y, z) in court coordinates
         """
-        # For now, just ensure we're returning valid values that will be displayed properly
-        # in the bounce overlay and other visualization components.
-        # The coordinate system should match what is expected by the bounce overlay
-        
-        # The position_3d is already in the court-centered coordinate system
-        # following the triangulation. We just need to make sure the values are valid
-        # and have the correct sign conventions.
-        
-        # Assign x, y, z from position_3d (ensuring we have valid values)
         try:
             # Sometimes we might get NaN or Inf values
             if position_3d is None or not np.all(np.isfinite(position_3d)):
@@ -54,15 +118,24 @@ class CoordinateService(QObject):
                 logging.warning("Invalid position_3d values detected, using defaults")
                 return 0.0, 0.0, 0.0
                 
-            x = float(position_3d[0])
-            y = float(position_3d[1])
-            z = float(position_3d[2])
+            # Convert to numpy array and ensure it's a vector
+            p_cam = np.array(position_3d, dtype=float).flatten()
+            
+            # Scale from pixels to meters if needed
+            p_cam = p_cam / self.scale
+            
+            # Apply rotation to convert from camera to world coordinates
+            p_world = self.R @ p_cam
+            
+            # Apply camera height offset
+            p_world[2] -= self.camera_height
+            
+            # Convert to tuple
+            x, y, z = float(p_world[0]), float(p_world[1]), float(p_world[2])
             
             # Log the coordinate transformation
-            logging.debug(f"Coordinate transformation: world ({x:.2f}, {y:.2f}, {z:.2f}) → court")
-            
-            # Apply any coordinate system conversions needed (none for now)
-            # In the future, this could involve rotation, scaling, etc.
+            logging.debug(f"Coordinate transformation: world ({position_3d[0]:.2f}, {position_3d[1]:.2f}, {position_3d[2]:.2f}) → "
+                        f"court ({x:.2f}, {y:.2f}, {z:.2f})")
             
             # Return the court coordinates as a tuple
             return x, y, z

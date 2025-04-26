@@ -1,18 +1,18 @@
 {
     "last_image_folder": "C:/Users/hyper/PycharmProjects/CPET_Final_Project/data files/hawk_eye_serve_volley/serve1",
     "hsv_settings": {
-        "h_min": 13,
-        "h_max": 83,
-        "s_min": 110,
+        "h_min": 10,
+        "h_max": 85,
+        "s_min": 96,
         "s_max": 193,
-        "v_min": 113,
+        "v_min": 112,
         "v_max": 255,
         "blur_size": 3,
         "morph_iterations": 3,
         "dilation_iterations": 1
     },
     "roi_settings": {
-        "width": 100,
+        "width": 106,
         "height": 100,
         "enabled": true,
         "auto_center": true
@@ -22,7 +22,7 @@
         "min_dist": 112,
         "param1": 64,
         "param2": 31,
-        "min_radius": 13,
+        "min_radius": 10,
         "max_radius": 25,
         "adaptive": false
     },
@@ -46,10 +46,12 @@
         "camera_rotation_z": 180.0,
         "focal_length_mm": 50.0,
         "baseline_m": 1.0,
-        "sensor_width": 36.0,
-        "sensor_height": 24.0,
+        "sensor_width_mm": 36.0,
+        "sensor_height_mm": 24.0,
         "principal_point_x": 320.0,
-        "principal_point_y": 240.0
+        "principal_point_y": 240.0,
+        "image_width_px": 640,
+        "image_height_px": 480
     },
     "calibration_points": {
         "left": {},
@@ -65,5 +67,14 @@
         "left_image_path": null,
         "right_image_path": null,
         "calib_ver": 1.2
+    },
+    "coordinate_settings": {
+        "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+        },
+        "scale": 0.01,
+        "camera_height": 3.0
     }
 }

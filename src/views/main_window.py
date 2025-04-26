@@ -22,6 +22,7 @@ from src.views.setting_view import SettingView
 from src.views.calibration_view import CalibrationView
 from src.models.calibration_model import CalibrationModel
 from src.controllers.calibration_controller import CalibrationController
+from src.views.widgets.inout_indicator import InOutLED
 
 
 class MainWindow(QMainWindow):
@@ -77,6 +78,9 @@ class MainWindow(QMainWindow):
         # Create calibration view
         self.calibration_view = CalibrationView()
         self.tab_widget.addTab(self.calibration_view, "Calibration")
+        
+        # Create IN/OUT LED indicator
+        self.inout_led = InOutLED()
         
         # Create calibration model and controller
         self.calibration_model = CalibrationModel()
@@ -264,4 +268,19 @@ class MainWindow(QMainWindow):
             right_image: QPixmap or QImage for the right view
         """
         if hasattr(self, 'calibration_controller'):
-            self.calibration_controller.set_images(left_image, right_image) 
+            self.calibration_controller.set_images(left_image, right_image)
+
+    def connect_game_analyzer(self, analyzer):
+        """
+        Connect to a game analyzer to receive bounce events.
+        
+        Args:
+            analyzer: GameAnalyzer instance
+        """
+        if analyzer:
+            # Connect in/out LED to game analyzer
+            analyzer.in_out_detected.connect(self.inout_led.on_in_out)
+            logging.info("IN/OUT LED connected to game analyzer")
+            
+            # Add LED to status bar
+            self.status_bar.addPermanentWidget(self.inout_led) 

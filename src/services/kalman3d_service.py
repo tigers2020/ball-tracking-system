@@ -251,8 +251,8 @@ class Kalman3DService:
         # 유효성 검사: 높이(z)값이 현실적인지 확인
         MAX_VALID_HEIGHT = ANALYSIS.MAX_VALID_HEIGHT  # 최대 유효 높이 (미터)
         if position[2] > MAX_VALID_HEIGHT:
-            logging.warning(f"Initial height too high: {position[2]:.2f}m. Clamping to {MAX_VALID_HEIGHT}m.")
-            position[2] = MAX_VALID_HEIGHT
+            # 경고만 표시하고 원래 값 유지 (클램핑 제거)
+            logging.warning(f"Initial height unusually high: {position[2]:.2f}m. Check camera calibration or triangulation.")
         elif position[2] < 0.0:
             logging.warning(f"Negative initial height: {position[2]:.2f}m. Setting to 0.0m.")
             position[2] = 0.0
@@ -401,6 +401,16 @@ class Kalman3DService:
             
         # 로깅용으로 원래 측정값 저장
         original_position = position.copy()
+        
+        # Check for invalid or extremely large values
+        if not np.all(np.isfinite(position)) or np.any(np.abs(position) > 1000):
+            logging.warning(f"Invalid position detected: {position}. Using last valid position.")
+            if self.last_pos is not None:
+                position = self.last_pos.copy()
+                confidence *= 0.1  # Significantly reduce confidence
+            else:
+                position = np.zeros(3, dtype=np.float32)  # Use zeros as a fallback
+                confidence *= 0.1  # Significantly reduce confidence
             
         # First measurement - initialize filter
         if not self.is_initialized:
@@ -469,20 +479,30 @@ class Kalman3DService:
         # Prediction step
         predicted_state = self.kalman.predict()
         
-        # 측정 업데이트 수행
-        measurement = np.array(position, dtype=np.float32).reshape(3, 1)
-        corrected_state = self.kalman.correct(measurement)
-        
-        # 측정 노이즈 원래대로 복원 (신뢰도로 조정했던 경우)
-        if confidence < 1.0:
-            self.kalman.measurementNoiseCov = original_noise
-        
-        # Extract position and velocity from state
-        filtered_position = corrected_state[:3].flatten()
-        filtered_velocity = corrected_state[3:6].flatten()
+        try:
+            # 측정 업데이트 수행
+            measurement = np.array(position, dtype=np.float32).reshape(3, 1)
+            corrected_state = self.kalman.correct(measurement)
+            
+            # 측정 노이즈 원래대로 복원 (신뢰도로 조정했던 경우)
+            if confidence < 1.0:
+                self.kalman.measurementNoiseCov = original_noise
+            
+            # Extract position and velocity from state
+            filtered_position = corrected_state[:3].flatten()
+            filtered_velocity = corrected_state[3:6].flatten()
+        except cv2.error as e:
+            logging.error(f"OpenCV error in Kalman update: {e}")
+            
+            # Fallback to predicted values when correction fails
+            filtered_position = predicted_state[:3].flatten()
+            filtered_velocity = predicted_state[3:6].flatten()
+            
+            # Reduce confidence further
+            confidence *= 0.2
         
         # 현재 상태 저장
-        self.last_state = corrected_state.copy()
+        self.last_state = np.array(predicted_state.copy(), dtype=np.float32)
         self.last_pos = filtered_position.copy()
         self.last_vel = filtered_velocity.copy()
         

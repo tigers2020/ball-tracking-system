@@ -135,6 +135,9 @@ class AppController(QObject):
         # Connect image_view to game_analyzer
         self.view.image_view.connect_game_analyzer(self.game_analyzer)
         
+        # Connect main window to game_analyzer for IN/OUT indication
+        self.view.connect_game_analyzer(self.game_analyzer)
+        
         # Initialize ball tracking settings dialog
         self.ball_tracking_dialog = None
         
@@ -180,6 +183,9 @@ class AppController(QObject):
             lambda enabled: self.view.image_view.playback_controls.ball_tracking_button.setChecked(enabled))
         self.ball_tracking_controller.tracking_state_changed.connect(
             lambda state: self.game_analyzer.enable(state == TrackingState.TRACKING or state == TrackingState.TRACKING_LOST))
+        
+        # Connect bounce overlay to game analyzer to visualize bounces and ball positions
+        self.view.image_view.bounce_overlay.connect_game_analyzer(self.game_analyzer)
         
         logging.info("Ball tracking controller connected to game analyzer")
     

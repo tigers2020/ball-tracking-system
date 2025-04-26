@@ -141,8 +141,8 @@ class SettingView(QWidget):
         camera_group_layout.addRow("Baseline (m):", self.baseline)
         
         # Sensor parameters
-        self.sensor_width = self._create_double_spin_box(1, 100, 0.1, self.camera_settings["sensor_width"])
-        self.sensor_height = self._create_double_spin_box(1, 100, 0.1, self.camera_settings["sensor_height"])
+        self.sensor_width = self._create_double_spin_box(1, 100, 0.1, self.camera_settings["sensor_width_mm"])
+        self.sensor_height = self._create_double_spin_box(1, 100, 0.1, self.camera_settings["sensor_height_mm"])
         camera_group_layout.addRow("Sensor Width (mm):", self.sensor_width)
         camera_group_layout.addRow("Sensor Height (mm):", self.sensor_height)
         
@@ -226,8 +226,8 @@ class SettingView(QWidget):
         self.camera_settings["camera_rotation_z"] = self.camera_rotation_z.value()
         self.camera_settings["focal_length_mm"] = self.focal_length.value()
         self.camera_settings["baseline_m"] = self.baseline.value()
-        self.camera_settings["sensor_width"] = self.sensor_width.value()
-        self.camera_settings["sensor_height"] = self.sensor_height.value()
+        self.camera_settings["sensor_width_mm"] = self.sensor_width.value()
+        self.camera_settings["sensor_height_mm"] = self.sensor_height.value()
         self.camera_settings["principal_point_x"] = self.principal_point_x.value()
         self.camera_settings["principal_point_y"] = self.principal_point_y.value()
         
@@ -290,7 +290,7 @@ class SettingView(QWidget):
         self.camera_rotation_z.setValue(self.camera_settings["camera_rotation_z"])
         self.focal_length.setValue(self.camera_settings["focal_length_mm"])
         self.baseline.setValue(self.camera_settings["baseline_m"])
-        self.sensor_width.setValue(self.camera_settings["sensor_width"])
-        self.sensor_height.setValue(self.camera_settings["sensor_height"])
+        self.sensor_width.setValue(self.camera_settings["sensor_width_mm"])
+        self.sensor_height.setValue(self.camera_settings["sensor_height_mm"])
         self.principal_point_x.setValue(self.camera_settings["principal_point_x"])
         self.principal_point_y.setValue(self.camera_settings["principal_point_y"]) 
