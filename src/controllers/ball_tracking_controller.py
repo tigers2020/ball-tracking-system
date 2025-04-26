@@ -152,6 +152,10 @@ class BallTrackingController(QObject):
         # Timestamp tracking for Kalman filter dt calculation
         self.last_update_time = {"left": None, "right": None}
         
+        # Initialize previous ROI variables
+        self.previous_left_roi = None
+        self.previous_right_roi = None
+        
         # Initialize cropped_images if not present in model
         if not hasattr(self.model, 'cropped_images'):
             self.model.cropped_images = {
@@ -626,18 +630,103 @@ class BallTrackingController(QObject):
     
     def _compute_rois(self, left_image, right_image, roi_settings):
         """
-        Compute ROIs based on the given images and ROI settings.
+        컴퓨터 ROI 및 적용 마스크
         
         Args:
-            left_image (numpy.ndarray): Left input image
-            right_image (numpy.ndarray): Right input image
-            roi_settings (dict): Dictionary containing ROI settings
+            left_image: 왼쪽 카메라 이미지
+            right_image: 오른쪽 카메라 이미지
+            roi_settings: ROI 설정
             
         Returns:
-            tuple: (left_roi, right_roi) - ROI dictionaries for both images
+            left_roi, right_roi: 왼쪽 및 오른쪽 ROI 영역 튜플 (x, y, width, height)
         """
+        # ROI 계산
         left_roi = self.roi_computer.compute_roi(self.left_mask, left_image)
         right_roi = self.roi_computer.compute_roi(self.right_mask, right_image)
+        
+        # 이전 ROI가 있는 경우 안정성 검사 추가
+        if hasattr(self, 'previous_left_roi') and self.previous_left_roi is not None:
+            # 이전 ROI의 중심점 계산
+            x = self.previous_left_roi.get('x', 0)
+            y = self.previous_left_roi.get('y', 0)
+            w = self.previous_left_roi.get('width', ROI.DEFAULT_WIDTH)
+            h = self.previous_left_roi.get('height', ROI.DEFAULT_HEIGHT)
+            prev_left_x = x + w // 2
+            prev_left_y = y + h // 2
+            
+            # 현재 ROI의 중심점 계산
+            x = left_roi.get('x', 0)
+            y = left_roi.get('y', 0)
+            w = left_roi.get('width', ROI.DEFAULT_WIDTH)
+            h = left_roi.get('height', ROI.DEFAULT_HEIGHT)
+            curr_left_x = x + w // 2
+            curr_left_y = y + h // 2
+            
+            # 중심점의 변화 계산
+            dx = abs(curr_left_x - prev_left_x)
+            dy = abs(curr_left_y - prev_left_y)
+            
+            # 변화가 너무 큰 경우 (이미지 너비의 30% 초과) 제한
+            # 급격한 ROI 이동 방지
+            frame_width = left_image.shape[1]
+            frame_height = left_image.shape[0]
+            
+            if dx > frame_width * 0.3 or dy > frame_height * 0.3:
+                logging.warning(f"Large ROI jump detected: dx={dx}px, dy={dy}px. Limiting movement.")
+                
+                # 너무 큰 이동 제한 - 이전 ROI와 현재 ROI의 중간으로 제한
+                max_dx = int(frame_width * 0.3)
+                max_dy = int(frame_height * 0.3)
+                
+                # 새 중심점 계산
+                new_left_x = prev_left_x + np.clip(curr_left_x - prev_left_x, -max_dx, max_dx)
+                new_left_y = prev_left_y + np.clip(curr_left_y - prev_left_y, -max_dy, max_dy)
+                
+                # 새 ROI 계산
+                half_width = w // 2
+                half_height = h // 2
+                left_roi = {
+                    'x': max(0, new_left_x - half_width),
+                    'y': max(0, new_left_y - half_height),
+                    'width': min(w, frame_width - (new_left_x - half_width)),
+                    'height': min(h, frame_height - (new_left_y - half_height))
+                }
+                
+                # 오른쪽 ROI도 동일하게 처리
+                if hasattr(self, 'previous_right_roi') and self.previous_right_roi is not None:
+                    # 우측 ROI 중심점 계산 
+                    x = self.previous_right_roi.get('x', 0)
+                    y = self.previous_right_roi.get('y', 0)
+                    w = self.previous_right_roi.get('width', ROI.DEFAULT_WIDTH)
+                    h = self.previous_right_roi.get('height', ROI.DEFAULT_HEIGHT)
+                    prev_right_x = x + w // 2
+                    prev_right_y = y + h // 2
+                    
+                    x = right_roi.get('x', 0)
+                    y = right_roi.get('y', 0)
+                    w = right_roi.get('width', ROI.DEFAULT_WIDTH)
+                    h = right_roi.get('height', ROI.DEFAULT_HEIGHT)
+                    curr_right_x = x + w // 2
+                    curr_right_y = y + h // 2
+                    
+                    # 중심점 제한
+                    new_right_x = prev_right_x + np.clip(curr_right_x - prev_right_x, -max_dx, max_dx)
+                    new_right_y = prev_right_y + np.clip(curr_right_y - prev_right_y, -max_dy, max_dy)
+                    
+                    # 새 ROI 계산
+                    half_width = w // 2
+                    half_height = h // 2
+                    right_roi = {
+                        'x': max(0, new_right_x - half_width),
+                        'y': max(0, new_right_y - half_height),
+                        'width': min(w, frame_width - (new_right_x - half_width)),
+                        'height': min(h, frame_height - (new_right_y - half_height))
+                    }
+        
+        # 현재 ROI 저장
+        self.previous_left_roi = left_roi
+        self.previous_right_roi = right_roi
+        
         return left_roi, right_roi
     
     def _apply_roi_mask(self, mask, roi):
@@ -858,16 +947,43 @@ class BallTrackingController(QObject):
     
     def _fuse_coordinates(self):
         """
-        Fuse coordinates from both left and right images.
-        
-        Returns:
-            tuple: Fused coordinates (uL, vL, uR, vR) or None if no circles are detected
+        Triangulate 3D coordinates from left/right 2D coordinates.
         """
-        if self.model.left_circles and self.model.right_circles:
-            left_circle = self.model.left_circles[0]
-            right_circle = self.model.right_circles[0]
-            return (left_circle[0], left_circle[1], right_circle[0], right_circle[1])
-        else:
+        left_coords = self.model.left_coords
+        right_coords = self.model.right_coords
+        
+        # Skip if either coordinate is missing
+        if left_coords is None or right_coords is None:
+            return None
+        
+        # 디스패리티 검증 추가
+        disparity = left_coords[0] - right_coords[0]
+        MIN_VALID_DISPARITY = 15.0  # 최소 유효 디스패리티 값 (픽셀)
+        
+        if abs(disparity) < MIN_VALID_DISPARITY:
+            logging.warning(f"Disparity too small: {disparity:.2f}px < {MIN_VALID_DISPARITY}px. Skipping triangulation.")
+            return None
+        
+        # Convert to numpy arrays
+        p1 = np.array(left_coords, dtype=np.float32)
+        p2 = np.array(right_coords, dtype=np.float32)
+        
+        # Triangulate 3D coordinates
+        try:
+            world_coords = self.triangulator.triangulate(p1[0], p1[1], p2[0], p2[1])
+            
+            if world_coords is None:
+                logging.warning("Triangulation failed: No valid 3D coordinates returned")
+                return None
+                
+            # 높이 검증 추가 - Y 좌표가 3.5m보다 높으면 경고 표시
+            if world_coords[1] > 3.5:
+                logging.warning(f"Invalid triangulated height: {world_coords[1]:.2f}m > 3.5m. Measurement may be unreliable.")
+            
+            return world_coords
+            
+        except Exception as e:
+            logging.error(f"Error during triangulation: {e}")
             return None
     
     def _check_out_of_bounds(self):

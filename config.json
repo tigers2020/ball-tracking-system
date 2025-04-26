@@ -43,8 +43,8 @@
         "camera_rotation_z": 180,
         "focal_length_mm": 50,
         "baseline_m": 1,
-        "sensor_width": 36,
-        "sensor_height": 24,
+        "sensor_width": 36.0,
+        "sensor_height": 24.0,
         "principal_point_x": 960,
         "principal_point_y": 540,
         "resizing_scale": 1.0

@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 from typing import Tuple, List, Optional, Dict
 import time
+import logging
 
 
 class BallDetector:
@@ -71,6 +72,17 @@ class BallDetector:
         self.adaptive_mode = False
         self.hsv_ranges = []
         
+        # ROI tracking
+        self.use_roi = False
+        self.roi = None
+        self.roi_margin = 50  # 픽셀 단위의 ROI 여유 공간
+        self.roi_min_size = 100  # 최소 ROI 크기
+        self.roi_max_size = 300  # 최대 ROI 크기
+        self.roi_expansion_rate = 1.5  # 검출 실패 시 확장 비율
+        self.roi_contraction_rate = 0.9  # 검출 성공 시 축소 비율
+        self.roi_failure_count = 0
+        self.roi_max_failures = 5  # 연속 실패 최대 횟수
+        
         # Blob detector parameters
         self.params = cv2.SimpleBlobDetector_Params()
         self.params.filterByArea = True
@@ -105,6 +117,114 @@ class BallDetector:
         """
         self.adaptive_mode = enable
         
+    def enable_roi_tracking(self, enable: bool = True, initial_roi: Tuple[int, int, int, int] = None):
+        """
+        ROI 기반 트래킹을 활성화/비활성화합니다.
+        
+        Args:
+            enable: ROI 트래킹 활성화 여부
+            initial_roi: 초기 ROI (x, y, width, height)
+        """
+        self.use_roi = enable
+        if enable and initial_roi:
+            self.roi = initial_roi
+            self.roi_failure_count = 0
+
+    def update_roi(self, center: Tuple[int, int], radius: int, frame_shape: Tuple[int, int]):
+        """
+        볼 위치와 속도에 기반하여 ROI를 동적으로 업데이트합니다.
+        
+        Args:
+            center: 볼의 중심 좌표 (x, y)
+            radius: 볼의 반경
+            frame_shape: 프레임 크기 (height, width)
+        """
+        if not self.use_roi or center is None:
+            return
+            
+        # 프레임 크기 가져오기
+        height, width = frame_shape
+        
+        # 속도 기반 ROI 예측
+        pred_x, pred_y = center
+        pred_size = max(radius * 4, self.roi_min_size)
+        
+        # 속도 정보가 있으면 예측 위치 조정
+        if self.velocity is not None:
+            # 속도에 따라 ROI 위치 예측 (0.1초 후 위치 예측)
+            vx, vy = self.velocity
+            pred_x += int(vx * 0.1)
+            pred_y += int(vy * 0.1)
+            
+            # 속도 크기에 따라 ROI 크기 조정
+            velocity_magnitude = np.sqrt(vx**2 + vy**2)
+            if velocity_magnitude > 100:  # 빠르게 움직이는 경우
+                pred_size = min(pred_size * 1.5, self.roi_max_size)
+        
+        # ROI 여유 공간 추가
+        half_size = pred_size // 2 + self.roi_margin
+        
+        # ROI 계산
+        roi_x = max(0, pred_x - half_size)
+        roi_y = max(0, pred_y - half_size)
+        roi_w = min(width - roi_x, pred_size + self.roi_margin * 2)
+        roi_h = min(height - roi_y, pred_size + self.roi_margin * 2)
+        
+        # ROI 업데이트
+        self.roi = (int(roi_x), int(roi_y), int(roi_w), int(roi_h))
+        self.roi_failure_count = 0
+
+    def expand_roi(self, frame_shape: Tuple[int, int]):
+        """
+        연속 검출 실패 시 ROI를 확장합니다.
+        
+        Args:
+            frame_shape: 프레임 크기 (height, width)
+        """
+        if not self.use_roi or self.roi is None:
+            return
+            
+        # 프레임 크기 가져오기
+        height, width = frame_shape
+        
+        # 현재 ROI 정보
+        x, y, w, h = self.roi
+        
+        # ROI 중심점 계산
+        center_x = x + w // 2
+        center_y = y + h // 2
+        
+        # 확장된 크기 계산 (최대 크기 제한)
+        new_w = min(int(w * self.roi_expansion_rate), width)
+        new_h = min(int(h * self.roi_expansion_rate), height)
+        
+        # 새 ROI 위치 계산
+        new_x = max(0, center_x - new_w // 2)
+        new_y = max(0, center_y - new_h // 2)
+        
+        # 프레임 경계 확인
+        if new_x + new_w > width:
+            new_x = width - new_w
+        if new_y + new_h > height:
+            new_y = height - new_h
+            
+        # ROI 업데이트
+        self.roi = (int(new_x), int(new_y), int(new_w), int(new_h))
+        
+        # 연속 실패 횟수가 최대치에 도달하면 ROI 비활성화
+        self.roi_failure_count += 1
+        if self.roi_failure_count >= self.roi_max_failures:
+            # 전체 프레임으로 ROI 확장
+            self.roi = (0, 0, width, height)
+
+    def reset_roi(self, frame_shape):
+        """ROI를 화면 중앙으로 재설정"""
+        h, w = frame_shape
+        center_x, center_y = w // 2, h // 2
+        roi_size = self.roi_min_size * 2
+        self.roi = (center_x - roi_size//2, center_y - roi_size//2, roi_size, roi_size)
+        self.roi_failure_count = 0
+
     def detect(self, frame: np.ndarray) -> Tuple[Optional[Tuple[int, int]], Optional[int], float]:
         """
         Detect tennis ball in the frame.
@@ -118,8 +238,25 @@ class BallDetector:
                 - Radius of the ball or None if not detected
                 - Confidence score (0.0 to 1.0)
         """
+        # 프레임 크기 가져오기
+        frame_height, frame_width = frame.shape[:2]
+        
+        # ROI 적용 (활성화된 경우)
+        roi_applied = False
+        if self.use_roi and self.roi is not None:
+            x, y, w, h = self.roi
+            # ROI가 유효한지 확인
+            if w > 0 and h > 0 and x >= 0 and y >= 0 and x + w <= frame_width and y + h <= frame_height:
+                roi_frame = frame[y:y+h, x:x+w]
+                roi_applied = True
+            else:
+                roi_frame = frame
+                self.roi = (0, 0, frame_width, frame_height)
+        else:
+            roi_frame = frame
+        
         # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(frame, (self.blur_size, self.blur_size), 0)
+        blurred = cv2.GaussianBlur(roi_frame, (self.blur_size, self.blur_size), 0)
         
         # Convert to HSV color space
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
@@ -135,19 +272,32 @@ class BallDetector:
                 else:
                     mask = cv2.bitwise_or(mask, range_mask)
         else:
-            # Use default HSV range
-            mask = cv2.inRange(hsv, self.hsv_lower, self.hsv_upper)
+            # Use default HSV range for yellow
+            yellow_mask = cv2.inRange(hsv, self.hsv_lower, self.hsv_upper)
+            
+            # Add additional masks for red (handling hue wrap-around)
+            red_lower1 = (0, 70, 70)
+            red_upper1 = (10, 255, 255)
+            red_lower2 = (170, 70, 70)
+            red_upper2 = (180, 255, 255)
+            
+            red_mask1 = cv2.inRange(hsv, red_lower1, red_upper1)
+            red_mask2 = cv2.inRange(hsv, red_lower2, red_upper2)
+            
+            # Combine all masks
+            mask = cv2.bitwise_or(yellow_mask, cv2.bitwise_or(red_mask1, red_mask2))
         
-        # Apply morphological operations to remove noise
+        # Apply morphological operations to remove noise (증가된 반복 횟수)
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        # 모폴로지 연산 2회 수행
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
         
         # Find contours in the mask
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         # Combine with background subtraction for moving objects
-        fg_mask = self.bg_subtractor.apply(frame)
+        fg_mask = self.bg_subtractor.apply(roi_frame)
         fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
         fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
         
@@ -156,50 +306,44 @@ class BallDetector:
         
         # Use blob detector for robust detection
         inverted_mask = cv2.bitwise_not(combined_mask)
-        keypoints = self.blob_detector.detect(inverted_mask)
+        
+        # Try Hough circles detection with reduced threshold
+        circles = cv2.HoughCircles(
+            inverted_mask, 
+            cv2.HOUGH_GRADIENT, 
+            dp=1.2,
+            minDist=10,
+            param1=50,
+            param2=25,  # 36에서 25로 낮춤
+            minRadius=self.min_radius,
+            maxRadius=self.max_radius
+        )
         
         best_center = None
         best_radius = None
         best_confidence = 0.0
         
-        # Process contours
-        for contour in contours:
-            # Calculate contour area
-            area = cv2.contourArea(contour)
-            
-            # Filter by area
-            if area < self.min_area or area > self.max_area:
-                continue
-            
-            # Calculate circularity
-            perimeter = cv2.arcLength(contour, True)
-            if perimeter == 0:
-                continue
+        # Process Hough circles if found
+        if circles is not None:
+            circles = np.uint16(np.around(circles))
+            for circle in circles[0, :]:
+                center = (int(circle[0]), int(circle[1]))
+                radius = int(circle[2])
                 
-            circularity = 4 * np.pi * area / (perimeter * perimeter)
-            
-            # Fit circle
-            (x, y), radius = cv2.minEnclosingCircle(contour)
-            center = (int(x), int(y))
-            radius = int(radius)
-            
-            # Check if circle size is reasonable
-            if radius < self.min_radius or radius > self.max_radius:
-                continue
-            
-            # Check if circle is in motion (using background subtraction)
-            motion_mask = cv2.circle(np.zeros_like(fg_mask), center, radius, 255, -1)
-            motion_score = cv2.countNonZero(cv2.bitwise_and(fg_mask, motion_mask)) / cv2.countNonZero(motion_mask)
-            
-            # Calculate confidence score
-            confidence = 0.4 * circularity + 0.3 * (1.0 - abs(radius - 15) / 30) + 0.3 * motion_score
-            
-            if confidence > best_confidence:
-                best_center = center
-                best_radius = radius
-                best_confidence = confidence
+                # Check if circle is in motion (using background subtraction)
+                motion_mask = cv2.circle(np.zeros_like(fg_mask), center, radius, 255, -1)
+                motion_score = cv2.countNonZero(cv2.bitwise_and(fg_mask, motion_mask)) / max(cv2.countNonZero(motion_mask), 1)
                 
-        # Process keypoints from blob detector
+                # Calculate confidence score
+                confidence = 0.5 + 0.3 * (1.0 - abs(radius - 15) / 30) + 0.2 * motion_score
+                
+                if confidence > best_confidence:
+                    best_center = center
+                    best_radius = radius
+                    best_confidence = confidence
+        
+        # Process keypoints from blob detector as fallback
+        keypoints = self.blob_detector.detect(inverted_mask)
         for keypoint in keypoints:
             center = (int(keypoint.pt[0]), int(keypoint.pt[1]))
             radius = int(keypoint.size / 2)
@@ -218,6 +362,10 @@ class BallDetector:
                 best_center = center
                 best_radius = radius
                 best_confidence = confidence
+        
+        # ROI 좌표계에서 전체 프레임 좌표계로 변환
+        if roi_applied and best_center is not None:
+            best_center = (best_center[0] + self.roi[0], best_center[1] + self.roi[1])
                 
         # Update detection history
         current_time = time.time()
@@ -230,6 +378,10 @@ class BallDetector:
                     dx = (best_center[0] - self.last_position[0]) / dt
                     dy = (best_center[1] - self.last_position[1]) / dt
                     self.velocity = (dx, dy)
+            
+            # ROI 업데이트 (성공적인 검출)
+            if self.use_roi:
+                self.update_roi(best_center, best_radius, frame.shape[:2])
                     
             # Update history
             self.detection_history.append((best_center, best_radius, best_confidence))
@@ -242,6 +394,16 @@ class BallDetector:
             
             return best_center, best_radius, best_confidence
         else:
+            # ROI 확장 (검출 실패)
+            if self.use_roi:
+                self.roi_failure_count += 1
+                if self.roi_failure_count >= self.roi_max_failures:
+                    # 최대 실패 횟수에 도달하면 ROI를 화면 중앙으로 재설정
+                    self.reset_roi(frame.shape[:2])
+                    logging.warning("Max ROI failures reached. Resetting ROI to center.")
+                else:
+                    self.expand_roi(frame.shape[:2])
+                
             # If no detection, try to predict based on velocity
             if (self.last_position is not None and self.velocity is not None and 
                 current_time - self.last_detection_time < 0.5):  # Only predict for short gaps
@@ -282,6 +444,20 @@ class BallDetector:
         """
         result = frame.copy()
         
+        # ROI 영역 표시 (활성화된 경우)
+        if self.use_roi and self.roi is not None:
+            x, y, w, h = self.roi
+            cv2.rectangle(result, (x, y), (x + w, y + h), (255, 0, 0), 2)
+            cv2.putText(
+                result, 
+                f"ROI: {w}x{h}", 
+                (x, y - 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 
+                0.5, 
+                (255, 0, 0), 
+                2
+            )
+        
         if center is not None and radius is not None:
             # Draw the ball circle
             cv2.circle(result, center, radius, (0, 255, 0), 2)
@@ -301,6 +477,20 @@ class BallDetector:
                 2
             )
             
+            # 속도 정보 표시
+            if self.velocity is not None:
+                vx, vy = self.velocity
+                speed = np.sqrt(vx**2 + vy**2)
+                cv2.putText(
+                    result, 
+                    f"Speed: {speed:.1f} px/s", 
+                    (center[0] - radius, center[1] - radius - 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 
+                    0.5, 
+                    (0, 255, 0), 
+                    2
+                )
+            
             # Draw detection trail
             for i in range(1, len(self.detection_history)):
                 prev_center = self.detection_history[i-1][0]
@@ -314,7 +504,7 @@ class BallDetector:
 
     def calibrate_from_roi(self, frame: np.ndarray, roi: Tuple[int, int, int, int]) -> None:
         """
-        Calibrate HSV color range from a region of interest.
+        Calibrate HSV color range from a region of interest and set up ROI tracking.
         
         Args:
             frame: Input image frame
@@ -341,6 +531,17 @@ class BallDetector:
         # Add to HSV ranges list
         self.add_hsv_range(self.hsv_lower, self.hsv_upper)
         
+        # 자동으로 ROI 트래킹 활성화
+        self.enable_roi_tracking(True, roi)
+        
+        # 첫 검출을 위해 ROI를 약간 확장
+        self.roi = (
+            max(0, x - self.roi_margin), 
+            max(0, y - self.roi_margin),
+            min(frame.shape[1] - x, w + 2 * self.roi_margin),
+            min(frame.shape[0] - y, h + 2 * self.roi_margin)
+        )
+
 
 class StereoBallDetector:
     """
@@ -517,24 +718,18 @@ class StereoBallDetector:
         right_roi: Tuple[int, int, int, int]
     ) -> None:
         """
-        Calibrate HSV color range from regions of interest in both frames.
+        Calibrate ball detectors using ROIs from left and right frames.
         
         Args:
             left_frame: Left camera frame
             right_frame: Right camera frame
-            left_roi: Left region of interest as (x, y, width, height)
-            right_roi: Right region of interest as (x, y, width, height)
+            left_roi: Region of interest in left frame
+            right_roi: Region of interest in right frame
         """
+        # Calibrate left and right detectors
         self.left_detector.calibrate_from_roi(left_frame, left_roi)
         self.right_detector.calibrate_from_roi(right_frame, right_roi)
         
-        # Share calibration between detectors
-        for hsv_range in self.left_detector.hsv_ranges:
-            self.right_detector.add_hsv_range(*hsv_range)
-            
-        for hsv_range in self.right_detector.hsv_ranges:
-            self.left_detector.add_hsv_range(*hsv_range)
-            
-        # Enable adaptive mode
-        self.left_detector.enable_adaptive_mode(True)
-        self.right_detector.enable_adaptive_mode(True) 
+        # Enable ROI tracking for both detectors
+        self.left_detector.enable_roi_tracking(True, left_roi)
+        self.right_detector.enable_roi_tracking(True, right_roi) 

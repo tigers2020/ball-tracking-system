@@ -85,12 +85,21 @@ class TriangulationService:
         self.w = int(w0 * self.scale)
         self.h = int(h0 * self.scale)
 
+        # Ensure sensor dimensions are set correctly for focal length calculation
+        sensor_width = cfg.get("sensor_width", 36.0)  # Default to full-frame 36mm if not specified
+        sensor_height = cfg.get("sensor_height", 24.0)  # Default to full-frame 24mm if not specified
+        
+        # Log sensor dimensions
+        logging.info(f"Using sensor dimensions: width={sensor_width}mm, height={sensor_height}mm")
+
         # Create camera intrinsic matrix
-        fx = cfg["focal_length_mm"] / cfg["sensor_width"] * self.w
-        fy = cfg["focal_length_mm"] / cfg["sensor_height"] * self.h
+        fx = cfg["focal_length_mm"] / sensor_width * self.w
+        fy = cfg["focal_length_mm"] / sensor_height * self.h
         self.K = np.array([[fx, 0, cfg["principal_point_x"] * self.scale],
                            [0, fy, cfg["principal_point_y"] * self.scale],
                            [0, 0, 1]], dtype=np.float64)
+        
+        logging.info(f"Camera intrinsics calculated: fx={fx:.1f}, fy={fy:.1f}, focal_length={cfg['focal_length_mm']}mm")
 
         # Left and right camera transforms
         B = cfg["baseline_m"]

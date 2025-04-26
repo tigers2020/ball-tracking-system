@@ -9,8 +9,11 @@ from 2D positions in stereo camera views.
 
 import numpy as np
 import cv2
+import logging
 from typing import Tuple, Optional, List
 
+# 최소 유효 디스패리티 값 (픽셀)
+MIN_VALID_DISPARITY = 15.0
 
 def triangulate_points(
     point1: np.ndarray,
@@ -30,6 +33,11 @@ def triangulate_points(
     Returns:
         3D point in world coordinates [x, y, z]
     """
+    # 디스패리티 검증 
+    disparity = point1[0] - point2[0]
+    if abs(disparity) < MIN_VALID_DISPARITY:
+        logging.warning(f"Disparity too small: {disparity:.2f}px < {MIN_VALID_DISPARITY}px. Triangulation may be unstable.")
+        
     # Triangulate using OpenCV's triangulatePoints function
     # Reshape points to the format required by triangulatePoints
     points1 = np.array([point1], dtype=np.float32).T
@@ -105,6 +113,17 @@ def triangulate_with_confidence(
     Returns:
         Tuple of (3D point in world coordinates [x, y, z], combined confidence)
     """
+    # 디스패리티 검증 및 신뢰도 조정
+    disparity = point1[0] - point2[0]
+    disparity_valid = abs(disparity) >= MIN_VALID_DISPARITY
+    
+    if not disparity_valid:
+        logging.warning(f"Disparity too small: {disparity:.2f}px < {MIN_VALID_DISPARITY}px. Reducing confidence.")
+        # 디스패리티가 작을수록 신뢰도 감소
+        disparity_factor = abs(disparity) / MIN_VALID_DISPARITY
+        confidence1 *= disparity_factor
+        confidence2 *= disparity_factor
+    
     # Triangulate the 3D point
     point_3d = triangulate_points(point1, point2, proj_matrix1, proj_matrix2)
     

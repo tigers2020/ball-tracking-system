@@ -255,15 +255,96 @@ class GameAnalyzer(QObject):
         # 삼각측량 결과 로깅 추가
         logging.debug(f"Triangulated 3D point: ({position_3d[0]:.2f}, {position_3d[1]:.2f}, {position_3d[2]:.2f})")
         
-        # Validate triangulated point (z should be positive and within reasonable range)
-        if position_3d[2] < 0 or position_3d[2] > 10.0:  # 증가: 5.0 -> 10.0
+        # 삼각측량 결과 검증 강화
+        # 테니스 코트에서 볼의 현실적인 높이는 일반적으로 3m 미만임
+        MAX_VALID_HEIGHT = 5.0  # 최대 유효 높이 (미터)
+        MIN_VALID_HEIGHT = -0.05  # 약간의 음수 높이는 오차로 허용
+        
+        # 측정 신뢰도 점수 초기화
+        confidence_score = detection_rate  # 기본 신뢰도는 검출률로 시작
+        
+        # 높이 검증 
+        if position_3d[2] < MIN_VALID_HEIGHT or position_3d[2] > MAX_VALID_HEIGHT:
             logging.warning(f"Invalid triangulated height: {position_3d[2]:.2f}m")
-            # 더 유연한 클램핑 - 테니스 데이터의 현실적인 범위로 제한
-            position_3d[2] = max(0.0, min(position_3d[2], 10.0))  # 최대 높이 증가: 5.0 -> 10.0
-            logging.debug(f"Clamped height to: {position_3d[2]:.2f}m")
             
-        # Update Kalman filter
-        kalman_result = self.kalman.update(position_3d)
+            if position_3d[2] > MAX_VALID_HEIGHT:
+                # 비현실적으로 높은 값은 캘리브레이션이나 삼각측량 문제일 가능성 높음
+                # 높이에 따른 신뢰도 감소율 계산 (5m 초과하면 신뢰도 급감)
+                height_factor = min((position_3d[2] - MAX_VALID_HEIGHT) / 5.0, 1.0)
+                height_confidence = max(0.2, 1.0 - height_factor)
+                confidence_score *= height_confidence
+                
+                # 높이가 매우 높은 경우 (10m 이상) 로그 추가
+                if position_3d[2] > 10.0:
+                    logging.error(f"Extremely high triangulation result: {position_3d[2]:.2f}m. Possible calibration issue.")
+                
+                # 최대 허용 높이(5m)로 클램핑 대신 3m로 보정 (일반적인 테니스 환경 기준)
+                position_3d[2] = min(position_3d[2], 3.0)
+                logging.info(f"Clamped excessive height to: {position_3d[2]:.2f}m, confidence: {confidence_score:.2f}")
+                
+            elif position_3d[2] < MIN_VALID_HEIGHT:
+                # 약간의 음수 높이는 오차로 허용하지만 클램핑
+                confidence_score *= 0.9  # 신뢰도 약간 감소
+                position_3d[2] = max(position_3d[2], 0.0)
+                logging.info(f"Adjusted negative height to: {position_3d[2]:.2f}m")
+            
+        # x, y 좌표 유효성 검사 (코트 경계에서 과도하게 벗어난 경우)
+        COURT_WIDTH_HALF = 8.23 / 2  # 테니스 코트 폭의 절반 (미터)
+        COURT_LENGTH_HALF = 23.77 / 2  # 테니스 코트 길이의 절반 (미터)
+        BOUNDARY_MARGIN = 5.0  # 코트 경계 밖 허용 마진 (미터)
+        
+        # X축 검증 (코트 폭 방향)
+        if abs(position_3d[0]) > (COURT_WIDTH_HALF + BOUNDARY_MARGIN):
+            x_factor = min((abs(position_3d[0]) - COURT_WIDTH_HALF - BOUNDARY_MARGIN) / BOUNDARY_MARGIN, 1.0)
+            x_confidence = max(0.3, 1.0 - x_factor)
+            confidence_score *= x_confidence
+            logging.warning(f"X-position outside court bounds: {position_3d[0]:.2f}m, confidence reduced to {confidence_score:.2f}")
+            
+            # 극단적인 경우 클램핑 (10m 이상 벗어난 경우)
+            if abs(position_3d[0]) > (COURT_WIDTH_HALF + BOUNDARY_MARGIN * 2):
+                position_3d[0] = np.sign(position_3d[0]) * (COURT_WIDTH_HALF + BOUNDARY_MARGIN)
+                logging.info(f"Clamped extreme X-position to: {position_3d[0]:.2f}m")
+        
+        # Y축 검증 (코트 길이 방향)
+        if abs(position_3d[1]) > (COURT_LENGTH_HALF + BOUNDARY_MARGIN):
+            y_factor = min((abs(position_3d[1]) - COURT_LENGTH_HALF - BOUNDARY_MARGIN) / BOUNDARY_MARGIN, 1.0)
+            y_confidence = max(0.3, 1.0 - y_factor)
+            confidence_score *= y_confidence
+            logging.warning(f"Y-position outside court bounds: {position_3d[1]:.2f}m, confidence reduced to {confidence_score:.2f}")
+            
+            # 극단적인 경우 클램핑 (10m 이상 벗어난 경우)
+            if abs(position_3d[1]) > (COURT_LENGTH_HALF + BOUNDARY_MARGIN * 2):
+                position_3d[1] = np.sign(position_3d[1]) * (COURT_LENGTH_HALF + BOUNDARY_MARGIN)
+                logging.info(f"Clamped extreme Y-position to: {position_3d[1]:.2f}m")
+        
+        # 거리 차이 기반 신뢰도 추가 조정
+        if hasattr(self, 'prev_position_3d') and self.prev_position_3d is not None:
+            # 이전 위치와의 거리 계산
+            distance = np.linalg.norm(position_3d - self.prev_position_3d)
+            
+            # 프레임 간 예상 가능한 최대 거리 계산 (60fps 기준, 최대 속도 50m/s 가정)
+            frame_time = 1.0/60.0  # 기본 프레임 간격
+            if hasattr(self, 'prev_timestamp') and self.prev_timestamp is not None:
+                frame_time = max(0.001, timestamp - self.prev_timestamp)  # 실제 프레임 간격 (너무 작은 값 방지)
+            
+            # 프레임 간 예상 최대 변위 계산 (테니스 공 최대 속도 고려)
+            max_expected_displacement = 50.0 * frame_time  # 50 m/s * 시간
+            
+            # 변위가 예상보다 큰 경우 신뢰도 감소
+            if distance > max_expected_displacement:
+                # 신뢰도 감소 비율 계산
+                displacement_factor = min((distance - max_expected_displacement) / max_expected_displacement, 1.0)
+                displacement_confidence = max(0.2, 1.0 - displacement_factor)
+                confidence_score *= displacement_confidence
+                logging.warning(f"Large displacement detected: {distance:.2f}m in {frame_time:.4f}s, confidence reduced to {confidence_score:.2f}")
+        
+        # 현재 위치와 타임스탬프 저장
+        self.prev_position_3d = position_3d.copy()
+        self.prev_timestamp = timestamp
+        
+        # 위치 및 속도 추정 (칼만 필터 적용)
+        logging.debug(f"Updating Kalman with confidence score: {confidence_score:.2f}")
+        kalman_result = self.kalman.update(position_3d, confidence=confidence_score)
         position_filtered = kalman_result["position"]
         velocity = kalman_result["velocity"]
         

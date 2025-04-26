@@ -158,6 +158,10 @@ class CircleDetector:
             # Apply Gaussian blur to reduce noise
             blurred = cv2.GaussianBlur(roi_img, MORPHOLOGY.kernel_size, 0)
             
+            # 임계값 낮추기 (더 민감하게 원을 검출)
+            original_param2 = settings['param2']
+            settings['param2'] = min(original_param2, 25)  # 기존 임계값과 25 중 더 작은 값 사용
+            
             # Detect circles using Hough Circle Transform
             circles = cv2.HoughCircles(
                 blurred,
@@ -169,6 +173,12 @@ class CircleDetector:
                 minRadius=settings['min_radius'],
                 maxRadius=settings['max_radius']
             )
+            
+            # 결과 로깅
+            if circles is not None:
+                logging.info(f"Detected {len(circles[0])} circles with param2={settings['param2']} (original: {original_param2})")
+            else:
+                logging.debug(f"No circles detected with param2={settings['param2']} (original: {original_param2})")
             
             # Process detected circles
             circles_list = None

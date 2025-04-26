@@ -17,46 +17,109 @@ class Kalman3DService:
     Service class for applying Kalman filtering to 3D ball tracking data.
     """
 
-    def __init__(self, settings: dict = None):
+    def __init__(self, dt: float = 1/60.0, 
+                 process_noise: float = 2.5,
+                 measurement_noise: float = 0.5,
+                 reset_threshold: float = 10.0,
+                 min_updates_required: int = 5):
         """
-        Initialize 3D Kalman filter processor.
+        Initialize 3D Kalman filter for ball tracking.
         
         Args:
-            settings: Dictionary containing Kalman filter settings
+            dt: Time step between frames (seconds)
+            process_noise: Process noise parameter (acceleration variance)
+            measurement_noise: Measurement noise parameter
+            reset_threshold: Distance threshold for filter reset (meters)
+            min_updates_required: Minimum updates before allowing filter reset
         """
-        # Set default values
-        settings = settings or {}
+        self.dt = dt
+        self.process_noise = process_noise
+        self.measurement_noise = measurement_noise
+        self.reset_threshold = reset_threshold
+        self.min_updates_required = min_updates_required
         
-        # Extract settings with defaults
-        self.dt = settings.get("dt", 0.033)  # 30fps by default
-        self.process_noise = settings.get("process_noise", 0.01)
-        self.measurement_noise = settings.get("measurement_noise", 0.1)
-        self.reset_threshold = 10.0  # Maximum distance between measurements (meters)
-        self.velocity_decay = settings.get("velocity_decay", 0.98)
-        self.min_updates_required = 2  # Minimum updates before filter is considered stable
-        self.gravity = settings.get("gravity", 9.81)  # m/s^2
-        self.use_physics_model = settings.get("use_physics_model", True)
+        # 물리 모델 관련 변수 초기화
+        self.use_physics_model = False
+        self.gravity = 9.81
+        self.velocity_decay = 0.99
+        self.max_history_length = 60
+        self.gravity_vector = np.zeros((6, 1), np.float32)
         
-        # State tracking
-        self.kalman = None
+        # State tracking variables
         self.is_initialized = False
         self.update_count = 0
         self.last_state = None
         self.last_pos = None
         self.last_vel = None
-        
-        # Position and velocity history for visualization and analysis
         self.position_history = []
         self.velocity_history = []
-        self.max_history_length = settings.get("max_history_length", 60)  # 2 seconds at 30fps
         
-        # Initialize the Kalman filter
-        self._init_kalman_filter()
+        # Initialize Kalman filter with 6 state variables (x, y, z, vx, vy, vz)
+        # and 3 measurement variables (x, y, z)
+        self.kalman = cv2.KalmanFilter(6, 3, 0, cv2.CV_32F)
         
-        logging.info(f"3D Kalman processor initialized with dt={self.dt}, "
-                    f"process_noise={self.process_noise}, "
-                    f"measurement_noise={self.measurement_noise}, "
-                    f"physics_model={'enabled' if self.use_physics_model else 'disabled'}")
+        # 상태 전이 행렬 설정 (F)
+        # x(k) = x(k-1) + vx(k-1)*dt
+        # y(k) = y(k-1) + vy(k-1)*dt
+        # z(k) = z(k-1) + vz(k-1)*dt
+        # vx(k) = vx(k-1)
+        # vy(k) = vy(k-1)
+        # vz(k) = vz(k-1)
+        self.kalman.transitionMatrix = np.array([
+            [1, 0, 0, dt, 0, 0],
+            [0, 1, 0, 0, dt, 0],
+            [0, 0, 1, 0, 0, dt],
+            [0, 0, 0, 1, 0, 0],
+            [0, 0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 0, 1]
+        ], np.float32)
+        
+        # 측정 행렬 설정 (H)
+        # 위치만 측정 가능, 속도는 측정 불가능
+        self.kalman.measurementMatrix = np.zeros((3, 6), np.float32)
+        self.kalman.measurementMatrix[0, 0] = 1.0  # x
+        self.kalman.measurementMatrix[1, 1] = 1.0  # y
+        self.kalman.measurementMatrix[2, 2] = 1.0  # z
+        
+        # 프로세스 노이즈 공분산 설정 (Q)
+        # 가속도에 의한 위치 및 속도 불확실성을 모델링
+        # 테니스 공의 갑작스러운 속도 변화를 허용하기 위해 값을 조정
+        
+        # 가속도 분산 (더 높은 값은 더 빠른 적응 = 노이지한 추적, 더 낮은 값은 더 부드러운 추적 = 느린 적응)
+        acceleration_variance = self.process_noise
+        
+        # 간소화된 continuous-time model을 사용한 프로세스 노이즈 행렬
+        # Q_continuous를 이산화한 Q = G * G.T * a_var를 직접 사용
+        dt2 = dt**2
+        dt3 = dt**3
+        
+        # 프로세스 노이즈 행렬 구성
+        # 참고: van Loan method와 같은 더 정확한 방법도 있으나, 
+        # 이 단순화된 버전이 실제로 테니스 추적에 충분히 잘 작동함
+        self.kalman.processNoiseCov = np.array([
+            [dt3/3, 0, 0, dt2/2, 0, 0],
+            [0, dt3/3, 0, 0, dt2/2, 0],
+            [0, 0, dt3/3, 0, 0, dt2/2],
+            [dt2/2, 0, 0, dt, 0, 0],
+            [0, dt2/2, 0, 0, dt, 0],
+            [0, 0, dt2/2, 0, 0, dt]
+        ], np.float32) * acceleration_variance
+        
+        # 측정 노이즈 공분산 설정 (R)
+        # 각 위치 좌표(x, y, z)의 측정 노이즈
+        self.kalman.measurementNoiseCov = np.eye(3, dtype=np.float32) * self.measurement_noise
+        
+        # z축(높이)에 대한 노이즈는 추가로 증가 (일반적으로 높이 측정이 더 부정확)
+        self.kalman.measurementNoiseCov[2, 2] *= 1.5
+        
+        # 사후 오차 공분산 초기화 (P_0)
+        # 위치에 대한 낮은 불확실성, 속도에 대한 높은 불확실성으로 시작
+        self.kalman.errorCovPost = np.diag([
+            0.1, 0.1, 0.2,  # 위치 불확실성
+            25.0, 25.0, 25.0  # 속도 불확실성
+        ]).astype(np.float32)
+        
+        logging.debug(f"3D Kalman filter initialized with reset_threshold={self.reset_threshold}m and min_updates={self.min_updates_required}")
 
     def update_params(self, settings: dict) -> None:
         """
@@ -174,46 +237,92 @@ class Kalman3DService:
         
         logging.debug(f"3D Kalman filter initialized with reset_threshold={self.reset_threshold}m and min_updates={self.min_updates_required}")
 
-    def set_initial_state(self, position: np.ndarray, velocity: np.ndarray = None) -> None:
+    def set_initial_state(self, position: np.ndarray):
         """
-        Set the initial state of the Kalman filter.
+        Initialize the Kalman filter state with a given position.
         
         Args:
             position: Initial 3D position [x, y, z]
-            velocity: Initial 3D velocity [vx, vy, vz] (default: [0,0,0])
         """
-        try:
-            if velocity is None:
-                velocity = np.zeros(3, dtype=np.float32)
-            
-            # Ensure position is a numpy array
-            position = np.array(position, dtype=np.float32)
-            velocity = np.array(velocity, dtype=np.float32)
-            
-            # Validate input dimensions
-            if position.shape != (3,) or velocity.shape != (3,):
-                logging.error(f"Invalid dimensions: position {position.shape}, velocity {velocity.shape}")
-                return
-                
-            # Set initial state [x, y, z, vx, vy, vz]
-            initial_state = np.concatenate([position, velocity]).reshape(6, 1)
-            self.kalman.statePost = initial_state
-            
-            # Update tracking variables
-            self.last_state = initial_state
-            self.last_pos = position
-            self.last_vel = velocity
-            self.is_initialized = True
-            self.update_count = 1
-            
-            # Add to history
-            self.position_history = [position.copy()]
-            self.velocity_history = [velocity.copy()]
-            
-            logging.info(f"Set initial 3D Kalman state: pos=({position[0]:.2f}, {position[1]:.2f}, {position[2]:.2f}), "
-                        f"vel=({velocity[0]:.2f}, {velocity[1]:.2f}, {velocity[2]:.2f})")
-        except Exception as e:
-            logging.error(f"Error setting initial 3D Kalman state: {e}")
+        self.is_initialized = True
+        self.update_count = 1
+        
+        # 유효성 검사: 높이(z)값이 현실적인지 확인
+        MAX_VALID_HEIGHT = 3.5  # 최대 유효 높이 (미터)
+        if position[2] > MAX_VALID_HEIGHT:
+            logging.warning(f"Initial height too high: {position[2]:.2f}m. Clamping to {MAX_VALID_HEIGHT}m.")
+            position[2] = MAX_VALID_HEIGHT
+        elif position[2] < 0.0:
+            logging.warning(f"Negative initial height: {position[2]:.2f}m. Setting to 0.0m.")
+            position[2] = 0.0
+        
+        # 역사 초기화 또는 재설정
+        self.position_history = [position.copy()]
+        
+        # 이전 상태 값이 있는 경우, 초기 속도 추정
+        initial_velocity = np.zeros(3, dtype=np.float32)
+        if self.last_pos is not None and self.position_history and len(self.position_history) > 1:
+            # 위치 기록이 있으면 마지막 두 위치로부터 속도 추정
+            try:
+                # 이전 마지막 위치와 현재 위치 사이의 거리를 프레임 간격으로 나누어 속도 추정
+                last_positions = self.position_history[-min(5, len(self.position_history)):]
+                if len(last_positions) >= 2:
+                    avg_displacement = np.zeros(3)
+                    count = 0
+                    
+                    # 마지막 몇 프레임의 평균 변위 계산
+                    for i in range(1, len(last_positions)):
+                        displacement = last_positions[i] - last_positions[i-1]
+                        distance = np.linalg.norm(displacement)
+                        
+                        # 합리적인 변위만 포함 (점프나 이상치 제외)
+                        if distance < 2.0:  # 2m/frame 이하만 고려
+                            avg_displacement += displacement
+                            count += 1
+                    
+                    if count > 0:
+                        # 초당 프레임 수로 나누어 미터/초 속도로 변환
+                        initial_velocity = (avg_displacement / count) / self.dt
+                        logging.info(f"Estimated initial velocity: {initial_velocity}")
+                        
+                        # 속도 크기 제한 (너무 빠른 초기 속도 방지)
+                        speed = np.linalg.norm(initial_velocity)
+                        if speed > 30.0:  # 30 m/s (108 km/h) 이상은 제한
+                            logging.warning(f"Initial speed too high: {speed:.2f} m/s. Scaling down.")
+                            initial_velocity = initial_velocity * (30.0 / speed)
+            except Exception as e:
+                logging.warning(f"Error estimating initial velocity: {e}")
+                initial_velocity = np.zeros(3, dtype=np.float32)
+        
+        self.velocity_history = [initial_velocity.copy()]
+        
+        # Initialize state with position and velocity (position[0:3], velocity[3:6])
+        state = np.zeros(6, dtype=np.float32)
+        state[0:3] = position
+        state[3:6] = initial_velocity
+        
+        # 상태 설정
+        self.kalman.statePost = state.reshape(6, 1)
+        
+        # 초기 상태 불확실성 설정 - 위치는 낮은 불확실성, 속도는 높은 불확실성
+        self.kalman.errorCovPost = np.diag([
+            0.1, 0.1, 0.2,  # 낮은 위치 불확실성
+            25.0, 25.0, 25.0  # 높은 속도 불확실성
+        ]).astype(np.float32)
+        
+        # 측정 노이즈 및 프로세스 노이즈 업데이트 (재초기화시 필요할 수 있음)
+        self.kalman.measurementNoiseCov = np.eye(3, dtype=np.float32) * self.measurement_noise
+        
+        # 위치만 측정되므로 측정 행렬은 첫 3개 상태만 연결
+        self.kalman.measurementMatrix = np.zeros((3, 6), np.float32)
+        self.kalman.measurementMatrix[0, 0] = 1.0
+        self.kalman.measurementMatrix[1, 1] = 1.0
+        self.kalman.measurementMatrix[2, 2] = 1.0
+        
+        # 현재 상태 저장
+        self.last_state = self.kalman.statePost.copy()
+        self.last_pos = position.copy()
+        self.last_vel = initial_velocity.copy()
 
     def predict(self, dt: float = None) -> Dict[str, np.ndarray]:
         """
@@ -271,106 +380,131 @@ class Kalman3DService:
             "state": state_predicted.flatten()
         }
 
-    def update(self, position: np.ndarray) -> Dict[str, np.ndarray]:
+    def update(self, position: np.ndarray, confidence: float = 1.0) -> dict:
         """
         Update the Kalman filter with a new position measurement.
         
         Args:
-            position: Measured 3D position [x, y, z]
-            
+            position: 3D position measurement [x, y, z]
+            confidence: Confidence score of the measurement (0.0-1.0)
+                        Lower values increase measurement noise
+        
         Returns:
-            Dictionary with updated position, velocity and state
+            dict: Dictionary containing filtered position and velocity
         """
+        position = np.array(position, dtype=np.float32)
+        
+        # Ensure position has correct shape
+        if position.shape != (3,):
+            position = position.flatten()[:3]
+            
+        # 로깅용으로 원래 측정값 저장
+        original_position = position.copy()
+            
+        # First measurement - initialize filter
         if not self.is_initialized:
-            # Initialize with the first measurement
             self.set_initial_state(position)
             return {
                 "position": position,
-                "velocity": np.zeros(3),
-                "state": np.concatenate([position, np.zeros(3)])
+                "velocity": np.zeros(3, dtype=np.float32),
+                "is_reliable": True,
+                "measurement": position.copy(),
+                "confidence": confidence
             }
             
-        try:
-            # Convert to numpy array
-            position = np.array(position, dtype=np.float32)
+        self.update_count += 1
             
-            # Check for valid measurement
-            if not np.all(np.isfinite(position)):
-                logging.warning(f"Invalid measurement with non-finite values: {position}")
-                return {
-                    "position": self.last_pos,
-                    "velocity": self.last_vel,
-                    "state": self.last_state.flatten() if self.last_state is not None else np.zeros(6)
-                }
-                
-            # Check if measurement is too far from prediction (possible outlier)
-            if self.last_pos is not None:
-                distance = np.linalg.norm(position - self.last_pos)
-                # 적응형 거리 계산 - 업데이트 횟수에 따라 더 관대하게 조정
-                adaptive_threshold = self.reset_threshold
-                if self.update_count > 10:
-                    adaptive_threshold *= 1.2  # 업데이트가 많을수록 더 관대하게
-                
-                logging.debug(f"Distance from previous position: {distance:.2f}m (threshold: {adaptive_threshold:.2f}m)")
-                
-                if distance > adaptive_threshold:
-                    logging.warning(f"Measurement too far from prediction: {distance:.2f}m > {adaptive_threshold:.2f}m")
+        # 측정 거리가 임계값을 초과하는지 확인 (필터 재설정 조건)
+        too_far = False
+        distance = 0.0
+        
+        # 이전 위치가 있으면 거리 계산
+        if self.last_pos is not None:
+            distance = np.linalg.norm(position - self.last_pos)
+            logging.debug(f"Distance from last position: {distance:.2f}m")
+            
+            # 충분한 업데이트 후에만 거리 기반 검사 적용
+            if self.update_count > self.min_updates_required:
+                # 전체 재설정 대신 거리 기반 신뢰도 조정
+                if distance > self.reset_threshold:
+                    too_far = True
+                    logging.warning(f"Large distance detected: {distance:.2f}m > {self.reset_threshold:.2f}m threshold")
                     
-                    # If multiple consecutive large jumps, reinitialize the filter
-                    if self.update_count > self.min_updates_required:
-                        logging.info("Continuing with existing filter despite distance")
-                    else:
-                        logging.info("Reinitializing filter with new position")
-                        self.set_initial_state(position)
-                        return {
-                            "position": position,
-                            "velocity": np.zeros(3),
-                            "state": np.concatenate([position, np.zeros(3)])
-                        }
-            
-            # Reshape measurement for OpenCV Kalman
-            measurement = position.reshape(3, 1).astype(np.float32)
-            
-            # Perform the measurement update
-            state_updated = self.kalman.correct(measurement)
-            
-            # Extract position and velocity
-            updated_position = state_updated[:3].flatten()
-            updated_velocity = state_updated[3:].flatten()
-            
-            # Store the updated state
-            self.last_state = state_updated
-            self.last_pos = updated_position
-            self.last_vel = updated_velocity
-            
-            # Update counter and history
-            self.update_count += 1
-            
-            # Add to history, maintaining max length
-            self.position_history.append(updated_position.copy())
-            self.velocity_history.append(updated_velocity.copy())
-            
-            if len(self.position_history) > self.max_history_length:
-                self.position_history.pop(0)
-                self.velocity_history.pop(0)
+                    # 거리에 따라 신뢰도 감소
+                    # 거리가 threshold의 2배 이상이면 신뢰도를 0에 가깝게
+                    distance_factor = min(distance / self.reset_threshold, 2.0)
+                    confidence_scaling = max(0.05, 1.0 - (distance_factor - 1.0))
+                    confidence *= confidence_scaling
+                    
+                    logging.info(f"Reduced confidence to {confidence:.2f} due to large displacement")
                 
-            logging.debug(f"Updated Kalman with measurement: meas=({position[0]:.2f}, {position[1]:.2f}, {position[2]:.2f}), "
-                         f"est=({updated_position[0]:.2f}, {updated_position[1]:.2f}, {updated_position[2]:.2f}), "
-                         f"vel=({updated_velocity[0]:.2f}, {updated_velocity[1]:.2f}, {updated_velocity[2]:.2f})")
-                
-            return {
-                "position": updated_position,
-                "velocity": updated_velocity,
-                "state": state_updated.flatten()
-            }
+                # 신뢰도가 매우 낮으면 재초기화 고려
+                if confidence < 0.1:
+                    logging.warning("Very low confidence measurement, resetting filter")
+                    self.set_initial_state(position)
+                    return {
+                        "position": position,
+                        "velocity": np.zeros(3, dtype=np.float32),
+                        "is_reliable": False,
+                        "measurement": position.copy(),
+                        "reset": True,
+                        "confidence": confidence
+                    }
+        
+        # Adjust measurement noise based on confidence
+        # 낮은 신뢰도는 높은 측정 노이즈를 의미 (측정을 덜 신뢰)
+        if confidence < 1.0:
+            # 기본 노이즈에 신뢰도 반비례 가중치 적용
+            adjusted_noise = self.measurement_noise / confidence
+            original_noise = self.kalman.measurementNoiseCov.copy()
             
-        except Exception as e:
-            logging.error(f"Error updating 3D Kalman: {e}")
-            return {
-                "position": self.last_pos if self.last_pos is not None else np.zeros(3),
-                "velocity": self.last_vel if self.last_vel is not None else np.zeros(3),
-                "state": self.last_state.flatten() if self.last_state is not None else np.zeros(6)
-            }
+            # 측정 노이즈 공분산 임시 조정
+            self.kalman.measurementNoiseCov = np.eye(3, dtype=np.float32) * adjusted_noise
+            # Z축(높이)에 더 높은 노이즈 적용
+            self.kalman.measurementNoiseCov[2, 2] *= 1.5
+            
+            logging.debug(f"Adjusted measurement noise to {adjusted_noise:.2f} (confidence: {confidence:.2f})")
+        
+        # Prediction step
+        predicted_state = self.kalman.predict()
+        
+        # 측정 업데이트 수행
+        measurement = np.array(position, dtype=np.float32).reshape(3, 1)
+        corrected_state = self.kalman.correct(measurement)
+        
+        # 측정 노이즈 원래대로 복원 (신뢰도로 조정했던 경우)
+        if confidence < 1.0:
+            self.kalman.measurementNoiseCov = original_noise
+        
+        # Extract position and velocity from state
+        filtered_position = corrected_state[:3].flatten()
+        filtered_velocity = corrected_state[3:6].flatten()
+        
+        # 현재 상태 저장
+        self.last_state = corrected_state.copy()
+        self.last_pos = filtered_position.copy()
+        self.last_vel = filtered_velocity.copy()
+        
+        # 기록 저장 (시각화 및 분석용)
+        self.position_history.append(filtered_position.copy())
+        self.velocity_history.append(filtered_velocity.copy())
+        
+        # 역사 길이 제한
+        max_history = 120  # 2초 (60fps 기준)
+        if len(self.position_history) > max_history:
+            self.position_history.pop(0)
+        if len(self.velocity_history) > max_history:
+            self.velocity_history.pop(0)
+            
+        # 결과 반환
+        return {
+            "position": filtered_position,
+            "velocity": filtered_velocity,
+            "is_reliable": not too_far,
+            "measurement": original_position,
+            "confidence": confidence,
+            "distance": distance
+        }
 
     def get_position_history(self) -> List[np.ndarray]:
         """
