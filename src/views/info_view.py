@@ -101,7 +101,7 @@ class InfoView(QWidget):
         right_pixel_group.setLayout(right_pixel_layout)
         
         # 3D position coordinates group
-        position_group = QGroupBox("3D Court Position")
+        position_group = QGroupBox("3D Ball World Coordinate")
         position_layout = QFormLayout()
         self.position_x_label = QLabel("0.000")
         self.position_y_label = QLabel("0.000")
@@ -308,8 +308,8 @@ class InfoView(QWidget):
         if analyzer:
             self.game_analyzer = analyzer
             
-            # Connect to court position updates (x, y, z in court coordinate system)
-            analyzer.court_position_updated.connect(self._on_court_position_updated)
+            # Connect to world position updates (x, y, z in world coordinate system)
+            analyzer.court_position_updated.connect(self._on_world_position_updated)
             
             # Connect to in/out signal for the LED indicator
             analyzer.in_out_detected.connect(self.in_out_led.on_in_out)
@@ -368,7 +368,7 @@ class InfoView(QWidget):
             self.set_right_pixel_coords(0, 0, 0)
         
         # We don't update 3D position from BallTrackingController anymore
-        # This is now handled by the GameAnalyzer's court_position_updated signal
+        # This is now handled by the GameAnalyzer's world_position_updated signal
         
         # Log with proper type information
         left_type = type(left_coords).__name__ if left_coords is not None else "None"
@@ -397,17 +397,17 @@ class InfoView(QWidget):
             
         logging.debug(f"ROI info updated: left={left_roi}, right={right_roi}")
     
-    def _on_court_position_updated(self, x, y, z):
+    def _on_world_position_updated(self, x, y, z):
         """
-        Handle court position update signal from game analyzer.
+        Handle world position update signal from game analyzer.
         
         Args:
-            x (float): X coordinate in court space
-            y (float): Y coordinate in court space
-            z (float): Z coordinate in court space
+            x (float): X coordinate in world space
+            y (float): Y coordinate in world space
+            z (float): Z coordinate in world space
         """
         self.set_position_coords(x, y, z)
-        logging.debug(f"Court position updated: ({x:.3f}, {y:.3f}, {z:.3f})")
+        logging.debug(f"World position updated: ({x:.3f}, {y:.3f}, {z:.3f})")
     
     def _on_kalman_predicted(self, camera, x, y, vx, vy):
         """

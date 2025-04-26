@@ -214,8 +214,9 @@ class CalibrationController(QObject):
         progress_dialog.setWindowTitle("Fine-Tuning in Progress")
         progress_dialog.setText("Fine-tuning calibration points...\nPlease wait.")
         progress_dialog.setStandardButtons(QMessageBox.NoButton)
+        progress_dialog.setModal(True)  # 모달 대화 상자로 설정
         progress_dialog.show()
-        QApplication.processEvents()
+        QApplication.processEvents()  # 즉시 UI 업데이트
         
         try:
             # Each point processing code for left and right sides
@@ -260,6 +261,9 @@ class CalibrationController(QObject):
             
             logger.info(f"Fine-tuning complete. Adjusted {adjusted_count} points.")
             
+            # 메시지 박스 표시 전에 남아있는 이벤트를 처리하고 진행 대화 상자가 완전히 사라졌는지 확인
+            QApplication.processEvents()
+            
             # Show success message
             QMessageBox.information(
                 self.view,
@@ -269,13 +273,18 @@ class CalibrationController(QObject):
         except Exception as e:
             # Close progress dialog and refresh UI in case of error
             progress_dialog.close()
-            QApplication.processEvents()
+            progress_dialog.deleteLater()  # 메모리 해제
+            QApplication.processEvents()  # 즉시 UI 업데이트
             
             # Hide ROI
             self.view.hide_roi('left')
             self.view.hide_roi('right')
             
             logger.error(f"Error during fine-tuning: {e}")
+            
+            # 오류 메시지 표시 전에 추가적인 이벤트 처리
+            QApplication.processEvents()
+            
             QMessageBox.critical(
                 self.view,
                 "Fine Tuning Error",
@@ -284,11 +293,13 @@ class CalibrationController(QObject):
         finally:
             # Ensure dialog is closed in all circumstances
             if progress_dialog.isVisible():
+                # 진행 대화 상자를 완전히 닫고 메모리에서 해제
                 progress_dialog.close()
-                QApplication.processEvents()
+                progress_dialog.deleteLater()  # 메모리 해제 추가
+                QApplication.processEvents()  # 즉시 UI 이벤트 처리
             
-            # Force additional event processing to ensure dialog is completely removed
-            QTimer.singleShot(100, lambda: QApplication.processEvents())
+            # 추가적인 안전 장치: 타이머를 사용하여 약간의 지연 후 한 번 더 이벤트 처리
+            QTimer.singleShot(300, QApplication.processEvents)  # 시간 증가 및 람다 제거
     
     @Slot()
     def on_save_to_config(self):

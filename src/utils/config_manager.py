@@ -77,8 +77,8 @@ class ConfigManager:
                 "camera_rotation_z": 180.0,
                 "focal_length_mm": 50.0,
                 "baseline_m": 1.0,
-                "sensor_width": 36.0,
-                "sensor_height": 24.0,
+                "sensor_width_mm": 36.0,
+                "sensor_height_mm": 24.0,
                 "principal_point_x": 320.0,
                 "principal_point_y": 240.0
             },
@@ -108,6 +108,26 @@ class ConfigManager:
         
         # Load configuration from file if it exists
         self.load_config()
+        
+        # 이전 버전과의 호환성을 위한 필드 이름 업데이트
+        self._update_legacy_field_names()
+    
+    def _update_legacy_field_names(self):
+        """기존의 sensor_width, sensor_height 필드를 sensor_width_mm, sensor_height_mm로 업데이트"""
+        camera_settings = self.get_camera_settings()
+        
+        # sensor_width가 있고 sensor_width_mm가 없는 경우
+        if "sensor_width" in camera_settings and "sensor_width_mm" not in camera_settings:
+            camera_settings["sensor_width_mm"] = camera_settings["sensor_width"]
+            logging.info("Legacy field 'sensor_width' updated to 'sensor_width_mm'")
+        
+        # sensor_height가 있고 sensor_height_mm가 없는 경우
+        if "sensor_height" in camera_settings and "sensor_height_mm" not in camera_settings:
+            camera_settings["sensor_height_mm"] = camera_settings["sensor_height"]
+            logging.info("Legacy field 'sensor_height' updated to 'sensor_height_mm'")
+        
+        # 업데이트된 설정 저장
+        self.set_camera_settings(camera_settings)
     
     def load_config(self):
         """

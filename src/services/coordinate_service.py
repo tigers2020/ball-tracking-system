@@ -158,15 +158,19 @@ class CoordinateService(QObject):
             # Apply camera height offset
             p_world[2] -= self.camera_height
             
-            # Convert to tuple
-            x, y, z = float(p_world[0]), float(p_world[1]), float(p_world[2])
+            # 축 맵핑 수정: 원래 좌표계 유지 (y/z 맵핑 오류 수정)
+            # 기존: court_x = world_y, court_y = world_z, court_z = world_x (잘못된 매핑)
+            # 수정: court_x = world_x, court_y = world_y, court_z = world_z (올바른 매핑)
+            court_x = float(p_world[0])  # x축은 그대로
+            court_y = float(p_world[1])  # y축은 그대로 (깊이)
+            court_z = float(p_world[2])  # z축은 그대로 (높이)
             
             # Log the coordinate transformation
             logging.debug(f"Coordinate transformation: world ({position_3d[0]:.2f}, {position_3d[1]:.2f}, {position_3d[2]:.2f}) → "
-                        f"court ({x:.2f}, {y:.2f}, {z:.2f})")
+                        f"court ({court_x:.2f}, {court_y:.2f}, {court_z:.2f})")
             
             # Return the court coordinates as a tuple
-            return x, y, z
+            return court_x, court_y, court_z
             
         except (TypeError, IndexError) as e:
             logging.error(f"Error in world_to_court transformation: {e}")

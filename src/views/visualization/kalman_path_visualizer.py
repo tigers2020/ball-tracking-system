@@ -108,7 +108,8 @@ class KalmanPathVisualizer:
                 future_pos,
                 arrow_color=(255, 0, 255),  # Magenta
                 thickness=2,
-                draw_uncertainty=True
+                draw_uncertainty=True,
+                world_pos=self.controller.current_position_3d  # 3D 좌표 전달
             )
         
         if right_output is not None and self.right_predictions:
@@ -123,7 +124,8 @@ class KalmanPathVisualizer:
                 future_pos,
                 arrow_color=(255, 0, 255),  # Magenta
                 thickness=2,
-                draw_uncertainty=True
+                draw_uncertainty=True,
+                world_pos=self.controller.current_position_3d  # 3D 좌표 전달
             )
         
         return left_output, right_output 
