@@ -4,6 +4,9 @@
 """
 Triangulation Service module.
 This module provides functionality for 3D triangulation from stereo camera views.
+
+[DEPRECATED] This is legacy code that will be removed in future versions.
+Please use the new coordinate transformation system instead.
 """
 
 import numpy as np
@@ -18,10 +21,15 @@ from src.utils.geometry_utils import (
     transform_to_world
 )
 
+# Add legacy warning logger
+logger = logging.getLogger(__name__)
+
 class TriangulationService:
     """
     Stereo triangulation service using pinhole camera model.
     Converts stereo image coordinates to 3D world coordinates.
+    
+    [DEPRECATED] This is legacy code that will be removed in future versions.
     """
 
     def __init__(self, cam_cfg: Dict[str, Any] = None):
@@ -31,6 +39,9 @@ class TriangulationService:
         Args:
             cam_cfg: Dictionary containing camera parameters
         """
+        # Log deprecation warning
+        logger.warning("TriangulationService is deprecated and will be removed in future versions")
+        
         self.is_calibrated = False
         self.use_pnp = False
         self.pnp_calibrated = False

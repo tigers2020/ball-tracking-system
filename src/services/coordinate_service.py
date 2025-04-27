@@ -3,7 +3,10 @@
 
 """
 Coordinate Service module.
-This module provides unified coordinate transformation and validation services.
+This module provides functionality for coordinate transformations between camera and world space.
+
+[DEPRECATED] This is legacy code that will be removed in future versions.
+Please use the new coordinate transformation system instead.
 """
 
 import logging
@@ -14,11 +17,14 @@ from PySide6.QtCore import QObject, Signal
 from src.utils.constants import ANALYSIS, COURT, STEREO
 from src.utils.config_manager import ConfigManager
 
+# Add legacy warning logger
+logger = logging.getLogger(__name__)
 
 class CoordinateService(QObject):
     """
-    Service for handling coordinate transformations and validations.
-    Provides a unified coordinate system for the entire application.
+    Service for transforming coordinates between different reference frames.
+    
+    [DEPRECATED] This is legacy code that will be removed in future versions.
     """
     
     # Signal for notifying position updates in court coordinate system
@@ -29,8 +35,11 @@ class CoordinateService(QObject):
         Initialize the coordinate service.
         
         Args:
-            config_manager (ConfigManager, optional): Configuration manager instance
+            config_manager: ConfigManager instance for loading/saving settings
         """
+        # Log deprecation warning
+        logger.warning("CoordinateService is deprecated and will be removed in future versions")
+        
         super(CoordinateService, self).__init__()
         
         # Store config manager reference

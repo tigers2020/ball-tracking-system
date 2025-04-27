@@ -5,12 +5,18 @@
 Triangulation module.
 This module contains the Triangulation class, which is used to calculate
 3D coordinates from stereo image points.
+
+[DEPRECATED] This is legacy code that will be removed in future versions.
+Please use the triangulation_point/triangulate_points functions from geometry_utils instead.
 """
 
 import numpy as np
 import cv2
+import logging
 from typing import Tuple, Optional
 
+# Add legacy warning logger
+logger = logging.getLogger(__name__)
 
 class Triangulation:
     """
@@ -18,10 +24,15 @@ class Triangulation:
     
     This class calculates 3D coordinates from stereo image points using
     the Direct Linear Transform (DLT) method.
+    
+    [DEPRECATED] This is legacy code that will be removed in future versions.
     """
     
     def __init__(self):
         """Initialize the triangulation object."""
+        # Log deprecation warning
+        logger.warning("Triangulation class is deprecated and will be removed in future versions")
+        
         # Camera matrices
         self.projection_matrix_left = None
         self.projection_matrix_right = None

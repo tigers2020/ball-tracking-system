@@ -2,37 +2,56 @@
 # -*- coding: utf-8 -*-
 
 """
-Coordinate transformation for tennis ball tracking.
+Coordinate Transformer module.
+This module provides functionality for transforming between image and world coordinates.
+
+[DEPRECATED] This is legacy code that will be removed in future versions.
+Please use the new coordinate transformation system instead.
 """
 
 import numpy as np
 import cv2
+import logging
 from typing import Tuple, List, Optional, Dict, Any
 
+# Add legacy warning logger
+logger = logging.getLogger(__name__)
 
-class CoordinateTransformer:
+class SingleViewCoordinateTransformer:
     """
-    Transform between camera coordinates and world coordinates.
-    The world coordinate system has Z=0 as the tennis court plane.
+    Transform between image and world coordinates for a single camera view.
+    
+    [DEPRECATED] This is legacy code that will be removed in future versions.
     """
     
-    def __init__(
-        self,
-        rotation_matrix: Optional[np.ndarray] = None,
-        translation_vector: Optional[np.ndarray] = None,
-        camera_matrix: Optional[np.ndarray] = None
-    ):
+    def __init__(self, 
+                 camera_matrix: np.ndarray, 
+                 rotation_vector: np.ndarray, 
+                 translation_vector: np.ndarray,
+                 distortion_coeffs: Optional[np.ndarray] = None):
         """
         Initialize the coordinate transformer.
         
         Args:
-            rotation_matrix: 3x3 rotation matrix from world to camera
-            translation_vector: 3x1 translation vector from world to camera
-            camera_matrix: 3x3 camera intrinsic matrix
+            camera_matrix: Camera intrinsic matrix (3x3)
+            rotation_vector: Camera rotation vector (3,) in Rodrigues form
+            translation_vector: Camera translation vector (3,)
+            distortion_coeffs: Camera distortion coefficients
         """
-        self.R = rotation_matrix
-        self.t = translation_vector
+        # Log deprecation warning
+        logger.warning("SingleViewCoordinateTransformer is deprecated and will be removed in future versions")
+        
         self.camera_matrix = camera_matrix
+        self.rotation_vector = rotation_vector
+        self.translation_vector = translation_vector
+        self.distortion_coeffs = distortion_coeffs if distortion_coeffs is not None else np.zeros(5)
+        
+        # Convert rotation vector to matrix
+        self.rotation_matrix, _ = cv2.Rodrigues(rotation_vector)
+        
+        # Cache the inverse matrices
+        self.inv_camera_matrix = np.linalg.inv(camera_matrix)
+        self.inv_rotation_matrix = np.linalg.inv(self.rotation_matrix)
         
         # Homography from image to world (calculated when calibrated)
         self.H_image_to_world = None
@@ -48,8 +67,8 @@ class CoordinateTransformer:
             rotation_matrix: 3x3 rotation matrix from world to camera
             translation_vector: 3x1 translation vector from world to camera
         """
-        self.R = rotation_matrix
-        self.t = translation_vector
+        self.rotation_matrix = rotation_matrix
+        self.translation_vector = translation_vector
         
     def set_intrinsic_parameters(self, camera_matrix: np.ndarray):
         """
@@ -92,7 +111,7 @@ class CoordinateTransformer:
         if self.camera_matrix is not None:
             # Use PnP to get better extrinsic parameters
             world_points_3d = np.array(world_points, dtype=np.float32)
-            _, self.R, self.t = cv2.solvePnP(
+            _, self.rotation_matrix, self.translation_vector = cv2.solvePnP(
                 world_points_3d, 
                 image_points, 
                 self.camera_matrix, 
@@ -100,7 +119,7 @@ class CoordinateTransformer:
                 flags=cv2.SOLVEPNP_ITERATIVE
             )
             # Convert rotation vector to rotation matrix
-            self.R, _ = cv2.Rodrigues(self.R)
+            self.rotation_matrix, _ = cv2.Rodrigues(self.rotation_matrix)
             
         return True
     
@@ -114,12 +133,12 @@ class CoordinateTransformer:
         Returns:
             3D point in world coordinates [X, Y, Z]
         """
-        if self.R is None or self.t is None:
+        if self.rotation_matrix is None or self.translation_vector is None:
             raise ValueError("Camera extrinsic parameters not set. Call calibrate_from_court_corners first.")
         
         # p_world = R^T * (p_camera - t)
         camera_point = np.array(camera_point).reshape(3, 1)
-        world_point = np.dot(self.R.T, camera_point - self.t)
+        world_point = np.dot(self.rotation_matrix.T, camera_point - self.translation_vector)
         
         return world_point.flatten()
     
@@ -133,12 +152,12 @@ class CoordinateTransformer:
         Returns:
             3D point in camera coordinates [x, y, z]
         """
-        if self.R is None or self.t is None:
+        if self.rotation_matrix is None or self.translation_vector is None:
             raise ValueError("Camera extrinsic parameters not set. Call calibrate_from_court_corners first.")
         
         # p_camera = R * p_world + t
         world_point = np.array(world_point).reshape(3, 1)
-        camera_point = np.dot(self.R, world_point) + self.t
+        camera_point = np.dot(self.rotation_matrix, world_point) + self.translation_vector
         
         return camera_point.flatten()
     
@@ -288,7 +307,7 @@ class CoordinateTransformer:
         Returns:
             Tuple of (ray_origin, ray_direction) in world coordinates
         """
-        if self.R is None or self.t is None or self.camera_matrix is None:
+        if self.rotation_matrix is None or self.translation_vector is None or self.camera_matrix is None:
             raise ValueError("Camera parameters not set")
         
         # Get ray in camera coordinates
@@ -298,7 +317,7 @@ class CoordinateTransformer:
         camera_center_world = self.camera_to_world(np.zeros(3))
         
         # Transform ray direction to world coordinates
-        ray_world = np.dot(self.R.T, ray_camera.reshape(3, 1)).flatten()
+        ray_world = np.dot(self.rotation_matrix.T, ray_camera.reshape(3, 1)).flatten()
         ray_world = ray_world / np.linalg.norm(ray_world)
         
         return camera_center_world, ray_world
@@ -439,9 +458,9 @@ class MultiViewCoordinateTransformer:
     
     def __init__(self):
         """Initialize the multi-view transformer with empty camera list."""
-        self.camera_transformers: Dict[str, CoordinateTransformer] = {}
+        self.camera_transformers: Dict[str, SingleViewCoordinateTransformer] = {}
         
-    def add_camera(self, camera_id: str, transformer: CoordinateTransformer):
+    def add_camera(self, camera_id: str, transformer: SingleViewCoordinateTransformer):
         """
         Add a camera to the multi-view system.
         
