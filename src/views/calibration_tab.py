@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from src.utils.ui_constants import Layout, WindowSize
 from src.utils.ui_theme import Colors, StyleManager
+from src.views.visualization import VisualizerFactory
 
 logger = logging.getLogger(__name__)
 
@@ -362,32 +363,51 @@ class CalibrationTab(QWidget):
             center (Tuple[float, float]): Center coordinates (x, y)
             radius (float): ROI radius
         """
-        x, y = center
-        rect = QRectF(x - radius, y - radius, radius * 2, radius * 2)
+        from src.views.visualization import VisualizerFactory
         
-        # Create a semi-transparent rectangle
-        color = QColor(Colors.ACCENT)
-        color.setAlpha(64)  # 25% opacity
+        # Calculate ROI coordinates
+        x, y = center
+        roi = (x - radius, y - radius, radius * 2, radius * 2)
         
         # Remove existing overlay if any
         if side == 'left':
             if self.left_roi_overlay:
                 self.left_scene.removeItem(self.left_roi_overlay)
+                self.left_roi_overlay = None
             
-            self.left_roi_overlay = QGraphicsRectItem(rect)
-            self.left_roi_overlay.setPen(QPen(Colors.ACCENT, 1))
-            self.left_roi_overlay.setBrush(QBrush(color))
-            self.left_roi_overlay.setZValue(0.5)  # Between image and points
-            self.left_scene.addItem(self.left_roi_overlay)
+            # Create visualizer and draw ROI
+            visualizer = VisualizerFactory.create(backend="qt", scene=self.left_scene)
+            self.left_scene = visualizer.draw_roi(
+                self.left_scene, 
+                roi, 
+                color=Colors.ACCENT, 
+                show_center=True
+            )
+            
+            # Find and store the created ROI item
+            for item in self.left_scene.items():
+                if isinstance(item, QGraphicsRectItem) and item != self.left_roi_overlay:
+                    self.left_roi_overlay = item
+                    break
         elif side == 'right':
             if self.right_roi_overlay:
                 self.right_scene.removeItem(self.right_roi_overlay)
+                self.right_roi_overlay = None
             
-            self.right_roi_overlay = QGraphicsRectItem(rect)
-            self.right_roi_overlay.setPen(QPen(Colors.ACCENT, 1))
-            self.right_roi_overlay.setBrush(QBrush(color))
-            self.right_roi_overlay.setZValue(0.5)  # Between image and points
-            self.right_scene.addItem(self.right_roi_overlay)
+            # Create visualizer and draw ROI
+            visualizer = VisualizerFactory.create(backend="qt", scene=self.right_scene)
+            self.right_scene = visualizer.draw_roi(
+                self.right_scene, 
+                roi, 
+                color=Colors.ACCENT, 
+                show_center=True
+            )
+            
+            # Find and store the created ROI item
+            for item in self.right_scene.items():
+                if isinstance(item, QGraphicsRectItem) and item != self.right_roi_overlay:
+                    self.right_roi_overlay = item
+                    break
     
     def hide_roi(self, side: str):
         """
@@ -413,69 +433,52 @@ class CalibrationTab(QWidget):
             rows (int): Number of rows in the grid
             cols (int): Number of columns in the grid
         """
+        from src.views.visualization import VisualizerFactory
+        
         # Clear existing grid lines for this side
         if side == 'left':
             for line in self.left_grid_lines:
                 self.left_scene.removeItem(line)
             self.left_grid_lines.clear()
+            scene = self.left_scene
         else:
             for line in self.right_grid_lines:
                 self.right_scene.removeItem(line)
             self.right_grid_lines.clear()
+            scene = self.right_scene
         
-        # Create path for horizontal lines
-        for row in range(rows):
-            path = QPainterPath()
-            for col in range(cols):
-                idx = row * cols + col
-                if idx >= len(points):
-                    break
-                
-                x, y = points[idx]
-                if col == 0:
-                    path.moveTo(x, y)
-                else:
-                    path.lineTo(x, y)
-            
-            # Create path item
-            path_item = QGraphicsPathItem(path)
-            path_item.setPen(QPen(Colors.WARNING, 1, Qt.DashLine))
-            path_item.setZValue(0.75)  # Between ROI overlay and points
-            
-            # Add to scene and store reference
-            if side == 'left':
-                self.left_scene.addItem(path_item)
-                self.left_grid_lines.append(path_item)
-            else:
-                self.right_scene.addItem(path_item)
-                self.right_grid_lines.append(path_item)
+        # Create Qt visualizer using the factory
+        visualizer = VisualizerFactory.create(backend="qt", scene=scene)
         
-        # Create path for vertical lines
-        for col in range(cols):
-            path = QPainterPath()
-            for row in range(rows):
-                idx = row * cols + col
-                if idx >= len(points):
-                    break
-                
-                x, y = points[idx]
-                if row == 0:
-                    path.moveTo(x, y)
-                else:
-                    path.lineTo(x, y)
+        # Draw grid lines using the visualizer
+        # Note: The visualizer returns the scene, but also stores created items internally
+        scene = visualizer.draw_grid_lines(scene, points, rows, cols, 
+                                          color=Colors.WARNING, 
+                                          thickness=1, 
+                                          dashed=True)
+        
+        # Add references to all lines created by the visualizer
+        if side == 'left':
+            # We need to find the newly added items in the scene
+            all_items = scene.items()
+            existing_items = set(self.left_points.values())
+            if self.left_roi_overlay:
+                existing_items.add(self.left_roi_overlay)
             
-            # Create path item
-            path_item = QGraphicsPathItem(path)
-            path_item.setPen(QPen(Colors.WARNING, 1, Qt.DashLine))
-            path_item.setZValue(0.75)  # Between ROI overlay and points
+            # Add newly created line items to our tracking list
+            for item in all_items:
+                if isinstance(item, QGraphicsPathItem) and item not in existing_items and item not in self.left_grid_lines:
+                    self.left_grid_lines.append(item)
+        else:
+            # Similar logic for right side
+            all_items = scene.items()
+            existing_items = set(self.right_points.values())
+            if self.right_roi_overlay:
+                existing_items.add(self.right_roi_overlay)
             
-            # Add to scene and store reference
-            if side == 'left':
-                self.left_scene.addItem(path_item)
-                self.left_grid_lines.append(path_item)
-            else:
-                self.right_scene.addItem(path_item)
-                self.right_grid_lines.append(path_item)
+            for item in all_items:
+                if isinstance(item, QGraphicsPathItem) and item not in existing_items and item not in self.right_grid_lines:
+                    self.right_grid_lines.append(item)
     
     def set_images(self, left_image, right_image):
         """

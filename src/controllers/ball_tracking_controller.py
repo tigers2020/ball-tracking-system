@@ -323,113 +323,52 @@ class BallTrackingController(QObject):
     
     def _process_images(self):
         """
-        Process images with the current ball tracking settings.
-        This includes:
-        1. Apply HSV threshold to create masks
-        2. Compute ROIs
-        3. Detect circles in ROIs
-        4. Process predictions through Kalman filter (if enabled)
-        5. Draw visualizations (ROI, circles, predictions, trajectories)
+        Process the current images from the model.
+        Detects circles, applies Kalman filtering, and updates the visualizations.
         """
         try:
-            # Import visualization modules at the beginning
-            from src.views.visualization.hough_visualizer import draw_circles
-            from src.views.visualization.kalman_visualizer import draw_prediction, draw_trajectory
-            from src.views.visualization.roi_visualizer import draw_roi
+            from src.views.visualization import VisualizerFactory
             
-            # Skip processing if model or images aren't available
-            if not hasattr(self.model, 'left_image') or not hasattr(self.model, 'right_image'):
-                logging.warning("Model missing image attributes, skipping image processing")
-                return
-                
-            # Extract properties
+            # Get current values for processing
             left_image = self.model.left_image
             right_image = self.model.right_image
             
-            # Skip processing if either image is None
+            # 현재 프레임이 없으면 처리하지 않음
             if left_image is None or right_image is None:
                 return
-                
-            # Get current values
+            
+            # Get current settings
             hsv_values = self.get_hsv_values()
             roi_settings = self.get_roi_settings()
             
-            # Apply HSV threshold to create masks and get pixel counts
-            left_mask, right_mask, left_pixel_count, right_pixel_count = self._apply_hsv_threshold(
-                left_image, right_image, hsv_values)
+            # 1. Apply HSV threshold to create masks
+            left_mask, right_mask, pixel_count_left, pixel_count_right = self._apply_hsv_threshold(
+                left_image, right_image, hsv_values
+            )
             
-            # Check if pixel count is too low (less than 50 pixels)
-            # Skip processing if both masks have too few pixels
-            min_pixel_threshold = TRACKING.MIN_PIXEL_THRESHOLD  # Minimum number of white pixels required
-            if left_pixel_count < min_pixel_threshold and right_pixel_count < min_pixel_threshold:
-                logging.warning(f"HSV mask pixel count too low: left={left_pixel_count}, right={right_pixel_count}. Skipping frame.")
-                return
+            # Store masks for later visualization
+            self.left_mask = left_mask
+            self.right_mask = right_mask
             
-            # Set the masks to the model
-            self.model.left_mask = left_mask
-            self.model.right_mask = right_mask
+            # 2. Compute ROIs (if enabled)
+            self.left_roi, self.right_roi = self._compute_rois(
+                left_image, right_image, roi_settings
+            )
             
-            # Store original masks for internal use
-            self.left_mask = left_mask.copy()
-            self.right_mask = right_mask.copy()
-            
-            # Calculate ROIs based on settings (even if disabled, for visualization purposes)
-            self.left_roi, self.right_roi = self._compute_rois(left_image, right_image, roi_settings)
-            
-            # Set the ROIs to the model
-            self.model.left_roi = self.left_roi
-            self.model.right_roi = self.right_roi
-            
-            # Create cropped images and masks based on ROI if enabled
-            left_cropped_image = None
-            right_cropped_image = None
-            left_cropped_mask = None
-            right_cropped_mask = None
+            # 3. Crop images to ROI if enabled
+            left_cropped_image, right_cropped_image = None, None
+            left_cropped_mask, right_cropped_mask = None, None
             
             if roi_settings.get('enabled', False):
-                # Crop left image and mask to ROI
-                if self.left_roi and left_image is not None:
-                    x = self.left_roi.get('x', 0)
-                    y = self.left_roi.get('y', 0)
-                    w = self.left_roi.get('width', left_image.shape[1])
-                    h = self.left_roi.get('height', left_image.shape[0])
-                    
-                    # Ensure coordinates are within image bounds
-                    x = max(0, min(x, left_image.shape[1] - 1))
-                    y = max(0, min(y, left_image.shape[0] - 1))
-                    w = max(1, min(w, left_image.shape[1] - x))
-                    h = max(1, min(h, left_image.shape[0] - y))
-                    
-                    # Crop image and mask
-                    left_cropped_image = left_image[y:y+h, x:x+w]
-                    left_cropped_mask = self.left_mask[y:y+h, x:x+w] if self.left_mask is not None else None
-                    
-                    # Store cropped images for later use
-                    self.model.cropped_images["left"] = left_cropped_image
+                # Crop both images to ROIs for detection
+                left_cropped_image, left_cropped_mask = self._crop_to_roi(
+                    left_image, left_mask, self.left_roi)
+                right_cropped_image, right_cropped_mask = self._crop_to_roi(
+                    right_image, right_mask, self.right_roi)
                 
-                # Crop right image and mask to ROI
-                if self.right_roi and right_image is not None:
-                    x = self.right_roi.get('x', 0)
-                    y = self.right_roi.get('y', 0)
-                    w = self.right_roi.get('width', right_image.shape[1])
-                    h = self.right_roi.get('height', right_image.shape[0])
-                    
-                    # Ensure coordinates are within image bounds
-                    x = max(0, min(x, right_image.shape[1] - 1))
-                    y = max(0, min(y, right_image.shape[0] - 1))
-                    w = max(1, min(w, right_image.shape[1] - x))
-                    h = max(1, min(h, right_image.shape[0] - y))
-                    
-                    # Crop image and mask
-                    right_cropped_image = right_image[y:y+h, x:x+w]
-                    right_cropped_mask = self.right_mask[y:y+h, x:x+w] if self.right_mask is not None else None
-                    
-                    # Store cropped images for later use
-                    self.model.cropped_images["right"] = right_cropped_image
-            else:
-                # If ROI is disabled, use full images
-                self.model.cropped_images["left"] = None
-                self.model.cropped_images["right"] = None
+                # Debug the cropped images and masks
+                logging.debug(f"Left cropped image shape: {left_cropped_image.shape if left_cropped_image is not None else None}")
+                logging.debug(f"Right cropped image shape: {right_cropped_image.shape if right_cropped_image is not None else None}")
             
             # Detect circles - use cropped images if available, otherwise use full images
             if roi_settings.get('enabled', False) and left_cropped_image is not None and right_cropped_image is not None:
@@ -468,47 +407,51 @@ class BallTrackingController(QObject):
             left_viz_image = left_image.copy()
             right_viz_image = right_image.copy()
             
+            # Create visualizers
+            left_visualizer = VisualizerFactory.create(backend="opencv")
+            right_visualizer = VisualizerFactory.create(backend="opencv")
+            
             # 1. Always draw ROI on images (regardless of whether ROI is enabled)
             if self.left_roi:
-                # Use thicker lines for better visibility
-                left_viz_image = draw_roi(
+                # Use the visualizer to draw ROI
+                left_viz_image = left_visualizer.draw_roi(
                     left_viz_image, 
                     self.left_roi, 
                     color=COLOR.GREEN,
                     thickness=TRACKING.ROI_THICKNESS,
-                    show_center=True,
-                    center_color=COLOR.RED
+                    show_center=True
                 )
                 logging.debug(f"Drew left ROI: {self.left_roi}")
             
             if self.right_roi:
-                right_viz_image = draw_roi(
+                # Use the visualizer to draw ROI
+                right_viz_image = right_visualizer.draw_roi(
                     right_viz_image, 
                     self.right_roi, 
                     color=COLOR.GREEN,
                     thickness=TRACKING.ROI_THICKNESS,
-                    show_center=True,
-                    center_color=COLOR.RED
+                    show_center=True
                 )
                 logging.debug(f"Drew right ROI: {self.right_roi}")
             
             # 2. Draw circles on images if detected
             if left_circles:
-                # Use thicker lines for better visibility
-                left_viz_image = draw_circles(
+                # Use the visualizer to draw circles
+                left_viz_image = left_visualizer.draw_circles(
                     left_viz_image, 
                     left_circles, 
-                    main_color=TRACKING.MAIN_CIRCLE_COLOR,
+                    color=TRACKING.MAIN_CIRCLE_COLOR,
                     thickness=TRACKING.CIRCLE_THICKNESS,
-                    label_circles=True  # Add numbered labels for clearer identification
+                    label_circles=True
                 )
                 logging.debug(f"Drew {len(left_circles)} circles on left image")
             
             if right_circles:
-                right_viz_image = draw_circles(
+                # Use the visualizer to draw circles
+                right_viz_image = right_visualizer.draw_circles(
                     right_viz_image, 
                     right_circles, 
-                    main_color=TRACKING.MAIN_CIRCLE_COLOR,
+                    color=TRACKING.MAIN_CIRCLE_COLOR,
                     thickness=TRACKING.CIRCLE_THICKNESS,
                     label_circles=True
                 )
@@ -521,25 +464,25 @@ class BallTrackingController(QObject):
                 pred_pos = (int(left_prediction[0]), int(left_prediction[1]))
                 
                 # Draw prediction arrow with thicker line
-                left_viz_image = draw_prediction(
+                left_viz_image = left_visualizer.draw_prediction(
                     left_viz_image, 
                     current_pos, 
                     pred_pos, 
                     arrow_color=TRACKING.PREDICTION_ARROW_COLOR,
                     thickness=TRACKING.PREDICTION_THICKNESS,
-                    draw_uncertainty=True,  # 예측 불확실성 표시
+                    draw_uncertainty=True,
                     uncertainty_radius=TRACKING.UNCERTAINTY_RADIUS
                 )
                 
                 # Draw trajectory if available
                 left_history = self.kalman_processor.get_position_history("left")
                 if left_history and len(left_history) > 1:
-                    left_viz_image = draw_trajectory(
+                    left_viz_image = left_visualizer.draw_trajectory(
                         left_viz_image, 
                         left_history, 
                         color=(255, 255, 0),  # Yellow trajectory
-                        thickness=5,          # 더 두꺼운 선으로 변경
-                        max_points=20         # 더 많은 히스토리 포인트 표시
+                        thickness=5,
+                        max_points=20
                     )
                     logging.debug(f"Drew left trajectory with {len(left_history)} points")
                     
@@ -549,28 +492,28 @@ class BallTrackingController(QObject):
                 pred_pos = (int(right_prediction[0]), int(right_prediction[1]))
                 
                 # Draw prediction arrow with thicker line
-                right_viz_image = draw_prediction(
+                right_viz_image = right_visualizer.draw_prediction(
                     right_viz_image, 
                     current_pos, 
                     pred_pos, 
                     arrow_color=(0, 255, 255),  # Yellow-green arrow
                     thickness=4,
-                    draw_uncertainty=True,  # 예측 불확실성 표시
-                    uncertainty_radius=20   # 더 큰 불확실성 원
+                    draw_uncertainty=True,
+                    uncertainty_radius=20
                 )
                 
                 # Draw trajectory if available
                 right_history = self.kalman_processor.get_position_history("right")
                 if right_history and len(right_history) > 1:
-                    right_viz_image = draw_trajectory(
+                    right_viz_image = right_visualizer.draw_trajectory(
                         right_viz_image, 
                         right_history, 
                         color=(255, 255, 0),  # Yellow trajectory
-                        thickness=5,          # 더 두꺼운 선으로 변경
-                        max_points=20         # 더 많은 히스토리 포인트 표시
+                        thickness=5,
+                        max_points=20
                     )
                     logging.debug(f"Drew right trajectory with {len(right_history)} points")
-                    
+            
             # 4. Emit processed images signal with visualization
             self.circles_processed.emit(left_viz_image, right_viz_image)
             
@@ -744,24 +687,91 @@ class BallTrackingController(QObject):
     
     def _apply_roi_mask(self, mask, roi):
         """
-        Apply a ROI mask to an existing mask.
+        Apply ROI mask to the current mask.
         
         Args:
-            mask (numpy.ndarray): Input mask
-            roi (dict): ROI dictionary
+            mask: Input mask
+            roi: Region of interest
             
         Returns:
-            numpy.ndarray: Mask with ROI applied
+            Masked image with areas outside ROI set to 0
         """
-        if roi:
-            # 직접 필요한 값만 추출
-            x = roi.get("x", 0)
-            y = roi.get("y", 0)
-            w = roi.get("width", ROI.DEFAULT_WIDTH)
-            h = roi.get("height", ROI.DEFAULT_HEIGHT)
-            return cv2.rectangle(mask, (x, y), (x + w, y + h), COLOR.WHITE, -1)
-        else:
+        if mask is None or roi is None:
             return mask
+            
+        # Create empty mask of same size
+        h, w = mask.shape[:2]
+        roi_mask = np.zeros((h, w), dtype=np.uint8)
+        
+        # Get ROI coordinates
+        x, y = roi.get('x', 0), roi.get('y', 0)
+        width, height = roi.get('width', 0), roi.get('height', 0)
+        
+        # Draw filled white rectangle in ROI area
+        cv2.rectangle(roi_mask, (x, y), (x + width, y + height), 255, -1)
+        
+        # Apply mask - only keep pixels in the ROI area
+        result = cv2.bitwise_and(mask, roi_mask)
+        
+        return result
+    
+    def _crop_to_roi(self, image, mask, roi):
+        """
+        Crop image and mask to the specified Region of Interest.
+        
+        Args:
+            image: Input image
+            mask: Input mask
+            roi: Region of interest dictionary with x, y, width, height
+            
+        Returns:
+            Tuple of (cropped_image, cropped_mask) or (None, None) if ROI is invalid
+        """
+        if image is None or roi is None:
+            return None, None
+            
+        # Validate ROI
+        if not all(k in roi for k in ['x', 'y', 'width', 'height']):
+            logging.warning("Invalid ROI format for cropping")
+            return None, None
+            
+        # Get ROI coordinates
+        x, y = roi.get('x', 0), roi.get('y', 0)
+        width, height = roi.get('width', 0), roi.get('height', 0)
+        
+        # Make sure coordinates are valid
+        if width <= 0 or height <= 0:
+            logging.warning(f"Invalid ROI dimensions: {width}x{height}")
+            return None, None
+            
+        # Check if ROI is within image bounds
+        if image is not None:
+            img_height, img_width = image.shape[:2]
+            if x < 0 or y < 0 or x + width > img_width or y + height > img_height:
+                # Adjust ROI to fit within image bounds
+                x = max(0, x)
+                y = max(0, y)
+                width = min(width, img_width - x)
+                height = min(height, img_height - y)
+                
+                if width <= 0 or height <= 0:
+                    logging.warning("ROI outside image bounds")
+                    return None, None
+                    
+                logging.debug(f"Adjusted ROI to fit image: {x}, {y}, {width}, {height}")
+        else:
+            logging.warning("Cannot crop to ROI: image is None")
+            return None, None
+        
+        # Crop image
+        cropped_image = image[y:y+height, x:x+width]
+        
+        # Crop mask if provided
+        cropped_mask = None
+        if mask is not None:
+            cropped_mask = mask[y:y+height, x:x+width]
+            
+        return cropped_image, cropped_mask
     
     def _detect_circles(self, left_image, right_image, left_mask, right_mask, roi_settings):
         """
@@ -1130,6 +1140,8 @@ class BallTrackingController(QObject):
         Returns:
             tuple: (left_processed_image, right_processed_image)
         """
+        from src.views.visualization import VisualizerFactory
+        
         if self.model.is_enabled and (self.model.left_image is not None or self.model.right_image is not None):
             # Get current values for detection
             left_image = self.model.left_image
@@ -1146,6 +1158,10 @@ class BallTrackingController(QObject):
             self.model.left_circles = left_circles
             self.model.right_circles = right_circles
             
+            # Create visualizers
+            left_visualizer = VisualizerFactory.create(backend="opencv")
+            right_visualizer = VisualizerFactory.create(backend="opencv") 
+            
             # Create circle visualizations
             left_viz = None
             right_viz = None
@@ -1156,22 +1172,28 @@ class BallTrackingController(QObject):
                 # Draw ROI if available
                 if self.model.left_roi:
                     try:
-                        x = int(self.model.left_roi.get("x", 0))
-                        y = int(self.model.left_roi.get("y", 0))
-                        w = int(self.model.left_roi.get("width", 100))
-                        h = int(self.model.left_roi.get("height", 100))
-                        cv2.rectangle(left_viz, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                    except (ValueError, TypeError, KeyError) as e:
+                        left_viz = left_visualizer.draw_roi(
+                            left_viz,
+                            self.model.left_roi,
+                            color=COLOR.GREEN,
+                            thickness=TRACKING.ROI_THICKNESS,
+                            show_center=True
+                        )
+                    except Exception as e:
                         logging.error(f"Error drawing left ROI in visualization: {e}")
                 
                 # Draw circles if available
                 if self.model.left_circles:
-                    for circle in self.model.left_circles:
-                        try:
-                            x, y, r = circle
-                            cv2.circle(left_viz, (int(x), int(y)), int(r), (0, 0, 255), 2)
-                        except (ValueError, TypeError, IndexError) as e:
-                            logging.error(f"Error drawing left circle in visualization: {e}")
+                    try:
+                        left_viz = left_visualizer.draw_circles(
+                            left_viz,
+                            self.model.left_circles,
+                            color=COLOR.RED,
+                            thickness=TRACKING.CIRCLE_THICKNESS,
+                            label_circles=True
+                        )
+                    except Exception as e:
+                        logging.error(f"Error drawing left circles in visualization: {e}")
             
             if self.model.right_image is not None and self.model.right_roi is not None:
                 right_viz = self.model.right_image.copy()
@@ -1179,22 +1201,28 @@ class BallTrackingController(QObject):
                 # Draw ROI if available
                 if self.model.right_roi:
                     try:
-                        x = int(self.model.right_roi.get("x", 0))
-                        y = int(self.model.right_roi.get("y", 0))
-                        w = int(self.model.right_roi.get("width", 100))
-                        h = int(self.model.right_roi.get("height", 100))
-                        cv2.rectangle(right_viz, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                    except (ValueError, TypeError, KeyError) as e:
+                        right_viz = right_visualizer.draw_roi(
+                            right_viz,
+                            self.model.right_roi,
+                            color=COLOR.GREEN,
+                            thickness=TRACKING.ROI_THICKNESS,
+                            show_center=True
+                        )
+                    except Exception as e:
                         logging.error(f"Error drawing right ROI in visualization: {e}")
                 
                 # Draw circles if available
                 if self.model.right_circles:
-                    for circle in self.model.right_circles:
-                        try:
-                            x, y, r = circle
-                            cv2.circle(right_viz, (int(x), int(y)), int(r), (0, 0, 255), 2)
-                        except (ValueError, TypeError, IndexError) as e:
-                            logging.error(f"Error drawing right circle in visualization: {e}")
+                    try:
+                        right_viz = right_visualizer.draw_circles(
+                            right_viz,
+                            self.model.right_circles,
+                            color=COLOR.RED,
+                            thickness=TRACKING.CIRCLE_THICKNESS,
+                            label_circles=True
+                        )
+                    except Exception as e:
+                        logging.error(f"Error drawing right circles in visualization: {e}")
             
             return left_viz, right_viz
         
@@ -1802,6 +1830,10 @@ class BallTrackingController(QObject):
             "right": {}
         }
         
+        # Initialize variables to avoid UnboundLocalError
+        left_hsv_center = None
+        right_hsv_center = None
+        
         # Add left camera data - safely access circles
         if self.model.left_circles and len(self.model.left_circles) > 0:
             best_left = self.model.left_circles[0]
@@ -1816,10 +1848,10 @@ class BallTrackingController(QObject):
             if self.model.left_mask is not None:
                 left_hsv_center = self.roi_computer.compute_mask_centroid(self.model.left_mask)
             if left_hsv_center:
-                    data["left"]["hsv_center"] = {
-                        "x": left_hsv_center[0],
-                        "y": left_hsv_center[1]
-                    }
+                data["left"]["hsv_center"] = {
+                    "x": left_hsv_center[0],
+                    "y": left_hsv_center[1]
+                }
         
         # Add left Kalman prediction
         if self.model.left_prediction is not None:
@@ -1843,12 +1875,12 @@ class BallTrackingController(QObject):
         if hasattr(self, 'hsv_mask_generator') and self.hsv_mask_generator:
             if self.model.right_mask is not None:
                 right_hsv_center = self.roi_computer.compute_mask_centroid(self.model.right_mask)
-                if right_hsv_center:
-                        data["right"]["hsv_center"] = {
-                            "x": right_hsv_center[0],
-                            "y": right_hsv_center[1]
-                        }
-            
+            if right_hsv_center:
+                data["right"]["hsv_center"] = {
+                    "x": right_hsv_center[0],
+                    "y": right_hsv_center[1]
+                }
+        
         # Add right Kalman prediction
         if self.model.right_prediction is not None:
             data["right"]["kalman_prediction"] = {
@@ -2146,31 +2178,38 @@ class BallTrackingController(QObject):
         return True
 
     def _draw_roi(self, left_frame, right_frame, show_original_roi=False):
+        from src.views.visualization import VisualizerFactory
+        
         # Draw ROI on both frames if enabled
         roi_settings = self.roi_settings or {}
         if not roi_settings.get('enabled', False):
             return
+        
+        # Create visualizers
+        left_visualizer = VisualizerFactory.create(backend="opencv")
+        right_visualizer = VisualizerFactory.create(backend="opencv")
         
         if hasattr(self, 'left_roi') and self.left_roi:
             x, y = self.left_roi.get('x', 0), self.left_roi.get('y', 0)
             w, h = self.left_roi.get('width', 0), self.left_roi.get('height', 0)
             
             # Draw rectangle for ROI
-            cv2.rectangle(
+            left_frame = left_visualizer.draw_rectangle(
                 left_frame, 
                 (x, y), 
                 (x + w, y + h), 
-                COLOR.GREEN, 
-                TRACKING.ROI_THICKNESS
+                color=COLOR.GREEN, 
+                thickness=TRACKING.ROI_THICKNESS
             )
+            
             # Draw center point
             center_x, center_y = x + w // 2, y + h // 2
-            cv2.circle(
+            left_frame = left_visualizer.draw_point(
                 left_frame, 
                 (center_x, center_y), 
-                ROI.CENTER_MARKER_SIZE, 
-                COLOR.RED, 
-                -1
+                radius=ROI.CENTER_MARKER_SIZE, 
+                color=COLOR.RED, 
+                thickness=-1  # Filled circle
             )
             logging.debug(f"Drew left ROI: {self.left_roi}")
         
@@ -2179,96 +2218,88 @@ class BallTrackingController(QObject):
             w, h = self.right_roi.get('width', 0), self.right_roi.get('height', 0)
             
             # Draw rectangle for ROI
-            cv2.rectangle(
+            right_frame = right_visualizer.draw_rectangle(
                 right_frame, 
                 (x, y), 
                 (x + w, y + h), 
-                COLOR.GREEN, 
-                TRACKING.ROI_THICKNESS
+                color=COLOR.GREEN, 
+                thickness=TRACKING.ROI_THICKNESS
             )
+            
             # Draw center point
             center_x, center_y = x + w // 2, y + h // 2
-            cv2.circle(
+            right_frame = right_visualizer.draw_point(
                 right_frame, 
                 (center_x, center_y), 
-                ROI.CENTER_MARKER_SIZE, 
-                COLOR.RED, 
-                -1
+                radius=ROI.CENTER_MARKER_SIZE, 
+                color=COLOR.RED, 
+                thickness=-1  # Filled circle
             )
             logging.debug(f"Drew right ROI: {self.right_roi}")
     
     def _draw_detected_circles(self, left_frame, right_frame):
+        from src.views.visualization import VisualizerFactory
+        
         if not hasattr(self.model, 'left_circles') or not hasattr(self.model, 'right_circles'):
             return
+        
+        # Create visualizers
+        left_visualizer = VisualizerFactory.create(backend="opencv")
+        right_visualizer = VisualizerFactory.create(backend="opencv")
             
         left_circles = self.model.left_circles or []
-        for circle in left_circles:
-            x, y, r = circle
-            cv2.circle(
+        if left_circles:
+            left_frame = left_visualizer.draw_circles(
                 left_frame, 
-                (int(x), int(y)), 
-                int(r), 
-                COLOR.YELLOW, 
-                TRACKING.CIRCLE_THICKNESS
+                left_circles, 
+                color=COLOR.YELLOW, 
+                thickness=TRACKING.CIRCLE_THICKNESS,
+                label_circles=False
             )
-            # Draw center point
-            cv2.circle(
-                left_frame, 
-                (int(x), int(y)), 
-                ROI.CENTER_MARKER_SIZE // 2, 
-                COLOR.RED, 
-                -1
-            )
-        logging.debug(f"Drew {len(left_circles)} circles on left image")
+            logging.debug(f"Drew {len(left_circles)} circles on left image")
         
         right_circles = self.model.right_circles or []
-        for circle in right_circles:
-            x, y, r = circle
-            cv2.circle(
+        if right_circles:
+            right_frame = right_visualizer.draw_circles(
                 right_frame, 
-                (int(x), int(y)), 
-                int(r), 
-                COLOR.YELLOW, 
-                TRACKING.CIRCLE_THICKNESS
+                right_circles, 
+                color=COLOR.YELLOW, 
+                thickness=TRACKING.CIRCLE_THICKNESS,
+                label_circles=False
             )
-            # Draw center point
-            cv2.circle(
-                right_frame, 
-                (int(x), int(y)), 
-                ROI.CENTER_MARKER_SIZE // 2, 
-                COLOR.RED, 
-                -1
-            )
-        logging.debug(f"Drew {len(right_circles)} circles on right image")
+            logging.debug(f"Drew {len(right_circles)} circles on right image")
     
     def _draw_trajectory(self, left_frame, right_frame):
+        from src.views.visualization import VisualizerFactory
+        
         if not hasattr(self, 'kalman_processor') or self.kalman_processor is None:
             return
+        
+        # Create visualizers
+        left_visualizer = VisualizerFactory.create(backend="opencv")
+        right_visualizer = VisualizerFactory.create(backend="opencv")
             
         # Draw path on the left image
         left_history = self.kalman_processor.get_position_history("left")
         if left_history and len(left_history) > 1:
-            # Convert points to int tuples
-            points = [(int(p[0]), int(p[1])) for p in left_history]
-            
-            # Draw polyline for trajectory
-            cv2.polylines(
-                left_frame, 
-                [np.array(points)], 
-                False, 
-                TRACKING.TRAJECTORY_COLOR, 
-                TRACKING.TRAJECTORY_THICKNESS
+            # Draw trajectory
+            left_frame = left_visualizer.draw_trajectory(
+                left_frame,
+                left_history,
+                color=TRACKING.TRAJECTORY_COLOR,
+                thickness=TRACKING.TRAJECTORY_THICKNESS,
+                max_points=20
             )
             
             # Draw the predicted point if available
             if hasattr(self.model, 'left_prediction') and self.model.left_prediction is not None:
                 x, y = self.model.left_prediction
-                cv2.circle(
-                    left_frame, 
-                    (int(x), int(y)), 
-                    TRACKING.UNCERTAINTY_RADIUS // 4, 
-                    COLOR.ORANGE, 
-                    -1
+                left_frame = left_visualizer.draw_point(
+                    left_frame,
+                    (int(x), int(y)),
+                    color=COLOR.ORANGE,
+                    radius=TRACKING.UNCERTAINTY_RADIUS // 4,
+                    thickness=-1  # Filled circle
                 )
         
         logging.debug(f"Drew left trajectory with {len(left_history) if left_history else 0} points")
@@ -2276,27 +2307,24 @@ class BallTrackingController(QObject):
         # Draw path on the right image
         right_history = self.kalman_processor.get_position_history("right")
         if right_history and len(right_history) > 1:
-            # Convert points to int tuples
-            points = [(int(p[0]), int(p[1])) for p in right_history]
-            
-            # Draw polyline for trajectory
-            cv2.polylines(
-                right_frame, 
-                [np.array(points)], 
-                False, 
-                TRACKING.TRAJECTORY_COLOR, 
-                TRACKING.TRAJECTORY_THICKNESS
+            # Draw trajectory
+            right_frame = right_visualizer.draw_trajectory(
+                right_frame,
+                right_history,
+                color=TRACKING.TRAJECTORY_COLOR,
+                thickness=TRACKING.TRAJECTORY_THICKNESS,
+                max_points=20
             )
             
             # Draw the predicted point if available
             if hasattr(self.model, 'right_prediction') and self.model.right_prediction is not None:
                 x, y = self.model.right_prediction
-                cv2.circle(
-                    right_frame, 
-                    (int(x), int(y)), 
-                    TRACKING.UNCERTAINTY_RADIUS // 4, 
-                    COLOR.ORANGE, 
-                    -1
+                right_frame = right_visualizer.draw_point(
+                    right_frame,
+                    (int(x), int(y)),
+                    color=COLOR.ORANGE,
+                    radius=TRACKING.UNCERTAINTY_RADIUS // 4,
+                    thickness=-1  # Filled circle
                 )
         
         logging.debug(f"Drew right trajectory with {len(right_history) if right_history else 0} points")
