@@ -31,6 +31,7 @@ from src.services.intersection_finder import find_and_sort_intersections
 from src.services.calibration_fine_tuning_service import CalibrationFineTuningService
 
 import numpy as np
+from src.utils.file_io import FileIOFactory, FileDialogHelper, PathUtils
 
 logger = logging.getLogger(__name__)
 
@@ -455,10 +456,10 @@ class CalibrationController(QObject):
         """
         try:
             # Ensure default save directory exists
-            self.default_save_dir.mkdir(parents=True, exist_ok=True)
+            PathUtils.ensure_dir(self.default_save_dir)
             
-            # Open file dialog
-            file_path, _ = QFileDialog.getSaveFileName(
+            # Get save path using helper
+            file_path = FileDialogHelper.get_save_path(
                 self.view,
                 "Save Calibration Configuration",
                 str(self.default_save_dir / "calibration.json"),
@@ -469,8 +470,21 @@ class CalibrationController(QObject):
                 logger.info("Save operation canceled by user")
                 return
                 
-            # Save calibration data
-            success = self.model.save_to_file(file_path)
+            # Create file I/O instance
+            file_io = FileIOFactory.create(file_path)
+            if not file_io:
+                QMessageBox.warning(
+                    self.view,
+                    "Save Failed",
+                    "Unsupported file format. Please use .json extension."
+                )
+                return
+            
+            # Get data from model
+            calibration_data = self.model.to_dict()
+            
+            # Save data
+            success = file_io.save(calibration_data, file_path)
             
             if success:
                 # Show success message
@@ -502,8 +516,8 @@ class CalibrationController(QObject):
         Opens a file dialog for the user to choose the file to load.
         """
         try:
-            # Open file dialog
-            file_path, _ = QFileDialog.getOpenFileName(
+            # Get open path using helper
+            file_path = FileDialogHelper.get_open_path(
                 self.view,
                 "Load Calibration Configuration",
                 str(self.default_save_dir),
@@ -514,14 +528,27 @@ class CalibrationController(QObject):
                 logger.info("Load operation canceled by user")
                 return
                 
-            # Clear existing points first
-            self.model.clear_points()
-            self.view.clear_points()
+            # Create file I/O instance
+            file_io = FileIOFactory.create(file_path)
+            if not file_io:
+                QMessageBox.warning(
+                    self.view,
+                    "Load Failed",
+                    "Unsupported file format. Please use .json extension."
+                )
+                return
             
-            # Load calibration data
-            success = self.model.load_from_file(file_path)
+            # Load data
+            calibration_data = file_io.load(file_path)
             
-            if success:
+            if calibration_data:
+                # Clear existing points
+                self.model.clear_points()
+                self.view.clear_points()
+                
+                # Load data into model
+                self.model.from_dict(calibration_data)
+                
                 # Update view with loaded points
                 self._render_points()
                 

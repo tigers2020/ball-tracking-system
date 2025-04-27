@@ -24,6 +24,8 @@ from src.utils.signal_binder import SignalBinder
 from src.controllers.ball_tracking_controller import BallTrackingController, TrackingState
 from src.controllers.game_analyzer import GameAnalyzer
 from src.views.ball_tracking_settings_dialog import BallTrackingSettingsDialog
+from src.controllers.calibration_controller import CalibrationController
+from src.controllers.data_export_controller import DataExportController
 
 
 class FrameLoaderThread(QThread):
@@ -169,6 +171,13 @@ class AppController(QObject):
         # Tracking data save settings
         self.tracking_data_save_enabled = True  # Enable/disable saving
         self.tracking_data_folder = os.path.join(os.getcwd(), "tracking_data")  # Default folder
+        
+        # Data export controller initialization
+        self.data_export_controller = DataExportController(self.config_manager)
+        
+        # Connect data export signals
+        self.data_export_controller.export_successful.connect(self._on_data_exported)
+        self.data_export_controller.import_successful.connect(self._on_data_imported)
     
     def _connect_ball_tracking_to_game_analyzer(self):
         """
@@ -676,9 +685,9 @@ class AppController(QObject):
 
     def save_all_tracking_data(self):
         """
-        Save all accumulated tracking data to a comprehensive XML file.
+        Save all accumulated tracking data to a comprehensive XML or JSON file.
         Call this on application exit or when user wants to save all tracking
-        data for further analysis. Falls back to JSON if XML saving fails.
+        data for further analysis.
         
         Returns:
             str: Path to the saved file
@@ -687,7 +696,11 @@ class AppController(QObject):
             logging.info("Tracking data saving is disabled")
             return None
         
-        # Use folder name based on current image folder
+        if not hasattr(self, 'ball_tracking_controller') or not self.ball_tracking_controller:
+            logging.warning("Ball tracking controller not initialized")
+            return None
+        
+        # Folder name based on current image folder
         folder_name = os.path.basename(self.config_manager.get_last_image_folder())
         if not folder_name:
             folder_name = "default"
@@ -697,9 +710,33 @@ class AppController(QObject):
         
         # First try XML saving (primary method)
         try:
-            # Initialize XML tracking if not already initialized
-            self.ball_tracking_controller.initialize_xml_tracking(folder_name)
-            xml_path = self.ball_tracking_controller.save_xml_tracking_data(tracking_folder)
+            # Create XML data structure
+            detection_rate = self.ball_tracking_controller.get_detection_rate()
+            total_frames = self.ball_tracking_controller.detection_stats["total_frames"]
+            detection_count = self.ball_tracking_controller.detection_stats["detection_count"]
+            
+            xml_data = {
+                "root_tag": "TrackingData",
+                "dataset": folder_name,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "detection_rate": detection_rate,
+                "frames": {
+                    "total": total_frames,
+                    "detected": detection_count
+                },
+                "coordinate_history": self.ball_tracking_controller.get_coordinate_history()
+            }
+            
+            # Generate filename
+            xml_filename = f"tracking_data_{int(time.time())}"
+            
+            # Export XML data
+            xml_path = self.data_export_controller.export_xml(
+                xml_data,
+                None,  # No parent widget (silent export)
+                "Export Tracking Data",
+                os.path.join(tracking_folder, xml_filename)
+            )
             
             if xml_path:
                 logging.info(f"All tracking data saved to XML: {xml_path}")
@@ -708,17 +745,21 @@ class AppController(QObject):
             logging.error(f"Error saving XML tracking data: {e}. Falling back to JSON.")
         
         # Fallback to JSON if XML saving failed
-        detection_rate = self.ball_tracking_controller.get_detection_rate()
-        total_frames = self.ball_tracking_controller.detection_stats["total_frames"]
-        detection_count = self.ball_tracking_controller.detection_stats["detection_count"]
+        try:
+            # Use dedicated method in data_export_controller
+            json_path = self.data_export_controller.export_tracking_data(
+                self.ball_tracking_controller,
+                None,  # No parent widget (silent export)
+                tracking_folder
+            )
+            
+            if json_path:
+                logging.info(f"All tracking data saved to JSON (fallback): {json_path}")
+                return json_path
+        except Exception as e:
+            logging.error(f"Error saving tracking data to JSON: {e}")
         
-        filename = f"summary_rate{int(detection_rate*100)}_frames{total_frames}_detections{detection_count}"
-        
-        json_path = self.ball_tracking_controller.save_tracking_data_to_json(tracking_folder, filename)
-        if json_path:
-            logging.info(f"All tracking data saved to JSON (fallback): {json_path}")
-        
-        return json_path
+        return None
 
     @Slot()
     def _on_app_closing(self):
@@ -809,4 +850,206 @@ class AppController(QObject):
                 handler_lambda
             )
         
-        logging.info("Parameter manager signals connected to controllers") 
+        logging.info("Parameter manager signals connected to controllers")
+
+    @Slot(str)
+    def _on_data_exported(self, file_path):
+        """
+        Handle successful data export.
+        
+        Args:
+            file_path (str): Path to the exported file
+        """
+        logging.info(f"Data successfully exported to: {file_path}")
+        
+        # Update status bar if available
+        if hasattr(self.view, 'update_status_message'):
+            self.view.update_status_message(f"Data exported to: {os.path.basename(file_path)}")
+
+    @Slot(str)
+    def _on_data_imported(self, file_path):
+        """
+        Handle successful data import.
+        
+        Args:
+            file_path (str): Path to the imported file
+        """
+        logging.info(f"Data successfully imported from: {file_path}")
+        
+        # Update status bar if available
+        if hasattr(self.view, 'update_status_message'):
+            self.view.update_status_message(f"Data imported from: {os.path.basename(file_path)}")
+
+    @Slot()
+    def on_export_tracking_data(self):
+        """
+        Handle export tracking data button click.
+        Opens a dialog for exporting tracking data.
+        """
+        try:
+            # Check if tracking controller is initialized
+            if not hasattr(self, 'ball_tracking_controller') or not self.ball_tracking_controller:
+                self.view.show_warning_message("Ball tracking controller not initialized.")
+                return
+            
+            # Use data export controller to export tracking data
+            self.data_export_controller.export_tracking_data(
+                self.ball_tracking_controller,
+                self.view
+            )
+        except Exception as e:
+            logging.error(f"Error exporting tracking data: {e}")
+            self.view.show_error_message(f"Error exporting tracking data: {str(e)}")
+
+    @Slot()
+    def on_import_tracking_data(self):
+        """
+        Handle import tracking data button click.
+        Opens a dialog for importing tracking data.
+        """
+        try:
+            # Check if tracking controller is initialized
+            if not hasattr(self, 'ball_tracking_controller') or not self.ball_tracking_controller:
+                self.view.show_warning_message("Ball tracking controller not initialized.")
+                return
+            
+            # Import JSON data
+            tracking_data = self.data_export_controller.import_json(
+                self.view,
+                "Import Tracking Data"
+            )
+            
+            if not tracking_data:
+                return
+            
+            # Validate tracking data format
+            if not isinstance(tracking_data, dict) or "coordinate_history" not in tracking_data:
+                self.view.show_warning_message("Invalid tracking data format.")
+                return
+            
+            # Process tracking data
+            self._apply_imported_tracking_data(tracking_data)
+            
+        except Exception as e:
+            logging.error(f"Error importing tracking data: {e}")
+            self.view.show_error_message(f"Error importing tracking data: {str(e)}")
+        
+    def _apply_imported_tracking_data(self, tracking_data):
+        """
+        Apply imported tracking data to the ball tracking controller.
+        
+        Args:
+            tracking_data (dict): Imported tracking data dictionary
+        """
+        if not self.ball_tracking_controller:
+            return
+        
+        # Apply coordinate history if available
+        if "coordinate_history" in tracking_data:
+            # Clear existing history
+            self.ball_tracking_controller.clear_coordinate_history()
+            
+            # Add imported coordinates to history
+            coord_history = tracking_data["coordinate_history"]
+            for side in ["left", "right"]:
+                if side in coord_history:
+                    for entry in coord_history[side]:
+                        x = entry.get("x")
+                        y = entry.get("y")
+                        radius = entry.get("radius", 5.0)  # Default radius if not provided
+                        timestamp = entry.get("timestamp", time.time())  # Default timestamp if not provided
+                        
+                        if x is not None and y is not None:
+                            # Add to history (assuming model has this method)
+                            if hasattr(self.ball_tracking_controller.model, 'add_to_coordinate_history'):
+                                self.ball_tracking_controller.model.add_to_coordinate_history(
+                                    side, (float(x), float(y), float(radius), timestamp)
+                                )
+        
+        # Apply detection settings if available
+        if "detection_settings" in tracking_data:
+            settings = tracking_data["detection_settings"]
+            
+            # Apply HSV settings
+            if "hsv" in settings and hasattr(self.ball_tracking_controller, 'set_hsv_values'):
+                self.ball_tracking_controller.set_hsv_values(settings["hsv"])
+            
+            # Apply ROI settings
+            if "roi" in settings and hasattr(self.ball_tracking_controller, 'set_roi_settings'):
+                self.ball_tracking_controller.set_roi_settings(settings["roi"])
+            
+            # Apply Hough circle settings
+            if "hough" in settings and hasattr(self.ball_tracking_controller, 'set_hough_circle_settings'):
+                self.ball_tracking_controller.set_hough_circle_settings(settings["hough"])
+            
+            # Apply Kalman filter settings
+            if "kalman" in settings and hasattr(self.ball_tracking_controller, 'update_kalman_settings'):
+                self.ball_tracking_controller.update_kalman_settings(settings["kalman"])
+        
+        # Update UI to reflect imported data
+        if hasattr(self.view, 'update_tracking_view'):
+            self.view.update_tracking_view()
+        
+        self.view.show_info_message("Tracking data imported successfully.")
+
+    @Slot()
+    def on_export_calibration(self):
+        """
+        Handle export calibration button click.
+        Opens a dialog for exporting calibration data.
+        """
+        try:
+            if not hasattr(self, 'calibration_controller') or not self.calibration_controller:
+                self.view.show_warning_message("Calibration controller not initialized.")
+                return
+            
+            # Get calibration data
+            calibration_data = self.calibration_controller.model.to_dict()
+            
+            # Export as JSON
+            self.data_export_controller.export_json(
+                calibration_data,
+                self.view,
+                "Export Calibration Data",
+                "calibration_data"
+            )
+        except Exception as e:
+            logging.error(f"Error exporting calibration data: {e}")
+            self.view.show_error_message(f"Error exporting calibration data: {str(e)}")
+
+    @Slot()
+    def on_import_calibration(self):
+        """
+        Handle import calibration button click.
+        Opens a dialog for importing calibration data.
+        """
+        try:
+            if not hasattr(self, 'calibration_controller') or not self.calibration_controller:
+                self.view.show_warning_message("Calibration controller not initialized.")
+                return
+            
+            # Import JSON data
+            calibration_data = self.data_export_controller.import_json(
+                self.view,
+                "Import Calibration Data"
+            )
+            
+            if not calibration_data:
+                return
+            
+            # Validate calibration data format
+            if not isinstance(calibration_data, dict) or "points" not in calibration_data:
+                self.view.show_warning_message("Invalid calibration data format.")
+                return
+            
+            # Apply calibration data
+            self.calibration_controller.model.clear_points()
+            self.calibration_controller.model.from_dict(calibration_data)
+            
+            # Update view
+            self.calibration_controller._render_points()
+            
+            self.view.show_info_message("Calibration data imported successfully.")
+        except Exception as e:
+            logging.error(f"Error importing calibration data: {e}")
+            self.view.show_error_message(f"Error importing calibration data: {str(e)}") 
