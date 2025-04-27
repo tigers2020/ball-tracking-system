@@ -9,6 +9,8 @@ This module provides utilities for managing connections between Qt signals and s
 import logging
 from typing import Dict, Any, Callable, List, Union, Optional, Tuple
 
+from src.utils.error_handling import handle_errors, ErrorAction
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,6 +21,10 @@ class SignalBinder:
     """
     
     @staticmethod
+    @handle_errors(
+        action=ErrorAction.RETURN_FALSE,
+        message="Error connecting signal: {error}"
+    )
     def bind(sender: Any, signal_name: str, receiver: Any, slot_name: str) -> bool:
         """
         Connect a signal from a sender to a slot in a receiver.
@@ -36,20 +42,24 @@ class SignalBinder:
             logger.warning(f"Cannot bind signal: sender or receiver is None")
             return False
             
+        if not isinstance(slot_name, str):
+            logger.error(f"Slot name must be a string, not {type(slot_name).__name__}")
+            return False
+            
+        # Get the signal by name
+        signal = getattr(sender, signal_name, None)
+        if not signal:
+            logger.warning(f"Signal '{signal_name}' not found in {sender.__class__.__name__}")
+            return False
+            
+        # Get the slot by name
+        slot = getattr(receiver, slot_name, None)
+        if not slot:
+            logger.warning(f"Slot '{slot_name}' not found in {receiver.__class__.__name__}")
+            return False
+            
+        # Connect the signal to the slot
         try:
-            # Get the signal by name
-            signal = getattr(sender, signal_name, None)
-            if not signal:
-                logger.warning(f"Signal '{signal_name}' not found in {sender.__class__.__name__}")
-                return False
-                
-            # Get the slot by name
-            slot = getattr(receiver, slot_name, None)
-            if not slot:
-                logger.warning(f"Slot '{slot_name}' not found in {receiver.__class__.__name__}")
-                return False
-                
-            # Connect the signal to the slot
             connected = signal.connect(slot)
             
             if connected:
@@ -58,12 +68,15 @@ class SignalBinder:
                 logger.warning(f"Failed to connect {sender.__class__.__name__}.{signal_name} to {receiver.__class__.__name__}.{slot_name}")
                 
             return connected
-            
         except Exception as e:
             logger.error(f"Error connecting signal {signal_name} to slot {slot_name}: {e}")
             return False
     
     @staticmethod
+    @handle_errors(
+        action=ErrorAction.RETURN_FALSE,
+        message="Error connecting signal {signal_name} to lambda function: {error}"
+    )
     def bind_lambda(sender: Any, signal_name: str, lambda_func: Callable) -> bool:
         """
         Connect a signal from a sender to a lambda function.
@@ -80,28 +93,27 @@ class SignalBinder:
             logger.warning(f"Cannot bind signal to lambda: sender is None")
             return False
             
-        try:
-            # Get the signal by name
-            signal = getattr(sender, signal_name, None)
-            if not signal:
-                logger.warning(f"Signal '{signal_name}' not found in {sender.__class__.__name__}")
-                return False
-                
-            # Connect the signal to the lambda function
-            connected = signal.connect(lambda_func)
-            
-            if connected:
-                logger.debug(f"Connected {sender.__class__.__name__}.{signal_name} to lambda function")
-            else:
-                logger.warning(f"Failed to connect {sender.__class__.__name__}.{signal_name} to lambda function")
-                
-            return connected
-            
-        except Exception as e:
-            logger.error(f"Error connecting signal {signal_name} to lambda function: {e}")
+        # Get the signal by name
+        signal = getattr(sender, signal_name, None)
+        if not signal:
+            logger.warning(f"Signal '{signal_name}' not found in {sender.__class__.__name__}")
             return False
+            
+        # Connect the signal to the lambda function
+        connected = signal.connect(lambda_func)
+        
+        if connected:
+            logger.debug(f"Connected {sender.__class__.__name__}.{signal_name} to lambda function")
+        else:
+            logger.warning(f"Failed to connect {sender.__class__.__name__}.{signal_name} to lambda function")
+            
+        return connected
     
     @staticmethod
+    @handle_errors(
+        action=ErrorAction.RETURN_FALSE,
+        message="Error disconnecting signal {signal_name}: {error}"
+    )
     def unbind(sender: Any, signal_name: str, receiver: Any = None, slot_name: str = None) -> bool:
         """
         Disconnect a signal from a sender to a slot in a receiver.
@@ -120,51 +132,46 @@ class SignalBinder:
             logger.warning(f"Cannot unbind signal: sender is None")
             return False
             
-        try:
-            # Get the signal by name
-            signal = getattr(sender, signal_name, None)
-            if not signal:
-                logger.warning(f"Signal '{signal_name}' not found in {sender.__class__.__name__}")
+        # Get the signal by name
+        signal = getattr(sender, signal_name, None)
+        if not signal:
+            logger.warning(f"Signal '{signal_name}' not found in {sender.__class__.__name__}")
+            return False
+            
+        # Disconnect the signal based on parameters
+        if receiver and slot_name:
+            # Get the slot by name
+            slot = getattr(receiver, slot_name, None)
+            if not slot:
+                logger.warning(f"Slot '{slot_name}' not found in {receiver.__class__.__name__}")
                 return False
                 
-            # Disconnect the signal based on parameters
-            if receiver and slot_name:
-                # Get the slot by name
-                slot = getattr(receiver, slot_name, None)
-                if not slot:
-                    logger.warning(f"Slot '{slot_name}' not found in {receiver.__class__.__name__}")
-                    return False
-                    
-                # Disconnect the specific connection
-                try:
-                    signal.disconnect(slot)
-                    logger.debug(f"Disconnected {sender.__class__.__name__}.{signal_name} from {receiver.__class__.__name__}.{slot_name}")
-                    return True
-                except Exception as e:
-                    logger.warning(f"Failed to disconnect {sender.__class__.__name__}.{signal_name} from {receiver.__class__.__name__}.{slot_name}: {e}")
-                    return False
-            elif receiver:
-                # Disconnect all connections to the receiver
-                try:
-                    signal.disconnect(receiver)
-                    logger.debug(f"Disconnected all connections from {sender.__class__.__name__}.{signal_name} to {receiver.__class__.__name__}")
-                    return True
-                except Exception as e:
-                    logger.warning(f"Failed to disconnect all connections from {sender.__class__.__name__}.{signal_name} to {receiver.__class__.__name__}: {e}")
-                    return False
-            else:
-                # Disconnect all connections from the signal
-                try:
-                    signal.disconnect()
-                    logger.debug(f"Disconnected all connections from {sender.__class__.__name__}.{signal_name}")
-                    return True
-                except Exception as e:
-                    logger.warning(f"Failed to disconnect all connections from {sender.__class__.__name__}.{signal_name}: {e}")
-                    return False
-                    
-        except Exception as e:
-            logger.error(f"Error disconnecting signal {signal_name}: {e}")
-            return False
+            # Disconnect the specific connection
+            try:
+                signal.disconnect(slot)
+                logger.debug(f"Disconnected {sender.__class__.__name__}.{signal_name} from {receiver.__class__.__name__}.{slot_name}")
+                return True
+            except Exception as e:
+                logger.warning(f"Failed to disconnect {sender.__class__.__name__}.{signal_name} from {receiver.__class__.__name__}.{slot_name}: {e}")
+                return False
+        elif receiver:
+            # Disconnect all connections to the receiver
+            try:
+                signal.disconnect(receiver)
+                logger.debug(f"Disconnected all connections from {sender.__class__.__name__}.{signal_name} to {receiver.__class__.__name__}")
+                return True
+            except Exception as e:
+                logger.warning(f"Failed to disconnect all connections from {sender.__class__.__name__}.{signal_name} to {receiver.__class__.__name__}: {e}")
+                return False
+        else:
+            # Disconnect all connections from the signal
+            try:
+                signal.disconnect()
+                logger.debug(f"Disconnected all connections from {sender.__class__.__name__}.{signal_name}")
+                return True
+            except Exception as e:
+                logger.warning(f"Failed to disconnect all connections from {sender.__class__.__name__}.{signal_name}: {e}")
+                return False
     
     @staticmethod
     def bind_all(sender: Any, receiver: Any, mappings: Dict[str, str]) -> Dict[str, bool]:
@@ -185,6 +192,11 @@ class SignalBinder:
         return results
     
     @staticmethod
+    @handle_errors(
+        action=ErrorAction.RETURN_DEFAULT,
+        default_return={},
+        message="Error getting signal names from {sender.__class__.__name__}: {error}"
+    )
     def unbind_all(sender: Any, receiver: Any, signal_names: List[str] = None) -> Dict[str, bool]:
         """
         Disconnect multiple signals from a sender to a receiver.
@@ -201,15 +213,11 @@ class SignalBinder:
         
         # If no signal names provided, try to get all signals from sender
         if signal_names is None:
-            try:
-                # Get all attributes that might be signals (those that have connect/disconnect methods)
-                signal_names = [attr for attr in dir(sender) 
-                                if not attr.startswith('_') and 
-                                hasattr(getattr(sender, attr), 'connect') and 
-                                hasattr(getattr(sender, attr), 'disconnect')]
-            except Exception as e:
-                logger.error(f"Error getting signal names from {sender.__class__.__name__}: {e}")
-                return results
+            # Get all attributes that might be signals (those that have connect/disconnect methods)
+            signal_names = [attr for attr in dir(sender) 
+                            if not attr.startswith('_') and 
+                            hasattr(getattr(sender, attr), 'connect') and 
+                            hasattr(getattr(sender, attr), 'disconnect')]
         
         # Disconnect each signal
         for signal_name in signal_names:

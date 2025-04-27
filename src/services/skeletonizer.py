@@ -10,6 +10,7 @@ import logging
 import numpy as np
 import cv2
 from typing import Optional, Tuple
+from src.utils.error_handling import error_handler, ErrorAction
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,11 @@ def skeletonize_image(image: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: Skeletonized binary image
     """
-    try:
+    with error_handler(
+        message="Skeletonization failed: {error}",
+        action=ErrorAction.RETURN_DEFAULT,
+        default_return=np.zeros((1, 1), dtype=np.uint8) if image is None else image
+    ) as handler:
         # Ensure the image is valid
         if image is None or image.size == 0:
             logger.error("Invalid image for skeletonization: None or empty")
@@ -71,10 +76,8 @@ def skeletonize_image(image: np.ndarray) -> np.ndarray:
                 skeleton = _custom_skeletonize(binary)
                 logger.debug("Used custom skeletonization implementation")
                 return skeleton
-    except Exception as e:
-        logger.error(f"Skeletonization failed: {e}")
-        # Return original image as fallback
-        return image
+    
+    return handler.result
         
 def skeletonize_roi(image: np.ndarray, threshold: int = 128) -> np.ndarray:
     """
@@ -87,7 +90,11 @@ def skeletonize_roi(image: np.ndarray, threshold: int = 128) -> np.ndarray:
     Returns:
         np.ndarray: Skeletonized binary image
     """
-    try:
+    with error_handler(
+        message="ROI skeletonization failed: {error}",
+        action=ErrorAction.RETURN_DEFAULT,
+        default_return=np.zeros((1, 1), dtype=np.uint8) if image is None else image
+    ) as handler:
         # Ensure image is valid
         if image is None or image.size == 0:
             logger.error("Invalid ROI for skeletonization: None or empty")
@@ -131,10 +138,8 @@ def skeletonize_roi(image: np.ndarray, threshold: int = 128) -> np.ndarray:
         filtered_skeleton = _filter_skeleton(skeleton)
         
         return filtered_skeleton
-    except Exception as e:
-        logger.error(f"ROI skeletonization failed: {e}")
-        # Return original image as fallback
-        return image
+    
+    return handler.result
         
 def _custom_skeletonize(binary_image: np.ndarray) -> np.ndarray:
     """
@@ -147,7 +152,11 @@ def _custom_skeletonize(binary_image: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: Skeletonized binary image
     """
-    try:
+    with error_handler(
+        message="Custom skeletonization failed: {error}",
+        action=ErrorAction.RETURN_DEFAULT,
+        default_return=binary_image
+    ) as handler:
         # Ensure binary image
         _, binary = cv2.threshold(binary_image, 128, 255, cv2.THRESH_BINARY)
         
@@ -166,9 +175,8 @@ def _custom_skeletonize(binary_image: np.ndarray) -> np.ndarray:
         skeleton = cv2.morphologyEx(dist_binary, cv2.MORPH_OPEN, kernel)
         
         return skeleton
-    except Exception as e:
-        logger.error(f"Custom skeletonization failed: {e}")
-        return binary_image
+    
+    return handler.result
         
 def _filter_skeleton(skeleton: np.ndarray) -> np.ndarray:
     """
@@ -180,7 +188,11 @@ def _filter_skeleton(skeleton: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: Filtered skeleton
     """
-    try:
+    with error_handler(
+        message="Skeleton filtering failed: {error}",
+        action=ErrorAction.RETURN_DEFAULT,
+        default_return=skeleton
+    ) as handler:
         # Create a copy to avoid modifying the original
         filtered = skeleton.copy()
         
@@ -204,21 +216,24 @@ def _filter_skeleton(skeleton: np.ndarray) -> np.ndarray:
         filtered[neighbor_count < 1] = 0
         
         return filtered
-    except Exception as e:
-        logger.error(f"Skeleton filtering failed: {e}")
-        return skeleton
+    
+    return handler.result
         
 def enhance_intersections(skeleton: np.ndarray) -> np.ndarray:
     """
-    Enhance intersections in a skeletonized image to make them more distinct.
+    Enhance intersection points in the skeleton for better detection.
     
     Args:
-        skeleton (np.ndarray): Skeletonized binary image
+        skeleton (np.ndarray): Skeletonized image
         
     Returns:
-        np.ndarray: Enhanced skeleton
+        np.ndarray: Skeleton with enhanced intersections
     """
-    try:
+    with error_handler(
+        message="Intersection enhancement failed: {error}",
+        action=ErrorAction.RETURN_DEFAULT,
+        default_return=skeleton
+    ) as handler:
         # Create a copy of the skeleton
         enhanced = skeleton.copy()
         
@@ -240,6 +255,5 @@ def enhance_intersections(skeleton: np.ndarray) -> np.ndarray:
             cv2.circle(enhanced, (x, y), 2, 255, -1)
             
         return enhanced
-    except Exception as e:
-        logger.error(f"Intersection enhancement failed: {e}")
-        return skeleton 
+    
+    return handler.result 

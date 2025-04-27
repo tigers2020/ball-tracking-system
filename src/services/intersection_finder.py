@@ -12,8 +12,15 @@ import cv2
 from typing import List, Tuple, Optional, Any, Dict
 from collections import defaultdict
 
+from src.utils.error_handling import handle_errors, ErrorAction
+
 logger = logging.getLogger(__name__)
 
+@handle_errors(
+    action=ErrorAction.RETURN_DEFAULT,
+    default_return=[],
+    message="Error finding intersections: {error}"
+)
 def find_intersections(skeleton: np.ndarray) -> List[Tuple[int, int]]:
     """
     Find intersections in a skeletonized image using kernel convolution.
@@ -24,55 +31,50 @@ def find_intersections(skeleton: np.ndarray) -> List[Tuple[int, int]]:
     Returns:
         List[Tuple[int, int]]: List of (x, y) coordinates of intersection points
     """
-    try:
-        # Ensure image is valid
-        if skeleton is None or skeleton.size == 0:
-            logger.error("Invalid skeleton: None or empty")
-            return []
-            
-        # Ensure image is binary
-        if skeleton.dtype != np.uint8:
-            skeleton = skeleton.astype(np.uint8)
-        
-        # Normalize to 0 and 1
-        skeleton = skeleton / 255 if np.max(skeleton) > 1 else skeleton
-        
-        # Create kernel for detecting intersections (3x3 neighborhood)
-        kernel = np.array([
-            [1, 1, 1],
-            [1, 10, 1],
-            [1, 1, 1]
-        ], dtype=np.uint8)
-        
-        # Convolve the image with the kernel
-        convolved = cv2.filter2D(skeleton, -1, kernel)
-        
-        # Find potential intersection points (value >= 13 means at least 3 neighbors)
-        intersections = np.where(convolved >= 13)
-        
-        # Convert to list of (x, y) tuples
-        intersection_points = [(int(x), int(y)) for y, x in zip(intersections[0], intersections[1])]
-        
-        # Merge nearby intersections (within 5 pixels)
-        merged_points = _merge_nearby_points(intersection_points, max_distance=5)
-        
-        logger.debug(f"Found {len(merged_points)} intersection points after merging")
-        
-        # If still no intersections found, try Hough transform
-        if not merged_points:
-            merged_points = find_intersections_hough(skeleton)
-            logger.debug(f"Used Hough method, found {len(merged_points)} intersections")
-            
-        # If still no intersections found, try harris corner detector
-        if not merged_points:
-            merged_points = find_intersections_harris(skeleton)
-            logger.debug(f"Used Harris method, found {len(merged_points)} intersections")
-            
-        return merged_points
-        
-    except Exception as e:
-        logger.error(f"Error finding intersections: {e}")
+    # Ensure image is valid
+    if skeleton is None or skeleton.size == 0:
+        logger.error("Invalid skeleton: None or empty")
         return []
+        
+    # Ensure image is binary
+    if skeleton.dtype != np.uint8:
+        skeleton = skeleton.astype(np.uint8)
+    
+    # Normalize to 0 and 1
+    skeleton = skeleton / 255 if np.max(skeleton) > 1 else skeleton
+    
+    # Create kernel for detecting intersections (3x3 neighborhood)
+    kernel = np.array([
+        [1, 1, 1],
+        [1, 10, 1],
+        [1, 1, 1]
+    ], dtype=np.uint8)
+    
+    # Convolve the image with the kernel
+    convolved = cv2.filter2D(skeleton, -1, kernel)
+    
+    # Find potential intersection points (value >= 13 means at least 3 neighbors)
+    intersections = np.where(convolved >= 13)
+    
+    # Convert to list of (x, y) tuples
+    intersection_points = [(int(x), int(y)) for y, x in zip(intersections[0], intersections[1])]
+    
+    # Merge nearby intersections (within 5 pixels)
+    merged_points = _merge_nearby_points(intersection_points, max_distance=5)
+    
+    logger.debug(f"Found {len(merged_points)} intersection points after merging")
+    
+    # If still no intersections found, try Hough transform
+    if not merged_points:
+        merged_points = find_intersections_hough(skeleton)
+        logger.debug(f"Used Hough method, found {len(merged_points)} intersections")
+        
+    # If still no intersections found, try harris corner detector
+    if not merged_points:
+        merged_points = find_intersections_harris(skeleton)
+        logger.debug(f"Used Harris method, found {len(merged_points)} intersections")
+        
+    return merged_points
 
 def _merge_nearby_points(points: List[Tuple[int, int]], max_distance: int = 5) -> List[Tuple[int, int]]:
     """
@@ -127,6 +129,11 @@ def _merge_nearby_points(points: List[Tuple[int, int]], max_distance: int = 5) -
     
     return merged
 
+@handle_errors(
+    action=ErrorAction.RETURN_DEFAULT,
+    default_return=[],
+    message="Error finding intersections with Hough transform: {error}"
+)
 def find_intersections_hough(skeleton: np.ndarray) -> List[Tuple[int, int]]:
     """
     Find intersections using Hough transform line detection.
@@ -137,71 +144,71 @@ def find_intersections_hough(skeleton: np.ndarray) -> List[Tuple[int, int]]:
     Returns:
         List[Tuple[int, int]]: List of (x, y) coordinates of intersection points
     """
-    try:
-        # Ensure image is valid
-        if skeleton is None or skeleton.size == 0:
-            logger.error("Invalid skeleton for Hough: None or empty")
-            return []
-            
-        # Ensure image is binary and in uint8 format
-        binary = (skeleton > 0).astype(np.uint8) * 255
-        
-        # Apply Hough Transform to detect lines with different parameters
-        # Try multiple parameter sets to maximize detection
-        parameter_sets = [
-            {'rho': 1, 'theta': np.pi/180, 'threshold': 20, 'minLineLength': 20, 'maxLineGap': 10},
-            {'rho': 1, 'theta': np.pi/180, 'threshold': 15, 'minLineLength': 15, 'maxLineGap': 15},
-            {'rho': 0.5, 'theta': np.pi/180, 'threshold': 10, 'minLineLength': 10, 'maxLineGap': 5}
-        ]
-        
-        all_lines = []
-        for params in parameter_sets:
-            lines = cv2.HoughLinesP(
-                binary, 
-                rho=params['rho'], 
-                theta=params['theta'], 
-                threshold=params['threshold'],
-                minLineLength=params['minLineLength'], 
-                maxLineGap=params['maxLineGap']
-            )
-            
-            if lines is not None:
-                all_lines.extend(lines)
-                
-        if not all_lines:
-            logger.debug("No lines found with HoughLinesP")
-            return []
-        
-        intersections = []
-        
-        # Find intersections between all lines
-        for i in range(len(all_lines)):
-            for j in range(i + 1, len(all_lines)):
-                x1, y1, x2, y2 = all_lines[i][0]
-                x3, y3, x4, y4 = all_lines[j][0]
-                
-                # Find intersection between two lines
-                intersection = line_intersection((x1, y1, x2, y2), (x3, y3, x4, y4))
-                
-                if intersection:
-                    x, y = intersection
-                    # Check if the point is within image boundaries
-                    height, width = skeleton.shape[:2]
-                    if 0 <= x < width and 0 <= y < height:
-                        # Check if the point is close to actual skeleton pixels
-                        if is_near_skeleton(skeleton, (int(x), int(y)), max_distance=3):
-                            intersections.append((int(x), int(y)))
-        
-        # Merge nearby intersections
-        merged_intersections = _merge_nearby_points(intersections)
-        
-        logger.debug(f"Found {len(merged_intersections)} intersection points using Hough transform")
-        return merged_intersections
-        
-    except Exception as e:
-        logger.error(f"Error finding intersections with Hough transform: {e}")
+    # Ensure image is valid
+    if skeleton is None or skeleton.size == 0:
+        logger.error("Invalid skeleton for Hough: None or empty")
         return []
+        
+    # Ensure image is binary and in uint8 format
+    binary = (skeleton > 0).astype(np.uint8) * 255
+    
+    # Apply Hough Transform to detect lines with different parameters
+    # Try multiple parameter sets to maximize detection
+    parameter_sets = [
+        {'rho': 1, 'theta': np.pi/180, 'threshold': 20, 'minLineLength': 20, 'maxLineGap': 10},
+        {'rho': 1, 'theta': np.pi/180, 'threshold': 15, 'minLineLength': 15, 'maxLineGap': 15},
+        {'rho': 0.5, 'theta': np.pi/180, 'threshold': 10, 'minLineLength': 10, 'maxLineGap': 5}
+    ]
+    
+    all_lines = []
+    for params in parameter_sets:
+        lines = cv2.HoughLinesP(
+            binary, 
+            rho=params['rho'], 
+            theta=params['theta'], 
+            threshold=params['threshold'],
+            minLineLength=params['minLineLength'], 
+            maxLineGap=params['maxLineGap']
+        )
+        
+        if lines is not None:
+            all_lines.extend(lines)
+            
+    if not all_lines:
+        logger.debug("No lines found with HoughLinesP")
+        return []
+    
+    intersections = []
+    
+    # Find intersections between all lines
+    for i in range(len(all_lines)):
+        for j in range(i + 1, len(all_lines)):
+            x1, y1, x2, y2 = all_lines[i][0]
+            x3, y3, x4, y4 = all_lines[j][0]
+            
+            # Find intersection between two lines
+            intersection = line_intersection((x1, y1, x2, y2), (x3, y3, x4, y4))
+            
+            if intersection:
+                x, y = intersection
+                # Check if the point is within image boundaries
+                height, width = skeleton.shape[:2]
+                if 0 <= x < width and 0 <= y < height:
+                    # Check if the point is close to actual skeleton pixels
+                    if is_near_skeleton(skeleton, (int(x), int(y)), max_distance=3):
+                        intersections.append((int(x), int(y)))
+    
+    # Merge nearby intersections
+    merged_intersections = _merge_nearby_points(intersections)
+    
+    logger.debug(f"Found {len(merged_intersections)} intersection points using Hough transform")
+    return merged_intersections
 
+@handle_errors(
+    action=ErrorAction.RETURN_DEFAULT,
+    default_return=[],
+    message="Error finding intersections with Harris corner detector: {error}"
+)
 def find_intersections_harris(skeleton: np.ndarray) -> List[Tuple[int, int]]:
     """
     Find intersections using Harris corner detection.
@@ -212,43 +219,38 @@ def find_intersections_harris(skeleton: np.ndarray) -> List[Tuple[int, int]]:
     Returns:
         List[Tuple[int, int]]: List of (x, y) coordinates of intersection points
     """
-    try:
-        # Ensure image is valid
-        if skeleton is None or skeleton.size == 0:
-            logger.error("Invalid skeleton for Harris: None or empty")
-            return []
-            
-        # Ensure image is binary and in uint8 format
-        binary = (skeleton > 0).astype(np.uint8) * 255
-        
-        # Detect corners using Harris corner detector
-        corners = cv2.cornerHarris(binary, blockSize=3, ksize=3, k=0.04)
-        
-        # Normalizing
-        cv2.normalize(corners, corners, 0, 255, cv2.NORM_MINMAX)
-        
-        # Thresholding
-        threshold = 0.01 * corners.max()
-        corner_points = np.where(corners > threshold)
-        
-        # Get corner coordinates
-        intersections = [(int(x), int(y)) for y, x in zip(corner_points[0], corner_points[1])]
-        
-        # Filter to keep only points that are on the skeleton
-        filtered_intersections = []
-        for point in intersections:
-            if is_near_skeleton(skeleton, point, max_distance=2):
-                filtered_intersections.append(point)
-        
-        # Merge nearby intersections
-        merged_intersections = _merge_nearby_points(filtered_intersections)
-        
-        logger.debug(f"Found {len(merged_intersections)} intersection points using Harris corner detector")
-        return merged_intersections
-        
-    except Exception as e:
-        logger.error(f"Error finding intersections with Harris corner detector: {e}")
+    # Ensure image is valid
+    if skeleton is None or skeleton.size == 0:
+        logger.error("Invalid skeleton for Harris: None or empty")
         return []
+        
+    # Ensure image is binary and in uint8 format
+    binary = (skeleton > 0).astype(np.uint8) * 255
+    
+    # Detect corners using Harris corner detector
+    corners = cv2.cornerHarris(binary, blockSize=3, ksize=3, k=0.04)
+    
+    # Normalizing
+    cv2.normalize(corners, corners, 0, 255, cv2.NORM_MINMAX)
+    
+    # Thresholding
+    threshold = 0.01 * corners.max()
+    corner_points = np.where(corners > threshold)
+    
+    # Get corner coordinates
+    intersections = [(int(x), int(y)) for y, x in zip(corner_points[0], corner_points[1])]
+    
+    # Filter to keep only points that are on the skeleton
+    filtered_intersections = []
+    for point in intersections:
+        if is_near_skeleton(skeleton, point, max_distance=2):
+            filtered_intersections.append(point)
+    
+    # Merge nearby intersections
+    merged_intersections = _merge_nearby_points(filtered_intersections)
+    
+    logger.debug(f"Found {len(merged_intersections)} intersection points using Harris corner detector")
+    return merged_intersections
 
 def find_corners(skeleton: np.ndarray) -> List[Tuple[int, int]]:
     """

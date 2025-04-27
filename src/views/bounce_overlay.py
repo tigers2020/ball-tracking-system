@@ -546,8 +546,8 @@ class BounceOverlayWidget(QGraphicsView):
         if game_analyzer:
             # Connect signals using SignalBinder
             signal_mappings = {
-                "court_position_updated": self._on_ball_position_updated,
-                "bounce_detected": self._on_bounce_detected
+                "court_position_updated": "_on_ball_position_updated",
+                "bounce_detected": "_on_bounce_detected"
             }
             
             # Connect all signals using SignalBinder

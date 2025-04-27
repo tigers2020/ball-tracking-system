@@ -34,6 +34,10 @@ class HOUGH:
     min_radius: int = 13
     max_radius: int = 25
     adaptive: bool = False
+    # Adaptive parameters for cropped images
+    MIN_RADIUS_CROPPED: int = 8
+    MAX_RADIUS_CROPPED: int = 14
+    MAX_PARAM2_CROPPED: int = 25
 
 
 @dataclass
@@ -82,6 +86,21 @@ class TRACKING:
     HISTORY_LENGTH: int = 120
     DETECTION_INTERVAL: int = 1
     PREDICTION_FRAMES: int = 5
+    MIN_PIXEL_THRESHOLD: int = 50  # Minimum number of white pixels required
+    # Visualization parameters
+    ROI_THICKNESS: int = 4  # Line thickness for ROI rectangles
+    CIRCLE_THICKNESS: int = 4  # Line thickness for detected circles
+    PREDICTION_THICKNESS: int = 4  # Line thickness for prediction arrows
+    UNCERTAINTY_RADIUS: int = 20  # Radius for uncertainty circle
+    TRAJECTORY_THICKNESS: int = 5  # Line thickness for trajectory
+    TRAJECTORY_MAX_POINTS: int = 20  # Maximum number of points to display in trajectory
+    # ROI movement constraints
+    MAX_ROI_JUMP_FACTOR: float = 0.3  # Maximum allowed ROI movement as a fraction of frame size
+    # Visualization colors
+    MAIN_CIRCLE_COLOR: Tuple[int, int, int] = (0, 255, 0)  # Green for main circles
+    PREDICTION_ARROW_COLOR: Tuple[int, int, int] = (0, 255, 255)  # Yellow-green for prediction arrows
+    TRAJECTORY_COLOR: Tuple[int, int, int] = (255, 255, 0)  # Yellow for trajectory lines
+    CENTER_POINT_COLOR: Tuple[int, int, int] = (0, 0, 255)  # Red for center points
 
 
 @dataclass
@@ -310,7 +329,6 @@ class ANALYSIS:
     BOUNCE_MARKER_SIZE: int = 8  # Size of bounce markers
     BOUNCE_IN_COLOR: Tuple[int, int, int] = COLOR.GREEN  # Color for IN bounces
     BOUNCE_OUT_COLOR: Tuple[int, int, int] = COLOR.RED   # Color for OUT bounces
-    TRAJECTORY_COLOR: Tuple[int, int, int] = COLOR.BLUE  # Color for ball trajectory
     COURT_LINE_COLOR: Tuple[int, int, int] = COLOR.WHITE  # Color for court lines
     COURT_LINE_THICKNESS: int = 2  # Thickness of court lines
     

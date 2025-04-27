@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-3D Geometry Utility module.
-This module provides functions for 3D triangulation, coordinate transformations,
+Core Geometry Utility module.
+This module provides essential functions for 3D triangulation, coordinate transformations,
 and related geometry calculations used across the application.
 """
 
@@ -12,17 +12,15 @@ import cv2
 import logging
 from typing import Tuple, List, Optional, Union, Dict, Any
 
-from src.utils.error_handling import handle_errors, ErrorAction
-
 logger = logging.getLogger(__name__)
 
 # Constants
 DEG2RAD = np.pi / 180.0
-
+RAD2DEG = 180.0 / np.pi
 
 def create_rotation_matrix(rx: float, ry: float, rz: float) -> np.ndarray:
     """
-    Create a 3D rotation matrix from Euler angles.
+    Create a 3D rotation matrix from Euler angles (ZYX convention).
     
     Args:
         rx: Rotation around X-axis (radians)
@@ -32,33 +30,28 @@ def create_rotation_matrix(rx: float, ry: float, rz: float) -> np.ndarray:
     Returns:
         3x3 rotation matrix (numpy array)
     """
+    # Create rotation matrices for each axis
     Rx = np.array([
         [1, 0, 0],
         [0, np.cos(rx), -np.sin(rx)],
         [0, np.sin(rx), np.cos(rx)]
-    ])
+    ], dtype=np.float32)
     
     Ry = np.array([
         [np.cos(ry), 0, np.sin(ry)],
         [0, 1, 0],
         [-np.sin(ry), 0, np.cos(ry)]
-    ])
+    ], dtype=np.float32)
     
     Rz = np.array([
         [np.cos(rz), -np.sin(rz), 0],
         [np.sin(rz), np.cos(rz), 0],
         [0, 0, 1]
-    ])
+    ], dtype=np.float32)
     
     # Return Z-Y-X intrinsic rotation (most common in computer vision)
     return Rz @ Ry @ Rx
 
-
-@handle_errors(
-    action=ErrorAction.RETURN_DEFAULT,
-    default_return=np.array([]),
-    message="Triangulation failed: {error}"
-)
 def triangulate_points(points_left: np.ndarray, 
                        points_right: np.ndarray,
                        proj_matrix_left: np.ndarray,
@@ -81,29 +74,28 @@ def triangulate_points(points_left: np.ndarray,
     if len(points_left) == 0:
         return np.array([])
     
-    # Reshape points for triangulation: (2, N)
-    points_left_reshaped = np.array(points_left, dtype=np.float32).T
-    points_right_reshaped = np.array(points_right, dtype=np.float32).T
-    
-    # Triangulate
-    points_4d = cv2.triangulatePoints(
-        proj_matrix_left,
-        proj_matrix_right,
-        points_left_reshaped,
-        points_right_reshaped
-    )
-    
-    # Convert from homogeneous coordinates to 3D
-    points_3d = (points_4d[:3] / points_4d[3]).T
-    
-    return points_3d
+    try:
+        # Reshape points for triangulation: (2, N)
+        points_left_reshaped = np.array(points_left, dtype=np.float32).T
+        points_right_reshaped = np.array(points_right, dtype=np.float32).T
+        
+        # Triangulate
+        points_4d = cv2.triangulatePoints(
+            proj_matrix_left,
+            proj_matrix_right,
+            points_left_reshaped,
+            points_right_reshaped
+        )
+        
+        # Convert from homogeneous coordinates to 3D
+        points_3d = (points_4d[:3] / points_4d[3]).T
+        
+        return points_3d
+        
+    except Exception as e:
+        logger.error(f"Triangulation failed: {e}")
+        return np.array([])
 
-
-@handle_errors(
-    action=ErrorAction.RETURN_DEFAULT,
-    default_return=None,
-    message="Point triangulation failed: {error}"
-)
 def triangulate_point(point_left: Tuple[float, float],
                      point_right: Tuple[float, float],
                      proj_matrix_left: np.ndarray,
@@ -120,86 +112,64 @@ def triangulate_point(point_left: Tuple[float, float],
     Returns:
         3D point [x, y, z] or None if triangulation fails
     """
-    # Convert to numpy arrays and reshape for triangulation
-    point_left_np = np.array([point_left], dtype=np.float32)
-    point_right_np = np.array([point_right], dtype=np.float32)
-    
-    # Use the triangulate_points function
-    points_3d = triangulate_points(
-        point_left_np, 
-        point_right_np, 
-        proj_matrix_left, 
-        proj_matrix_right
-    )
-    
-    if len(points_3d) == 0:
-        return None
+    try:
+        # Convert to numpy arrays and reshape for triangulation
+        point_left_np = np.array([point_left], dtype=np.float32)
+        point_right_np = np.array([point_right], dtype=np.float32)
         
-    return points_3d[0]
+        # Use the triangulate_points function
+        points_3d = triangulate_points(
+            point_left_np, 
+            point_right_np, 
+            proj_matrix_left, 
+            proj_matrix_right
+        )
+        
+        if len(points_3d) == 0:
+            return None
+            
+        return points_3d[0]
+        
+    except Exception as e:
+        logger.error(f"Point triangulation failed: {e}")
+        return None
 
-
-def triangulate_from_disparity(uL: float, vL: float, uR: float, vR: float, 
-                              camera_matrix: np.ndarray, 
-                              baseline_m: float,
-                              rotation_matrix: np.ndarray,
-                              translation_vector: np.ndarray) -> Optional[np.ndarray]:
+def calculate_projection_matrices(camera_matrix: np.ndarray,
+                                 R_left: np.ndarray, 
+                                 T_left: np.ndarray,
+                                 R_right: np.ndarray, 
+                                 T_right: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Triangulate 3D point from stereo disparity using a simplified model.
+    Calculate projection matrices for stereo cameras.
     
     Args:
-        uL: x-coordinate in left image (pixels)
-        vL: y-coordinate in left image (pixels)
-        uR: x-coordinate in right image (pixels)
-        vR: y-coordinate in right image (pixels)
         camera_matrix: Camera intrinsic matrix (3x3)
-        baseline_m: Baseline distance in meters
-        rotation_matrix: Camera rotation matrix (3x3)
-        translation_vector: Camera translation vector (3,1)
+        R_left: Rotation matrix for left camera (3x3)
+        T_left: Translation vector for left camera (3x1)
+        R_right: Rotation matrix for right camera (3x3)
+        T_right: Translation vector for right camera (3x1)
         
     Returns:
-        3D point in world coordinates (X,Y,Z) in meters, or None if invalid
+        Tuple of (left_projection_matrix, right_projection_matrix)
     """
-    # Calculate disparity
-    d = float(uL - uR)
+    # Ensure T vectors are correctly shaped
+    T_left = T_left.reshape(3, 1)
+    T_right = T_right.reshape(3, 1)
     
-    # Check for valid disparity
-    if abs(d) < 0.1:  # Threshold to avoid division by zero or invalid results
-        logger.warning(f"Invalid disparity: {d} (uL={uL}, uR={uR})")
-        return None
-        
-    # Camera parameters
-    fx = camera_matrix[0, 0]
-
-    # Triangulate depth
-    Z = fx * baseline_m / d                   # depth (m)
-    X_cam = (uL - camera_matrix[0, 2]) * Z / fx
-    Y_cam = (vL - camera_matrix[1, 2]) * Z / camera_matrix[1, 1]
+    # Calculate projection matrices
+    P_left = camera_matrix @ np.hstack((R_left, T_left))
+    P_right = camera_matrix @ np.hstack((R_right, T_right))
     
-    # Camera coordinates
-    camera_point = np.array([[X_cam], [Y_cam], [Z]])
-
-    # Transform from camera to world coordinates
-    world_point = rotation_matrix.T @ camera_point + translation_vector
-    
-    result = world_point.ravel()  # (X,Y,Z)
-    
-    # Sanity check on result
-    if not np.all(np.isfinite(result)):
-        logger.warning(f"Non-finite values in triangulated point: {result}")
-        return None
-        
-    logger.debug(f"Triangulated point: {result} from image points L({uL},{vL}), R({uR},{vR})")
-    return result
-
+    return P_left, P_right
 
 def calculate_reprojection_error(point_3d: np.ndarray,
                                 left_point: Tuple[float, float],
                                 right_point: Tuple[float, float],
                                 camera_matrix: np.ndarray,
-                                rotation_left: np.ndarray,
-                                translation_left: np.ndarray,
-                                rotation_right: np.ndarray,
-                                translation_right: np.ndarray) -> float:
+                                R_left: np.ndarray,
+                                T_left: np.ndarray,
+                                R_right: np.ndarray,
+                                T_right: np.ndarray) -> float:
     """
     Calculate reprojection error for a triangulated point.
     
@@ -208,10 +178,10 @@ def calculate_reprojection_error(point_3d: np.ndarray,
         left_point: Point in left image (x, y)
         right_point: Point in right image (x, y)
         camera_matrix: Camera intrinsic matrix (3x3)
-        rotation_left: Rotation matrix for left camera (3x3)
-        translation_left: Translation vector for left camera (3x1)
-        rotation_right: Rotation matrix for right camera (3x3)
-        translation_right: Translation vector for right camera (3x1)
+        R_left: Rotation matrix for left camera (3x3)
+        T_left: Translation vector for left camera (3x1)
+        R_right: Rotation matrix for right camera (3x3)
+        T_right: Translation vector for right camera (3x1)
         
     Returns:
         Average reprojection error in pixels
@@ -224,7 +194,7 @@ def calculate_reprojection_error(point_3d: np.ndarray,
     point_3d = np.array(point_3d).reshape(3, 1)
     
     # Project back to left camera image
-    cam_pt_left = rotation_left @ (point_3d - translation_left)
+    cam_pt_left = R_left @ (point_3d - T_left)
     
     # Ensure positive depth for left camera
     if cam_pt_left[2, 0] <= 0:
@@ -236,7 +206,7 @@ def calculate_reprojection_error(point_3d: np.ndarray,
     y_left = camera_matrix[1, 1] * cam_pt_left[1, 0] / z_left + camera_matrix[1, 2]
     
     # Project to right camera image
-    cam_pt_right = rotation_right @ (point_3d - translation_right)
+    cam_pt_right = R_right @ (point_3d - T_right)
     
     # Ensure positive depth for right camera
     if cam_pt_right[2, 0] <= 0:
@@ -253,7 +223,6 @@ def calculate_reprojection_error(point_3d: np.ndarray,
     
     # Return average error
     return (err_left + err_right) / 2.0
-
 
 def transform_to_world(point_3d: np.ndarray,
                       rotation_matrix: np.ndarray,
@@ -277,7 +246,6 @@ def transform_to_world(point_3d: np.ndarray,
     
     return point_world
 
-
 def transform_batch_to_world(points_3d: np.ndarray,
                            rotation_matrix: np.ndarray,
                            translation_vector: np.ndarray) -> np.ndarray:
@@ -299,36 +267,6 @@ def transform_batch_to_world(points_3d: np.ndarray,
     points_world = np.dot(points_3d, rotation_matrix) + t_flat
     
     return points_world
-
-
-def calculate_landing_position(pos: np.ndarray, vel: np.ndarray) -> Optional[np.ndarray]:
-    """
-    Calculate the landing position when a ball hits the ground (z=0).
-    
-    Args:
-        pos: Current position [x, y, z]
-        vel: Current velocity [vx, vy, vz]
-        
-    Returns:
-        Landing position [x, y, 0] or None if not possible to calculate
-    """
-    # If ball is moving upward, can't calculate landing
-    if vel[2] >= 0:
-        return None
-    
-    # Calculate time to hit ground (z=0)
-    time_to_hit = -pos[2] / vel[2]
-    
-    # If time is negative, can't calculate landing
-    if time_to_hit < 0:
-        return None
-    
-    # Calculate landing position
-    landing_x = pos[0] + vel[0] * time_to_hit
-    landing_y = pos[1] + vel[1] * time_to_hit
-    
-    return np.array([landing_x, landing_y, 0.0])
-
 
 def ray_plane_intersection(camera_center: np.ndarray,
                           ray_direction: np.ndarray,
@@ -365,4 +303,35 @@ def ray_plane_intersection(camera_center: np.ndarray,
     # Calculate intersection point
     intersection = camera_center + t * ray_direction
     
-    return intersection 
+    return intersection
+
+def pixel_to_camera_ray(pixel_point: Tuple[float, float],
+                       camera_matrix: np.ndarray) -> np.ndarray:
+    """
+    Convert a pixel coordinate to a ray in camera space.
+    
+    Args:
+        pixel_point: Point in image (u, v)
+        camera_matrix: Camera intrinsic matrix (3x3)
+        
+    Returns:
+        Ray direction vector [dx, dy, dz] in camera space
+    """
+    u, v = pixel_point
+    
+    # Get camera intrinsics
+    fx = camera_matrix[0, 0]
+    fy = camera_matrix[1, 1]
+    cx = camera_matrix[0, 2]
+    cy = camera_matrix[1, 2]
+    
+    # Calculate ray direction in camera space
+    x = (u - cx) / fx
+    y = (v - cy) / fy
+    z = 1.0
+    
+    # Normalize ray direction
+    ray = np.array([x, y, z])
+    ray = ray / np.linalg.norm(ray)
+    
+    return ray 

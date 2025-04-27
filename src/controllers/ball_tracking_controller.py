@@ -29,7 +29,7 @@ from src.services.data_saver import DataSaver
 from src.services.triangulation_service import TriangulationService
 from src.utils.config_manager import ConfigManager
 from src.utils.coord_utils import fuse_coordinates
-from src.utils.constants import HSV, ROI, COLOR, STEREO
+from src.utils.constants import HSV, ROI, COLOR, STEREO, TRACKING, ANALYSIS, HOUGH
 
 
 class TrackingState(Enum):
@@ -360,7 +360,7 @@ class BallTrackingController(QObject):
             
             # Check if pixel count is too low (less than 50 pixels)
             # Skip processing if both masks have too few pixels
-            min_pixel_threshold = 50  # Minimum number of white pixels required
+            min_pixel_threshold = TRACKING.MIN_PIXEL_THRESHOLD  # Minimum number of white pixels required
             if left_pixel_count < min_pixel_threshold and right_pixel_count < min_pixel_threshold:
                 logging.warning(f"HSV mask pixel count too low: left={left_pixel_count}, right={right_pixel_count}. Skipping frame.")
                 return
@@ -470,14 +470,14 @@ class BallTrackingController(QObject):
             
             # 1. Always draw ROI on images (regardless of whether ROI is enabled)
             if self.left_roi:
-                # Use thicker lines (4) for better visibility
+                # Use thicker lines for better visibility
                 left_viz_image = draw_roi(
                     left_viz_image, 
                     self.left_roi, 
-                    color=(0, 255, 0),  # Green color
-                    thickness=4,
+                    color=COLOR.GREEN,
+                    thickness=TRACKING.ROI_THICKNESS,
                     show_center=True,
-                    center_color=(0, 0, 255)  # Red center
+                    center_color=COLOR.RED
                 )
                 logging.debug(f"Drew left ROI: {self.left_roi}")
             
@@ -485,10 +485,10 @@ class BallTrackingController(QObject):
                 right_viz_image = draw_roi(
                     right_viz_image, 
                     self.right_roi, 
-                    color=(0, 255, 0),  # Green color
-                    thickness=4,
+                    color=COLOR.GREEN,
+                    thickness=TRACKING.ROI_THICKNESS,
                     show_center=True,
-                    center_color=(0, 0, 255)  # Red center
+                    center_color=COLOR.RED
                 )
                 logging.debug(f"Drew right ROI: {self.right_roi}")
             
@@ -498,8 +498,8 @@ class BallTrackingController(QObject):
                 left_viz_image = draw_circles(
                     left_viz_image, 
                     left_circles, 
-                    main_color=(0, 255, 0),  # Green for main circle
-                    thickness=4,
+                    main_color=TRACKING.MAIN_CIRCLE_COLOR,
+                    thickness=TRACKING.CIRCLE_THICKNESS,
                     label_circles=True  # Add numbered labels for clearer identification
                 )
                 logging.debug(f"Drew {len(left_circles)} circles on left image")
@@ -508,8 +508,8 @@ class BallTrackingController(QObject):
                 right_viz_image = draw_circles(
                     right_viz_image, 
                     right_circles, 
-                    main_color=(0, 255, 0),  # Green for main circle
-                    thickness=4,
+                    main_color=TRACKING.MAIN_CIRCLE_COLOR,
+                    thickness=TRACKING.CIRCLE_THICKNESS,
                     label_circles=True
                 )
                 logging.debug(f"Drew {len(right_circles)} circles on right image")
@@ -525,10 +525,10 @@ class BallTrackingController(QObject):
                     left_viz_image, 
                     current_pos, 
                     pred_pos, 
-                    arrow_color=(0, 255, 255),  # Yellow-green arrow
-                    thickness=4,
+                    arrow_color=TRACKING.PREDICTION_ARROW_COLOR,
+                    thickness=TRACKING.PREDICTION_THICKNESS,
                     draw_uncertainty=True,  # 예측 불확실성 표시
-                    uncertainty_radius=20   # 더 큰 불확실성 원
+                    uncertainty_radius=TRACKING.UNCERTAINTY_RADIUS
                 )
                 
                 # Draw trajectory if available
@@ -684,12 +684,12 @@ class BallTrackingController(QObject):
             frame_width = left_image.shape[1]
             frame_height = left_image.shape[0]
             
-            if dx > frame_width * 0.3 or dy > frame_height * 0.3:
+            if dx > frame_width * TRACKING.MAX_ROI_JUMP_FACTOR or dy > frame_height * TRACKING.MAX_ROI_JUMP_FACTOR:
                 logging.warning(f"Large ROI jump detected: dx={dx}px, dy={dy}px. Limiting movement.")
                 
                 # 너무 큰 이동 제한 - 이전 ROI와 현재 ROI의 중간으로 제한
-                max_dx = int(frame_width * 0.3)
-                max_dy = int(frame_height * 0.3)
+                max_dx = int(frame_width * TRACKING.MAX_ROI_JUMP_FACTOR)
+                max_dy = int(frame_height * TRACKING.MAX_ROI_JUMP_FACTOR)
                 
                 # 새 중심점 계산
                 new_left_x = prev_left_x + np.clip(curr_left_x - prev_left_x, -max_dx, max_dx)
@@ -2054,10 +2054,10 @@ class BallTrackingController(QObject):
         # Ensure min_radius is small enough for tennis ball detection
         if adaptive_enabled:
             if 'min_radius' in current_hough_settings:
-                current_hough_settings['min_radius'] = max(8, min(current_hough_settings['min_radius'], 14))
+                current_hough_settings['min_radius'] = max(HOUGH.MIN_RADIUS_CROPPED, min(current_hough_settings['min_radius'], HOUGH.MAX_RADIUS_CROPPED))
             
             if 'param2' in current_hough_settings:
-                current_hough_settings['param2'] = min(current_hough_settings['param2'], 25)
+                current_hough_settings['param2'] = min(current_hough_settings['param2'], HOUGH.MAX_PARAM2_CROPPED)
         
         # Update detector with modified settings if needed
         if current_hough_settings != self._hough_settings:
@@ -2124,3 +2124,179 @@ class BallTrackingController(QObject):
         # Reprocess current frame if tracking is enabled
         if self.is_enabled and (self.model.left_image is not None or self.model.right_image is not None):
             self._process_images()
+
+    def _process_hsv_masks(self, left_image, right_image):
+        # Process HSV masks
+        left_mask = self._apply_hsv_mask(left_image, self.hsv_values)
+        right_mask = self._apply_hsv_mask(right_image, self.hsv_values)
+
+        # Set masks to model
+        self.model.left_mask = left_mask
+        self.model.right_mask = right_mask
+
+        # Check for minimum pixel count
+        min_pixel_threshold = TRACKING.MIN_PIXEL_THRESHOLD
+        left_pixel_count = np.count_nonzero(left_mask)
+        right_pixel_count = np.count_nonzero(right_mask)
+
+        if left_pixel_count < min_pixel_threshold and right_pixel_count < min_pixel_threshold:
+            logging.warning(f"HSV mask pixel count too low: left={left_pixel_count}, right={right_pixel_count}. Skipping frame.")
+            return False
+
+        return True
+
+    def _draw_roi(self, left_frame, right_frame, show_original_roi=False):
+        # Draw ROI on both frames if enabled
+        roi_settings = self.roi_settings or {}
+        if not roi_settings.get('enabled', False):
+            return
+        
+        if hasattr(self, 'left_roi') and self.left_roi:
+            x, y = self.left_roi.get('x', 0), self.left_roi.get('y', 0)
+            w, h = self.left_roi.get('width', 0), self.left_roi.get('height', 0)
+            
+            # Draw rectangle for ROI
+            cv2.rectangle(
+                left_frame, 
+                (x, y), 
+                (x + w, y + h), 
+                COLOR.GREEN, 
+                TRACKING.ROI_THICKNESS
+            )
+            # Draw center point
+            center_x, center_y = x + w // 2, y + h // 2
+            cv2.circle(
+                left_frame, 
+                (center_x, center_y), 
+                ROI.CENTER_MARKER_SIZE, 
+                COLOR.RED, 
+                -1
+            )
+            logging.debug(f"Drew left ROI: {self.left_roi}")
+        
+        if hasattr(self, 'right_roi') and self.right_roi:
+            x, y = self.right_roi.get('x', 0), self.right_roi.get('y', 0)
+            w, h = self.right_roi.get('width', 0), self.right_roi.get('height', 0)
+            
+            # Draw rectangle for ROI
+            cv2.rectangle(
+                right_frame, 
+                (x, y), 
+                (x + w, y + h), 
+                COLOR.GREEN, 
+                TRACKING.ROI_THICKNESS
+            )
+            # Draw center point
+            center_x, center_y = x + w // 2, y + h // 2
+            cv2.circle(
+                right_frame, 
+                (center_x, center_y), 
+                ROI.CENTER_MARKER_SIZE, 
+                COLOR.RED, 
+                -1
+            )
+            logging.debug(f"Drew right ROI: {self.right_roi}")
+    
+    def _draw_detected_circles(self, left_frame, right_frame):
+        if not hasattr(self.model, 'left_circles') or not hasattr(self.model, 'right_circles'):
+            return
+            
+        left_circles = self.model.left_circles or []
+        for circle in left_circles:
+            x, y, r = circle
+            cv2.circle(
+                left_frame, 
+                (int(x), int(y)), 
+                int(r), 
+                COLOR.YELLOW, 
+                TRACKING.CIRCLE_THICKNESS
+            )
+            # Draw center point
+            cv2.circle(
+                left_frame, 
+                (int(x), int(y)), 
+                ROI.CENTER_MARKER_SIZE // 2, 
+                COLOR.RED, 
+                -1
+            )
+        logging.debug(f"Drew {len(left_circles)} circles on left image")
+        
+        right_circles = self.model.right_circles or []
+        for circle in right_circles:
+            x, y, r = circle
+            cv2.circle(
+                right_frame, 
+                (int(x), int(y)), 
+                int(r), 
+                COLOR.YELLOW, 
+                TRACKING.CIRCLE_THICKNESS
+            )
+            # Draw center point
+            cv2.circle(
+                right_frame, 
+                (int(x), int(y)), 
+                ROI.CENTER_MARKER_SIZE // 2, 
+                COLOR.RED, 
+                -1
+            )
+        logging.debug(f"Drew {len(right_circles)} circles on right image")
+    
+    def _draw_trajectory(self, left_frame, right_frame):
+        if not hasattr(self, 'kalman_processor') or self.kalman_processor is None:
+            return
+            
+        # Draw path on the left image
+        left_history = self.kalman_processor.get_position_history("left")
+        if left_history and len(left_history) > 1:
+            # Convert points to int tuples
+            points = [(int(p[0]), int(p[1])) for p in left_history]
+            
+            # Draw polyline for trajectory
+            cv2.polylines(
+                left_frame, 
+                [np.array(points)], 
+                False, 
+                TRACKING.TRAJECTORY_COLOR, 
+                TRACKING.TRAJECTORY_THICKNESS
+            )
+            
+            # Draw the predicted point if available
+            if hasattr(self.model, 'left_prediction') and self.model.left_prediction is not None:
+                x, y = self.model.left_prediction
+                cv2.circle(
+                    left_frame, 
+                    (int(x), int(y)), 
+                    TRACKING.UNCERTAINTY_RADIUS // 4, 
+                    COLOR.ORANGE, 
+                    -1
+                )
+        
+        logging.debug(f"Drew left trajectory with {len(left_history) if left_history else 0} points")
+        
+        # Draw path on the right image
+        right_history = self.kalman_processor.get_position_history("right")
+        if right_history and len(right_history) > 1:
+            # Convert points to int tuples
+            points = [(int(p[0]), int(p[1])) for p in right_history]
+            
+            # Draw polyline for trajectory
+            cv2.polylines(
+                right_frame, 
+                [np.array(points)], 
+                False, 
+                TRACKING.TRAJECTORY_COLOR, 
+                TRACKING.TRAJECTORY_THICKNESS
+            )
+            
+            # Draw the predicted point if available
+            if hasattr(self.model, 'right_prediction') and self.model.right_prediction is not None:
+                x, y = self.model.right_prediction
+                cv2.circle(
+                    right_frame, 
+                    (int(x), int(y)), 
+                    TRACKING.UNCERTAINTY_RADIUS // 4, 
+                    COLOR.ORANGE, 
+                    -1
+                )
+        
+        logging.debug(f"Drew right trajectory with {len(right_history) if right_history else 0} points")
