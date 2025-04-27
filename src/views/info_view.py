@@ -7,12 +7,22 @@ This module contains the InfoView class for displaying tracking information in a
 """
 
 import logging
+import os
+import re
+from collections import deque
+from datetime import datetime
+from pathlib import Path
+import time
+import traceback
+
 import numpy as np
+from PySide6.QtCore import Qt, Slot, QMetaObject, Signal, QTimer
+from PySide6.QtGui import QFont, QColor, QPalette, QPixmap, QIcon, QImage, QPainter, QBrush, QPen
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QGroupBox, QFormLayout
+    QGroupBox, QFormLayout, QPushButton, QGridLayout,
+    QSizePolicy, QFrame, QScrollArea
 )
-from PySide6.QtCore import Qt
 
 # Fix import errors using correct paths
 from src.utils.constants import LAYOUT
@@ -22,13 +32,22 @@ from src.views.visualization.hough_circle_visualizer import HoughCircleVisualize
 from src.views.visualization.kalman_path_visualizer import KalmanPathVisualizer
 from src.views.widgets.inout_indicator import InOutLED
 from src.utils.signal_binder import SignalBinder
+from src.models.net_zone import NetZone
+from src.utils.format_utils import format_time_delta
+from src.views.widgets.panel_label import PanelLabel
 
+# 로거 설정
+logger = logging.getLogger("InfoView")
 
 class InfoView(QWidget):
     """
     Widget for displaying detection information in the Stereo Image Player.
     Displays detection rate, 2D pixel coordinates, and 3D position coordinates.
     """
+    
+    # 시그널 정의
+    screenshot_requested = Signal(str)
+    capture_requested = Signal(str)
     
     def __init__(self, parent=None):
         """
@@ -37,7 +56,7 @@ class InfoView(QWidget):
         Args:
             parent (QWidget, optional): Parent widget
         """
-        super(InfoView, self).__init__(parent)
+        super().__init__(parent)
         
         # Default values
         self.detection_rate = 0.0  # Percentage
@@ -59,6 +78,52 @@ class InfoView(QWidget):
         
         # Visualizers list
         self._visualizers = []
+        
+        # 데이터 저장용 변수 초기화
+        self.left_coords = None
+        self.right_coords = None
+        self.position_3d = None
+        self.tracking_rate = 0.0
+        self.fps = 0.0
+        self.frame_count = 0
+        self.detection_count = 0
+        self.prediction_data = {}
+        self.rally_count = 0
+        self.last_update_time = time.time()
+        self._session_start_time = datetime.now()
+        self.total_session_time = "00:00:00"
+        self.current_rally_duration = "00:00:00"
+        
+        # 점수 관련 변수
+        self.score = {"player1": 0, "player2": 0}
+        self.current_game = 1
+        self.games_won = {"player1": 0, "player2": 0}
+        
+        # 거리 및 속도 관련 변수
+        self.ball_speed = 0.0
+        self.travel_distance = 0.0
+        
+        # 유효/아웃 판정 관련 변수
+        self.is_in = True
+        
+        # 코트 위치 데이터
+        self.ball_position_percentages = {
+            "left": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0
+        }
+        
+        # 이전 위치 정보 저장 (속도 계산용)
+        self.position_history = deque(maxlen=10)
+        
+        # UI 업데이트 타이머
+        self.update_timer = QTimer(self)
+        self.update_timer.timeout.connect(self._update_ui)
+        self.update_timer.start(500)  # 500ms마다 UI 업데이트
+        
+        # UI 업데이트 큐 (최근 업데이트 시간 추적용)
+        self.update_queue = deque(maxlen=5)
         
         # Set up UI
         self._setup_ui()
@@ -124,6 +189,10 @@ class InfoView(QWidget):
         main_layout.addWidget(position_group)
         main_layout.addWidget(roi_group)
         main_layout.addWidget(kalman_group)
+        
+        # Create current time and session time labels
+        self.current_time_label = QLabel()
+        self.session_time_label = QLabel("Session: 00:00:00")
     
     def _create_group_box(self, title):
         """
@@ -162,14 +231,14 @@ class InfoView(QWidget):
         return tuple(labels)
     
     def set_detection_rate(self, rate):
-        """
-        Set the detection rate value.
-        
-        Args:
-            rate (float): Detection rate (0.0 to 1.0)
-        """
-        self.detection_rate = rate
-        self.detection_label.setText(f"{rate:.2%}")
+        """탐지율 설정 (0.0 ~ 1.0)"""
+        try:
+            self.detection_rate = rate
+            percentage = int(rate * 100)
+            self.detection_label.setText(f"{percentage}%")
+            logger.debug(f"Detection rate set: {rate:.2f} ({percentage}%)")
+        except Exception as e:
+            logger.error(f"Error setting detection rate: {e}")
     
     def set_left_pixel_coords(self, x, y, r=0):
         """
@@ -180,12 +249,14 @@ class InfoView(QWidget):
             y (int): Y coordinate
             r (int, optional): Radius
         """
+        logging.debug(f"[InfoView DEBUG] set_left_pixel_coords called with x={x}, y={y}, r={r}")
         self.left_pixel_coords["x"] = x
         self.left_pixel_coords["y"] = y
         self.left_pixel_coords["r"] = r
         self.left_pixel_x_label.setText(str(x))
         self.left_pixel_y_label.setText(str(y))
         self.left_pixel_r_label.setText(str(r))
+        self.update()  # Force UI refresh
     
     def set_right_pixel_coords(self, x, y, r=0):
         """
@@ -196,12 +267,14 @@ class InfoView(QWidget):
             y (int): Y coordinate
             r (int, optional): Radius
         """
+        logging.debug(f"[InfoView DEBUG] set_right_pixel_coords called with x={x}, y={y}, r={r}")
         self.right_pixel_coords["x"] = x
         self.right_pixel_coords["y"] = y
         self.right_pixel_coords["r"] = r
         self.right_pixel_x_label.setText(str(x))
         self.right_pixel_y_label.setText(str(y))
         self.right_pixel_r_label.setText(str(r))
+        self.update()  # Force UI refresh
     
     def set_position_coords(self, x, y, z):
         """
@@ -212,6 +285,7 @@ class InfoView(QWidget):
             y (float): Y coordinate in world space (meters)
             z (float): Z coordinate in world space (meters)
         """
+        logging.debug(f"[InfoView DEBUG] set_position_coords called with x={x:.3f}, y={y:.3f}, z={z:.3f}")
         self.position_coords_3d["x"] = x
         self.position_coords_3d["y"] = y
         self.position_coords_3d["z"] = z
@@ -219,8 +293,12 @@ class InfoView(QWidget):
         self.position_y_label.setText(f"{y:.3f}")
         self.position_z_label.setText(f"{z:.3f}")
         
+        # Store for internal use
+        self.position_3d = (x, y, z)
+        
         # Add debug log to verify coordinates are being set
         logging.info(f"[UI UPDATE] 3D coordinates set to: x={x:.3f}, y={y:.3f}, z={z:.3f}")
+        self.update()  # Force UI refresh
     
     def set_left_roi(self, x, y, width, height):
         """
@@ -306,18 +384,22 @@ class InfoView(QWidget):
             # Connect detection_updated signal to handler method directly to ensure proper connection
             try:
                 # Connect detection_updated signal to handler method (including 3D coordinate update)
-                controller.detection_updated.connect(self._on_detection_updated)
+                # Use Qt.QueuedConnection to ensure the slot is executed in the main event loop
+                controller.detection_updated.connect(
+                    self._on_detection_updated, 
+                    Qt.QueuedConnection
+                )
                 logging.info("Connected BallTrackingController.detection_updated to InfoView._on_detection_updated")
                 
                 # ROI update signal directly
                 if hasattr(controller, "roi_updated"):
-                    controller.roi_updated.connect(self._on_roi_updated)
+                    controller.roi_updated.connect(self._on_roi_updated, Qt.QueuedConnection)
                     logging.info("Connected BallTrackingController.roi_updated to InfoView._on_roi_updated")
                 
                 # Connect prediction update signal for Kalman state
                 if hasattr(controller, "prediction_updated"):
                     # Try direct connection first
-                    controller.prediction_updated.connect(self._on_kalman_predicted)
+                    controller.prediction_updated.connect(self._on_kalman_predicted, Qt.QueuedConnection)
                     logging.info("Connected BallTrackingController.prediction_updated to InfoView._on_kalman_predicted")
                 
                 # Also try SignalBinder as backup
@@ -329,7 +411,8 @@ class InfoView(QWidget):
                 try:
                     controller.detection_updated.connect(
                         lambda frame_idx, rate, left, right, pos=None: 
-                        self._on_detection_updated(frame_idx, rate, left, right, pos)
+                        self._on_detection_updated(frame_idx, rate, left, right, pos),
+                        Qt.QueuedConnection
                     )
                     logging.info("Fallback connection to detection_updated established")
                 except Exception as e2:
@@ -338,7 +421,8 @@ class InfoView(QWidget):
             # Set up visualizers with controller
             self._setup_visualizers_with_controller(controller)
             
-            logging.info("InfoView connected to ball tracking controller")
+            # Print the object ID to verify it's the same instance used elsewhere
+            logging.info(f"InfoView instance {id(self)} connected to controller {id(controller)}")
     
     def connect_game_analyzer(self, analyzer):
         """
@@ -359,21 +443,24 @@ class InfoView(QWidget):
             
             # Connect all signals directly to ensure proper connection
             try:
-                analyzer.tracking_updated.connect(self._on_tracking_updated)
-                analyzer.in_out_detected.connect(self.in_out_led.on_in_out)
+                # Use Qt.QueuedConnection to ensure the slot is executed in the main event loop
+                from PySide6.QtCore import Qt
+                analyzer.tracking_updated.connect(self._on_tracking_updated, Qt.QueuedConnection)
+                analyzer.in_out_detected.connect(self.in_out_led.on_in_out, Qt.QueuedConnection)
                 if hasattr(analyzer, "court_position_updated"):
-                    analyzer.court_position_updated.connect(self._on_court_position_updated)
+                    analyzer.court_position_updated.connect(self._on_court_position_updated, Qt.QueuedConnection)
                 
                 # Also try using SignalBinder for redundancy
                 SignalBinder.bind_all(analyzer, self, signal_mappings)
                 
-                logging.info("InfoView connected to game analyzer")
+                # Print the object ID to verify it's the same instance used elsewhere
+                logging.info(f"InfoView instance {id(self)} connected to analyzer {id(analyzer)}")
                 logging.debug(f"Signal connections established: tracking_updated, in_out_detected, court_position_updated")
             except Exception as e:
                 logging.error(f"Error connecting to game analyzer signals: {e}")
                 # Fallback direct connection for tracking_updated
                 try:
-                    analyzer.tracking_updated.connect(self._on_tracking_updated)
+                    analyzer.tracking_updated.connect(self._on_tracking_updated, Qt.QueuedConnection)
                     logging.info("Fallback connection to tracking_updated established")
                 except Exception as e2:
                     logging.error(f"Fallback connection failed: {e2}")
@@ -395,70 +482,49 @@ class InfoView(QWidget):
         
         logging.info(f"Set up {len(self._visualizers)} visualizers")
     
-    def _on_detection_updated(self, frame_idx, detection_rate, left_coords, right_coords, position_coords=None):
+    @Slot(int, float, tuple, tuple, tuple)
+    def _on_detection_updated(self, frame_idx, detection_rate, left_coords, right_coords, position_3d):
         """
-        Handle detection update signal from ball tracking controller.
+        탐지 결과 업데이트 시 호출되는 슬롯
         
-        Args:
-            frame_idx (int): Frame index
-            detection_rate (float): Detection rate between 0-1
-            left_coords (tuple): Coordinates in left image (x, y, r) or None
-            right_coords (tuple): Coordinates in right image (x, y, r) or None
-            position_coords (tuple, optional): 3D position coordinates (x, y, z)
+        매개변수:
+            frame_idx (int): 프레임 인덱스
+            detection_rate (float): 탐지 성공률 (0.0 ~ 1.0)
+            left_coords (tuple): 좌측 카메라 좌표 (x, y, r) 또는 None
+            right_coords (tuple): 우측 카메라 좌표 (x, y, r) 또는 None
+            position_3d (tuple): 3D 위치 좌표 (x, y, z) 또는 None
         """
-        # Update detection rate
-        self.set_detection_rate(detection_rate)
+        try:
+            # 좌표 정보 업데이트
+            if left_coords:
+                self.set_left_coordinates(left_coords)
+                # Direct update of UI labels
+                self.set_left_pixel_coords(left_coords[0], left_coords[1], left_coords[2] if len(left_coords) > 2 else 0)
+            
+            if right_coords:
+                self.set_right_coordinates(right_coords)
+                # Direct update of UI labels
+                self.set_right_pixel_coords(right_coords[0], right_coords[1], right_coords[2] if len(right_coords) > 2 else 0)
+            
+            if position_3d:
+                logger.debug(f"Received 3D position: {position_3d}")
+                self.set_position_3d(position_3d)
+                # Direct update of UI labels
+                self.set_position_coords(position_3d[0], position_3d[1], position_3d[2])
+            
+            # 탐지율 업데이트
+            self.set_detection_rate(detection_rate)
+            
+            # 30 프레임마다 로그 기록 (디버그 레벨)
+            if frame_idx % 30 == 0:
+                logger.debug(f"Detection updated - Frame: {frame_idx}, "
+                           f"Left: {left_coords}, "
+                           f"Right: {right_coords}, "
+                           f"3D: {position_3d}")
         
-        # Safety check for left_coords - must be tuple-like (list, tuple, array)
-        if left_coords is not None:
-            try:
-                if isinstance(left_coords, (tuple, list, np.ndarray)):
-                    x, y = left_coords[0], left_coords[1]
-                    r = left_coords[2] if len(left_coords) > 2 else 0
-                    self.set_left_pixel_coords(x, y, r)
-                    logging.info(f"[LEFT PIXEL] Updated: x={x}, y={y}, r={r}")
-                else:
-                    logging.warning(f"Invalid left_coords type: {type(left_coords)}")
-                    self.set_left_pixel_coords(0, 0, 0)
-            except (IndexError, TypeError) as e:
-                logging.error(f"Error processing left_coords {left_coords}: {e}")
-                self.set_left_pixel_coords(0, 0, 0)
-        else:
-            self.set_left_pixel_coords(0, 0, 0)
-        
-        # Safety check for right_coords - must be tuple-like
-        if right_coords is not None:
-            try:
-                if isinstance(right_coords, (tuple, list, np.ndarray)):
-                    x, y = right_coords[0], right_coords[1]
-                    r = right_coords[2] if len(right_coords) > 2 else 0
-                    self.set_right_pixel_coords(x, y, r)
-                    logging.info(f"[RIGHT PIXEL] Updated: x={x}, y={y}, r={r}")
-                else:
-                    logging.warning(f"Invalid right_coords type: {type(right_coords)}")
-                    self.set_right_pixel_coords(0, 0, 0)
-            except (IndexError, TypeError) as e:
-                logging.error(f"Error processing right_coords {right_coords}: {e}")
-                self.set_right_pixel_coords(0, 0, 0)
-        else:
-            self.set_right_pixel_coords(0, 0, 0)
-        
-        # Enhanced 3D position update with better debug logging
-        if position_coords is not None:
-            try:
-                if isinstance(position_coords, (tuple, list, np.ndarray)) and len(position_coords) >= 3:
-                    x, y, z = position_coords[0], position_coords[1], position_coords[2]
-                    self.set_position_coords(x, y, z)
-                    logging.info(f"[3D WORLD] Updated: x={x:.3f}, y={y:.3f}, z={z:.3f}")
-                else:
-                    logging.warning(f"Invalid position_coords format: {position_coords}")
-            except (IndexError, TypeError) as e:
-                logging.error(f"Error processing position_coords {position_coords}: {e}")
-        
-        # Log with proper type information
-        left_type = type(left_coords).__name__ if left_coords is not None else "None"
-        right_type = type(right_coords).__name__ if right_coords is not None else "None"
-        logging.debug(f"Info view updated: frame={frame_idx}, rate={detection_rate:.2f}, left=({left_type}){left_coords}, right=({right_type}){right_coords}")
+        except Exception as e:
+            logger.error(f"Error in detection update handler: {e}")
+            logger.debug(traceback.format_exc())
     
     def _on_roi_updated(self, left_roi, right_roi):
         """
@@ -551,3 +617,133 @@ class InfoView(QWidget):
             list: List of visualizer objects
         """
         return self._visualizers 
+
+    def _update_ui(self):
+        """UI 위젯들의 값을 업데이트"""
+        try:
+            # 좌표 정보 업데이트
+            if self.left_coords:
+                x, y, r = self.left_coords
+                self.left_pixel_x_label.setText(f"{x:.2f}")
+                self.left_pixel_y_label.setText(f"{y:.2f}")
+                self.left_pixel_r_label.setText(f"{r:.2f}")
+            
+            if self.right_coords:
+                x, y, r = self.right_coords
+                self.right_pixel_x_label.setText(f"{x:.2f}")
+                self.right_pixel_y_label.setText(f"{y:.2f}")
+                self.right_pixel_r_label.setText(f"{r:.2f}")
+            
+            if self.position_3d:
+                x, y, z = self.position_3d
+                self.position_x_label.setText(f"{x:.2f}")
+                self.position_y_label.setText(f"{y:.2f}")
+                self.position_z_label.setText(f"{z:.2f}")
+                logger.debug(f"Updated UI with 3D position: ({x:.2f}, {y:.2f}, {z:.2f})")
+            
+            # 탐지율 업데이트
+            self.set_detection_rate(self.detection_rate)
+            
+            # 현재 시간 업데이트
+            current_time = datetime.now()
+            self.current_time_label.setText(current_time.strftime("%H:%M:%S"))
+            
+            # 세션 시간 업데이트
+            elapsed = current_time - self._session_start_time
+            self.total_session_time = format_time_delta(elapsed)
+            self.session_time_label.setText(f"Session: {self.total_session_time}")
+            
+            # UI 강제 리페인트
+            self._force_repaint()
+            
+        except Exception as e:
+            logger.error(f"Error updating UI: {e}")
+            logger.debug(traceback.format_exc())
+    
+    @Slot()
+    def _force_repaint(self):
+        """UI를 강제로 다시 그리도록 함"""
+        try:
+            # Qt의 repaint 메서드 호출
+            QMetaObject.invokeMethod(
+                self, "repaint", Qt.QueuedConnection
+            )
+            # 모든 자식 위젯에도 적용
+            for child in self.findChildren(QWidget):
+                QMetaObject.invokeMethod(
+                    child, "repaint", Qt.QueuedConnection
+                )
+            
+            logger.debug("Forced UI repaint")
+        except Exception as e:
+            logger.error(f"Error forcing repaint: {e}")
+            logger.debug(traceback.format_exc())
+
+    def request_screenshot(self, filename_prefix=None):
+        """
+        스크린샷 요청 함수
+        
+        매개변수:
+            filename_prefix (str): 파일명 접두사
+        """
+        if not filename_prefix:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename_prefix = f"info_view_{timestamp}"
+        
+        logger.info(f"Screenshot requested with prefix: {filename_prefix}")
+        self.capture_requested.emit(filename_prefix)
+
+    def set_left_coordinates(self, coords):
+        """
+        좌측 카메라 좌표 설정
+        
+        매개변수:
+            coords (tuple): (x, y, r) 좌표값 튜플
+        """
+        if coords and len(coords) == 3:
+            self.left_coords = coords
+            logger.debug(f"Left coordinates set: {coords}")
+        else:
+            logger.warning(f"Invalid left coordinates format: {coords}")
+    
+    def set_right_coordinates(self, coords):
+        """
+        우측 카메라 좌표 설정
+        
+        매개변수:
+            coords (tuple): (x, y, r) 좌표값 튜플
+        """
+        if coords and len(coords) == 3:
+            self.right_coords = coords
+            logger.debug(f"Right coordinates set: {coords}")
+        else:
+            logger.warning(f"Invalid right coordinates format: {coords}")
+    
+    def set_position_3d(self, position):
+        """
+        3D 위치 설정
+        
+        매개변수:
+            position (tuple): (x, y, z) 3D 위치값 튜플
+        """
+        try:
+            if position and len(position) == 3:
+                self.position_3d = position
+                logger.info(f"3D position set: {position}")
+                
+                # 좌표가 복사되는지 확인 (깊은 복사 vs 얕은 복사)
+                copied_position = tuple(float(p) for p in position)
+                logger.debug(f"3D position copied: {copied_position}")
+                
+                # 업데이트 큐에 현재 시간 추가
+                self.update_queue.append(time.time())
+                
+                # UI 즉시 업데이트 요청
+                QMetaObject.invokeMethod(
+                    self, "_update_ui", Qt.QueuedConnection
+                )
+            else:
+                logger.warning(f"Invalid 3D position format: {position}")
+        except Exception as e:
+            logger.error(f"Error setting 3D position: {e}")
+            logger.debug(traceback.format_exc()) 

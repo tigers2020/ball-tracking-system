@@ -1016,13 +1016,13 @@ class BallTrackingController(QObject):
             logging.debug("Skipping coordinate fusion: One or both coordinates are None")
             return
 
-        # Log input coordinates
-        logging.debug(f"Fusing coordinates: left={left_coords}, right={right_coords}")
+        # Log input coordinates with more detail
+        logging.info(f"[FUSION DEBUG] Fusing coordinates: left={left_coords}, right={right_coords}")
         
         # Check disparity threshold (acceptable difference between y-coordinates)
         disparity_y = abs(left_coords[1] - right_coords[1])
         if disparity_y > 30:  # Threshold value can be adjusted
-            logging.warning(f"Large y-disparity between left and right coordinates: {disparity_y}")
+            logging.warning(f"[FUSION WARNING] Large y-disparity between left and right coordinates: {disparity_y}")
             return
         
         try:
@@ -1030,23 +1030,27 @@ class BallTrackingController(QObject):
             x_left, y_left = left_coords[0], left_coords[1]
             x_right, y_right = right_coords[0], right_coords[1]
             
+            logging.info(f"[FUSION DEBUG] Using triangulator={self.triangulator}, type={type(self.triangulator)}")
+            
             # Do the triangulation
             x, y, z = self.triangulator.triangulate(x_left, y_left, x_right, y_right)
             
             # Store the calculated 3D coordinates for the detection signal
             self._last_3d_coordinates = (float(x), float(y), float(z))
             
-            # Log the calculated position
-            logging.debug(f"Calculated 3D position: ({x:.2f}, {y:.2f}, {z:.2f})")
+            # Log the calculated position with more detail
+            logging.info(f"[FUSION RESULT] Calculated 3D position: ({x:.3f}, {y:.3f}, {z:.3f})")
             
             # Emit tracking update signal with the 3D position
+            logging.info(f"[FUSION SIGNAL] Emitting tracking_updated with 3D position: ({x:.3f}, {y:.3f}, {z:.3f})")
             self.tracking_updated.emit(float(x), float(y), float(z))
             
             # Return 3D coordinates for other uses
             return self._last_3d_coordinates
         
         except Exception as e:
-            logging.error(f"Error during coordinate fusion: {str(e)}")
+            logging.error(f"[FUSION ERROR] Error during coordinate fusion: {str(e)}")
+            logging.error(f"[FUSION ERROR] Traceback: {traceback.format_exc()}")
             return None
     
     def _check_out_of_bounds(self):
@@ -1169,12 +1173,20 @@ class BallTrackingController(QObject):
         left_coords = ball_center_left if ball_center_left is not None else None
         right_coords = ball_center_right if ball_center_right is not None else None
         
+        # If both coordinates are available, try to fuse them to get 3D position
+        if left_coords is not None and right_coords is not None:
+            # Ensure we have at least x,y coordinates for both
+            if len(left_coords) >= 2 and len(right_coords) >= 2:
+                logging.info(f"[DETECTION DEBUG] Calling _fuse_coordinates with left={left_coords}, right={right_coords}")
+                # Try to calculate 3D coordinates
+                self._fuse_coordinates(left_coords, right_coords)
+        
         # Position coordinates from _last_3d_coordinates (from _fuse_coordinates)
         position_coords = self._last_3d_coordinates if hasattr(self, '_last_3d_coordinates') and self._last_3d_coordinates is not None else (0.0, 0.0, 0.0)
         
-        # Log information before emitting the signal
-        logging.debug(f"Emitting detection_updated: frame={frame_idx}, time={timestamp:.3f}, " 
-                     f"left={left_coords}, right={right_coords}, pos={position_coords}")
+        # Log information before emitting the signal with more detail
+        logging.info(f"[DETECTION EMIT] Emitting detection_updated: frame={frame_idx}, time={timestamp:.3f}, " 
+                    f"left={left_coords}, right={right_coords}, pos={position_coords}")
         
         # Emit the signal with the coordinates
         self.detection_updated.emit(frame_idx, timestamp, left_coords, right_coords, position_coords)
