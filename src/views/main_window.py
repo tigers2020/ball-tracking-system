@@ -22,8 +22,8 @@ from src.views.image_view import ImageView
 from src.views.setting_view import SettingView
 from src.views.calibration_view import CalibrationView
 from src.views.project_info_tab import ProjectInfoTab
-from src.models.calibration_model import CalibrationModel
 from src.controllers.calibration_controller import CalibrationController
+from src.models.calibration_model import CalibrationModel
 from src.views.widgets.inout_indicator import InOutLED
 
 
@@ -48,6 +48,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Stereo Image Player")
         self.resize(WindowSize.DEFAULT_WIDTH, WindowSize.DEFAULT_HEIGHT)
         self.setMinimumSize(WindowSize.MIN_WIDTH, WindowSize.MIN_HEIGHT)
+        
+        # Create IN/OUT LED indicator
+        self.inout_led = InOutLED()
         
         # Set background image
         self._set_background_image()
@@ -109,9 +112,6 @@ class MainWindow(QMainWindow):
         
         # Create tab widget with enhanced styling
         self._setup_tab_widget()
-        
-        # Create IN/OUT LED indicator
-        self.inout_led = InOutLED()
         
         # Create calibration model and controller
         self.calibration_model = CalibrationModel()

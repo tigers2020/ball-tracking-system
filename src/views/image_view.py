@@ -12,7 +12,6 @@ from PySide6.QtCore import Qt
 
 from src.views.image_view_widget import StereoImageViewWidget
 from src.views.playback_controls_widget import PlaybackControlsWidget
-from src.views.info_view import InfoView
 from src.views.bounce_overlay import BounceOverlayWidget
 from src.utils.ui_constants import Layout
 from src.utils.signal_binder import SignalBinder
@@ -49,10 +48,6 @@ class ImageView(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(Layout.MARGIN, Layout.MARGIN, Layout.MARGIN, Layout.MARGIN)
         main_layout.setSpacing(Layout.SPACING)
-        
-        # Create info view
-        self.info_view = InfoView()
-        main_layout.addWidget(self.info_view)
         
         # Create splitter for image view and bounce overlay
         self.splitter = QSplitter(Qt.Horizontal)
@@ -105,32 +100,11 @@ class ImageView(QWidget):
     def clear_images(self):
         """Clear both the left and right images."""
         self.stereo_view.clear_images()
-        self.info_view.clear_info()
         
         # Reset bounce overlay
         if hasattr(self, 'bounce_overlay'):
             self.bounce_overlay.reset()
     
-    def update_detection_info(self, detection_rate=0.0, pixel_coords=None, position_coords=None):
-        """
-        Update detection information.
-        
-        Args:
-            detection_rate (float, optional): Detection rate (0.0 to 1.0)
-            pixel_coords (tuple, optional): 2D pixel coordinates (x, y)
-            position_coords (tuple, optional): 3D position coordinates (x, y, z)
-        """
-        if detection_rate is not None:
-            self.info_view.set_detection_rate(detection_rate)
-        
-        if pixel_coords is not None:
-            x, y = pixel_coords
-            self.info_view.set_pixel_coords(x, y)
-        
-        if position_coords is not None:
-            x, y, z = position_coords
-            self.info_view.set_position_coords(x, y, z) 
-            
     def is_skipping_frames(self):
         """
         Check if frame skipping is enabled.
@@ -240,9 +214,6 @@ class ImageView(QWidget):
             # Connect all signals using SignalBinder
             SignalBinder.bind_all(controller, self, signal_mappings)
             
-            # Connect info view to controller
-            self.info_view.connect_tracking_controller(controller)
-            
             logging.info("Connected to ball tracking controller")
             
     def connect_game_analyzer(self, analyzer):
@@ -253,37 +224,22 @@ class ImageView(QWidget):
             analyzer: GameAnalyzer instance
         """
         if analyzer:
-            # Store reference
             self.game_analyzer = analyzer
             
-            # Connect bounce overlay to analyzer
+            # Connect bounce detection and court position
+            analyzer.bounce_detected.connect(self._on_bounce_detected)
+            
+            # Connect to bounce overlay
             self.bounce_overlay.connect_game_analyzer(analyzer)
-            
-            # Show bounce overlay and analysis tabs
-            self.enable_bounce_overlay(True)
-            self.enable_analysis_tabs(True)
-            
-            # Connect info view directly to game analyzer
-            self.info_view.connect_game_analyzer(analyzer)
-            
-            # Connect bounce events to info view using SignalBinder
-            SignalBinder.bind(analyzer, "bounce_detected", self, "_on_bounce_detected")
             
             logging.info("Connected to game analyzer")
     
     def _on_bounce_detected(self, bounce_event):
         """
-        Handle bounce events from game analyzer.
+        Handle bounce detection.
         
         Args:
-            bounce_event: BounceEvent object
+            bounce_event (BounceEvent): Bounce event data
         """
-        # Update info view with bounce information
-        position = bounce_event.position
-        message = f"Bounce {'IN' if bounce_event.is_inside_court else 'OUT'} at ({position[0]:.2f}, {position[1]:.2f})"
-        
-        # Update bounce info in info view
-        if hasattr(self.info_view, 'set_bounce_info'):
-            self.info_view.set_bounce_info(message)
-        
-        logging.info(f"Bounce detected: {message}") 
+        # Log that we received a bounce event
+        logging.info(f"Received bounce event at frame {bounce_event.frame_idx}, velocity: {bounce_event.velocity}") 

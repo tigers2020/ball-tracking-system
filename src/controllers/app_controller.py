@@ -215,45 +215,25 @@ class AppController(QObject):
     @Slot(int, float, tuple, tuple)
     def _on_ball_detection_updated(self, frame_idx, detection_rate, left_coords, right_coords):
         """
-        Handle ball detection updates from ball tracking controller and pass to game analyzer.
+        Handle ball detection updates from ball tracking controller.
         
         Args:
             frame_idx (int): Frame index
-            detection_rate (float): Detection confidence rate (0-1)
-            left_coords (tuple): (x, y, r) coordinates in left image, or None
-            right_coords (tuple): (x, y, r) coordinates in right image, or None
+            detection_rate (float): Detection rate between 0-1
+            left_coords (tuple): Coordinates in left image (x, y, r) or None
+            right_coords (tuple): Coordinates in right image (x, y, r) or None
         """
-        # Log that we received the signal
-        logging.debug(f"AppController received detection update: frame={frame_idx}, rate={detection_rate:.2f}")
+        timestamp = self.model.get_frame_timestamp(frame_idx) if frame_idx >= 0 else 0.0
         
-        # Get current timestamp
-        timestamp = time.time()
+        # Log the call to GameAnalyzer
+        logging.debug(f"Calling GameAnalyzer.on_ball_detected with frame={frame_idx}, left={left_coords}, right={right_coords}")
         
         # Extract pixel coordinates from tuple (ignoring radius)
         left_point = None if left_coords is None else (left_coords[0], left_coords[1])
         right_point = None if right_coords is None else (right_coords[0], right_coords[1])
         
-        # Log the call to GameAnalyzer
-        logging.debug(f"Calling GameAnalyzer.on_ball_detected with frame={frame_idx}, left={left_point}, right={right_point}")
-        
         # Pass to game analyzer for 3D tracking
         self.game_analyzer.on_ball_detected(frame_idx, timestamp, detection_rate, left_point, right_point)
-        
-        # Ensure 3D coordinates are displayed in InfoView by direct update if available
-        if hasattr(self.view, 'image_view') and hasattr(self.view.image_view, 'info_view'):
-            info_view = self.view.image_view.info_view
-            
-            # Try to get most recent 3D coordinates from game analyzer
-            if hasattr(self.game_analyzer, 'get_latest_tracking_data'):
-                try:
-                    tracking_data = self.game_analyzer.get_latest_tracking_data()
-                    if tracking_data and tracking_data.is_valid and tracking_data.position_3d is not None:
-                        # Update info view with 3D position
-                        position_3d = tracking_data.position_3d
-                        logging.info(f"[3D COORD FIX] Directly updating InfoView with latest 3D position: {position_3d}")
-                        info_view.set_position_coords(position_3d[0], position_3d[1], position_3d[2])
-                except Exception as e:
-                    logging.error(f"Error getting latest tracking data for InfoView update: {e}")
     
     def show(self):
         """Show the main window."""
