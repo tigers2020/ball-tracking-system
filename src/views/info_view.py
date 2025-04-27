@@ -371,19 +371,33 @@ class InfoView(QWidget):
         self.set_detection_rate(detection_rate)
         
         # Safety check for left_coords - must be tuple-like (list, tuple, array)
-        if left_coords and isinstance(left_coords, (tuple, list, np.ndarray)):
+        if left_coords is not None:
             try:
-                self.set_left_pixel_coords(left_coords[0], left_coords[1], left_coords[2] if len(left_coords) > 2 else 0)
+                if isinstance(left_coords, (tuple, list, np.ndarray)):
+                    x, y = left_coords[0], left_coords[1]
+                    r = left_coords[2] if len(left_coords) > 2 else 0
+                    self.set_left_pixel_coords(x, y, r)
+                    logging.info(f"[LEFT PIXEL] Updated: x={x}, y={y}, r={r}")
+                else:
+                    logging.warning(f"Invalid left_coords type: {type(left_coords)}")
+                    self.set_left_pixel_coords(0, 0, 0)
             except (IndexError, TypeError) as e:
                 logging.error(f"Error processing left_coords {left_coords}: {e}")
                 self.set_left_pixel_coords(0, 0, 0)
         else:
             self.set_left_pixel_coords(0, 0, 0)
-            
+        
         # Safety check for right_coords - must be tuple-like
-        if right_coords and isinstance(right_coords, (tuple, list, np.ndarray)):
+        if right_coords is not None:
             try:
-                self.set_right_pixel_coords(right_coords[0], right_coords[1], right_coords[2] if len(right_coords) > 2 else 0)
+                if isinstance(right_coords, (tuple, list, np.ndarray)):
+                    x, y = right_coords[0], right_coords[1]
+                    r = right_coords[2] if len(right_coords) > 2 else 0
+                    self.set_right_pixel_coords(x, y, r)
+                    logging.info(f"[RIGHT PIXEL] Updated: x={x}, y={y}, r={r}")
+                else:
+                    logging.warning(f"Invalid right_coords type: {type(right_coords)}")
+                    self.set_right_pixel_coords(0, 0, 0)
             except (IndexError, TypeError) as e:
                 logging.error(f"Error processing right_coords {right_coords}: {e}")
                 self.set_right_pixel_coords(0, 0, 0)
@@ -392,17 +406,15 @@ class InfoView(QWidget):
         
         # Enhanced 3D position update with better debug logging
         if position_coords is not None:
-            logging.info(f"Detection updated with position_coords: {position_coords}, type: {type(position_coords)}")
-            
-            if isinstance(position_coords, (tuple, list, np.ndarray)) and len(position_coords) >= 3:
-                try:
-                    self.set_position_coords(position_coords[0], position_coords[1], position_coords[2])
-                    logging.info(f"[3D POS DEBUG] 3D position updated from detection_updated signal: "
-                                f"({position_coords[0]:.3f}, {position_coords[1]:.3f}, {position_coords[2]:.3f})")
-                except (IndexError, TypeError) as e:
-                    logging.error(f"Error processing position_coords {position_coords}: {e}")
-            else:
-                logging.warning(f"Invalid position_coords format received: {position_coords}")
+            try:
+                if isinstance(position_coords, (tuple, list, np.ndarray)) and len(position_coords) >= 3:
+                    x, y, z = position_coords[0], position_coords[1], position_coords[2]
+                    self.set_position_coords(x, y, z)
+                    logging.info(f"[3D WORLD] Updated: x={x:.3f}, y={y:.3f}, z={z:.3f}")
+                else:
+                    logging.warning(f"Invalid position_coords format: {position_coords}")
+            except (IndexError, TypeError) as e:
+                logging.error(f"Error processing position_coords {position_coords}: {e}")
         
         # Log with proper type information
         left_type = type(left_coords).__name__ if left_coords is not None else "None"

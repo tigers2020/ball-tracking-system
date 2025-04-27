@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QHBoxLayout, QSizePo
 import logging
 
 from src.utils.ui_constants import Layout, ROI
-from src.views.visualization import OpenCVVisualizer
+from src.views.visualization import VisualizerFactory
 
 
 class ImageViewWidget(QWidget):
@@ -66,6 +66,9 @@ class ImageViewWidget(QWidget):
         
         # Empty pixmap as placeholder
         self.clear_image()
+        
+        # Create visualizer instance
+        self.visualizer = VisualizerFactory.create(backend="opencv")
     
     def set_image_from_cv(self, cv_image):
         """
@@ -188,7 +191,7 @@ class ImageViewWidget(QWidget):
         
         try:
             # Apply mask overlay with dynamic color if HSV settings are available
-            result = OpenCVVisualizer.apply_mask_overlay(
+            result = self.visualizer.apply_mask_overlay(
                 image, 
                 mask, 
                 alpha=0.3,  # Semi-transparent
@@ -234,7 +237,7 @@ class ImageViewWidget(QWidget):
         
         try:
             # Apply ROI visualization with dynamic color if HSV settings are available
-            result = OpenCVVisualizer.draw_roi(
+            result = self.visualizer.draw_roi(
                 image, 
                 roi, 
                 color=ROI.BORDER_COLOR, 
@@ -243,7 +246,12 @@ class ImageViewWidget(QWidget):
                 center_color=ROI.CENTER_MARKER_COLOR
             )
             
-            logging.debug(f"ROI drawn: x={roi['x']}, y={roi['y']}, w={roi['width']}, h={roi['height']}, center=({roi['center_x']}, {roi['center_y']})")
+            # Safe logging that handles missing center coordinates
+            log_msg = f"ROI drawn: x={roi.get('x')}, y={roi.get('y')}, w={roi.get('width')}, h={roi.get('height')}"
+            if 'center_x' in roi and 'center_y' in roi:
+                log_msg += f", center=({roi['center_x']}, {roi['center_y']})"
+            logging.debug(log_msg)
+            
             return result
             
         except Exception as e:

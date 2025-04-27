@@ -86,7 +86,10 @@ class IVisualizer(ABC):
                 roi: Union[Tuple[int, int, int, int], Dict], 
                 color: Optional[Tuple[int, int, int]] = None,
                 thickness: int = TRACKING.ROI_THICKNESS,
-                show_center: bool = True) -> T:
+                show_center: bool = True,
+                center_color: Optional[Tuple[int, int, int]] = None,
+                fill: bool = False,
+                fill_alpha: float = 0.2) -> T:
         """Draw ROI rectangle and optional center point."""
         pass
     
@@ -128,6 +131,15 @@ class IVisualizer(ABC):
                        thickness: int = TRACKING.TRAJECTORY_THICKNESS,
                        max_points: int = TRACKING.TRAJECTORY_MAX_POINTS) -> T:
         """Draw trajectory from list of positions."""
+        pass
+    
+    @abstractmethod
+    def apply_mask_overlay(self, raw: T,
+                         mask: np.ndarray,
+                         alpha: float = 0.3,
+                         mask_color: Optional[Tuple[int, int, int]] = None,
+                         hsv_settings: Optional[Dict[str, Any]] = None) -> T:
+        """Apply mask overlay to an image."""
         pass
 
 
@@ -210,11 +222,26 @@ class OpenCVVisualizer(IVisualizer):
                 roi: Union[Tuple[int, int, int, int], Dict], 
                 color: Optional[Tuple[int, int, int]] = None,
                 thickness: int = TRACKING.ROI_THICKNESS,
-                show_center: bool = True) -> np.ndarray:
+                show_center: bool = True,
+                center_color: Optional[Tuple[int, int, int]] = None,
+                fill: bool = False,
+                fill_alpha: float = 0.2) -> np.ndarray:
         """Draw ROI rectangle and optional center point on an OpenCV image."""
         if color is None:
             color = COLOR.GREEN
-        return viz_utils.draw_roi(raw, roi, color, thickness, show_center)
+        if center_color is None:
+            center_color = COLOR.RED
+        return viz_utils.draw_roi(raw, roi, color, thickness, show_center, center_color, fill, None, fill_alpha)
+    
+    def apply_mask_overlay(self, raw: np.ndarray, 
+                        mask: np.ndarray, 
+                        alpha: float = 0.3, 
+                        mask_color: Optional[Tuple[int, int, int]] = None,
+                        hsv_settings: Optional[Dict[str, Any]] = None) -> np.ndarray:
+        """Apply mask overlay to an OpenCV image."""
+        if mask_color is None:
+            mask_color = COLOR.GREEN
+        return viz_utils.apply_mask_overlay(raw, mask, alpha, mask_color, hsv_settings)
     
     def draw_circle(self, raw: np.ndarray, 
                    center: Tuple[int, int], 
@@ -606,6 +633,16 @@ class QtVisualizer(IVisualizer):
             x2, y2 = positions[i + 1]
             self.scene.addLine(int(x1), int(y1), int(x2), int(y2), pen)
         
+        return self.scene
+
+    def apply_mask_overlay(self, raw: QGraphicsScene,
+                         mask: np.ndarray,
+                         alpha: float = 0.3,
+                         mask_color: Optional[Tuple[int, int, int]] = None,
+                         hsv_settings: Optional[Dict[str, Any]] = None) -> QGraphicsScene:
+        """Apply mask overlay to a Qt scene."""
+        if mask_color is None:
+            mask_color = COLOR.GREEN
         return self.scene
 
 

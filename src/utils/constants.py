@@ -460,3 +460,15 @@ class UI_COLORS:
     ORANGE: str = "#ffa500"  # COLOR.ORANGE in CSS
     PURPLE: str = "#800080"  # COLOR.PURPLE in CSS
     LIME: str = "#bfff00"  # COLOR.LIME in CSS 
+
+# =============================================
+# Camera and Tracking Constants
+# =============================================
+
+# Camera indexes for left and right cameras
+LEFT_CAMERA_INDEX = 0
+RIGHT_CAMERA_INDEX = 1
+
+# Tracking data storage path
+TRACKING_DATA_DIR = os.path.join(ROOT_DIR, "data", "tracking")
+DEFAULT_STORAGE_PATH = os.path.join(ROOT_DIR, "data") 

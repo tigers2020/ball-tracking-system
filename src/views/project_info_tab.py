@@ -118,7 +118,6 @@ class ProjectInfoTab(QWidget):
                 font-size: 28px;
                 padding: 15px;
                 letter-spacing: 1px;
-                text-shadow: 0 2px 4px rgba(0,0,0,0.5);
             }
         """)
         self.setObjectName("projectInfoTab")
@@ -278,7 +277,6 @@ class ProjectInfoTab(QWidget):
                 padding-bottom: 10px;
                 position: relative;
                 letter-spacing: 1px;
-                text-shadow: 0 2px 3px rgba(0,0,0,0.3);
             }
             .section-title:after {
                 content: '';
@@ -363,7 +361,6 @@ class ProjectInfoTab(QWidget):
                 color: #80d8ff; 
                 font-size: 18px;
                 flex: 1;
-                text-shadow: 0px 1px 2px rgba(0,0,0,0.3);
                 letter-spacing: 0.5px;
             }
             .description { 
@@ -490,7 +487,6 @@ class ProjectInfoTab(QWidget):
                 padding-bottom: 10px;
                 position: relative;
                 letter-spacing: 1px;
-                text-shadow: 0 2px 3px rgba(0,0,0,0.3);
             }
             .section-title:after {
                 content: '';
@@ -567,7 +563,6 @@ class ProjectInfoTab(QWidget):
                 font-weight: bold; 
                 font-size: 18px;
                 flex: 1;
-                text-shadow: 0px 1px 2px rgba(0,0,0,0.3);
                 letter-spacing: 0.5px;
                 background: linear-gradient(to right, #ff7eb9, #ff4aa5, #ff7eb9);
                 -webkit-background-clip: text;
@@ -584,7 +579,6 @@ class ProjectInfoTab(QWidget):
                 font-size: 13px;
                 font-weight: bold;
                 box-shadow: 0 5px 15px rgba(45, 59, 98, 0.4);
-                text-shadow: 0px 1px 1px rgba(0,0,0,0.2);
                 letter-spacing: 0.5px;
                 border: 1px solid rgba(255, 255, 255, 0.1);
                 transition: all 0.3s ease;
@@ -720,7 +714,6 @@ class ProjectInfoTab(QWidget):
                 padding-bottom: 10px;
                 position: relative;
                 letter-spacing: 1px;
-                text-shadow: 0 2px 3px rgba(0,0,0,0.3);
             }
             .section-title:after {
                 content: '';
@@ -760,7 +753,6 @@ class ProjectInfoTab(QWidget):
                 display: grid;
                 grid-template-columns: 0.5fr 2fr 1.5fr 1fr;
                 padding: 18px 20px;
-                text-shadow: 0px 1px 1px rgba(0,0,0,0.5);
                 font-size: 15px;
                 position: sticky;
                 top: 0;
@@ -881,7 +873,6 @@ class ProjectInfoTab(QWidget):
                 color: #ffd966;
                 font-weight: bold;
                 font-size: 15px;
-                text-shadow: 0 1px 1px rgba(0,0,0,0.3);
                 letter-spacing: 0.5px;
             }
             

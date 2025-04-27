@@ -7,18 +7,61 @@ This module contains the GameAnalyzer class for orchestrating 3D ball tracking a
 """
 
 import logging
+import os
+import csv
 import numpy as np
 import time
 from typing import Dict, List, Tuple, Optional, Any, Union
 from dataclasses import dataclass
 from PySide6.QtCore import QObject, Signal, Slot, QTimer
+from datetime import datetime
 
-from src.services.triangulation_service import TriangulationService
+from src.controllers.ball_tracking_controller import TrackingState
+from src.models.net_zone import NetZone
+from src.models.tracking_data_model import TrackingDataModel
 from src.services.kalman3d_service import Kalman3DService
 from src.services.bounce_detector import BounceDetector, BounceEvent
 from src.services.coordinate_service import CoordinateService
 from src.geometry.court_frame import is_point_inside_court, is_net_crossed
-from src.utils.constants import ANALYSIS, COURT
+from src.utils.constants import (
+    ANALYSIS,
+    COURT,
+    LEFT_CAMERA_INDEX,
+    RIGHT_CAMERA_INDEX,
+    TRACKING_DATA_DIR,
+    DEFAULT_STORAGE_PATH
+)
+
+# Add mock GameState class
+class GameState:
+    """
+    Mock implementation of GameState to replace the deleted module.
+    """
+    def __init__(self):
+        self.left_score = 0
+        self.right_score = 0
+        self.serving_side = "left"  # 'left' or 'right'
+        self.game_active = False
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("Initializing GameState mock")
+        
+    def reset(self):
+        """Reset the game state."""
+        self.left_score = 0
+        self.right_score = 0
+        self.game_active = False
+        
+    def start_game(self):
+        """Start the game."""
+        self.game_active = True
+        
+    def end_game(self):
+        """End the game."""
+        self.game_active = False
+        
+    def switch_serving_side(self):
+        """Switch the serving side."""
+        self.serving_side = "right" if self.serving_side == "left" else "left"
 
 
 @dataclass
@@ -34,6 +77,66 @@ class TrackingData:
     is_valid: bool = False
 
 
+# Class for 3D mock triangulation
+class TriangulationServiceMock:
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("Initializing TriangulationServiceMock")
+        
+    def set_camera(self, camera_index, matrix, distortion, rotation=None, translation=None):
+        self.logger.info(f"Mock setting camera {camera_index}")
+        # Just store the camera parameters
+        pass
+        
+    def triangulate(self, x_left, y_left, x_right, y_right):
+        # Simple mock triangulation - returns average of inputs
+        # In a real system, this would use proper stereo triangulation
+        x = (x_left + x_right) / 2.0
+        y = (y_left + y_right) / 2.0
+        z = 1000.0  # Arbitrary depth
+        return x, y, z
+
+
+# Mock implementation of BallPositions class
+class BallPositions:
+    """
+    Simple mock implementation of BallPositions to replace the deleted module.
+    """
+    def __init__(self):
+        self.positions = []
+        self.timestamps = []
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("Initializing BallPositions mock")
+        
+    def add_position(self, position, timestamp):
+        """Add a position with timestamp."""
+        self.positions.append(position)
+        self.timestamps.append(timestamp)
+        
+        # Keep only recent positions
+        max_positions = 100  # Adjust as needed
+        if len(self.positions) > max_positions:
+            self.positions.pop(0)
+            self.timestamps.pop(0)
+    
+    def get_recent_positions(self, count=None):
+        """Get recent positions."""
+        if count is None or count >= len(self.positions):
+            return self.positions
+        return self.positions[-count:]
+    
+    def get_recent_timestamps(self, count=None):
+        """Get recent timestamps."""
+        if count is None or count >= len(self.timestamps):
+            return self.timestamps
+        return self.timestamps[-count:]
+        
+    def clear(self):
+        """Clear all positions."""
+        self.positions = []
+        self.timestamps = []
+
+
 class GameAnalyzer(QObject):
     """
     Controller for 3D tennis ball tracking and game analysis.
@@ -47,6 +150,8 @@ class GameAnalyzer(QObject):
     net_crossed = Signal(bool)  # Direction (True if crossed from baseline to net)
     landing_predicted = Signal(float, float)  # x, y of predicted landing
     in_out_detected = Signal(bool)  # True if in, False if out
+    game_state_updated = Signal(GameState)
+    tracking_data_saved = Signal(str)
     
     def __init__(self, config_manager, event_bus=None):
         """
@@ -62,7 +167,6 @@ class GameAnalyzer(QObject):
         self.event_bus = event_bus
         
         # Services
-        self.triangulation = TriangulationService()
         self.kalman = Kalman3DService()
         self.bounce_detector = BounceDetector()
         
@@ -86,14 +190,27 @@ class GameAnalyzer(QObject):
             
         logging.info("Game analyzer initialized")
         
+        # Use mock triangulation service instead of real one
+        self.triangulator = TriangulationServiceMock()
+        
+        self.tracking_data = []
+        self.current_game_state = GameState()
+        self.ball_positions = BallPositions()
+        
+        # Timer for periodic game state updates
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self.update_game_state)
+        self.update_timer.setInterval(200)  # Update every 200ms
+        
+        # Initialize tracking file
+        self.tracking_file = None
+        self.csv_writer = None
+        
+        # Start the update timer
+        self.update_timer.start()
+        
     def _init_from_config(self):
         """Initialize services from configuration."""
-        # Get camera settings for triangulation
-        camera_cfg = self.config_manager.get_camera_settings()
-        if camera_cfg:
-            self.triangulation.set_camera(camera_cfg)
-            logging.info("Triangulation service configured from settings")
-            
         # Get Kalman filter settings
         kalman_cfg = self.config_manager.get_section("kalman3d", {})
         if kalman_cfg:
@@ -179,7 +296,7 @@ class GameAnalyzer(QObject):
         right_points = np.array(right_court_points, dtype=np.float32)
         
         # Perform PnP calibration
-        success = self.triangulation.calibrate_from_pnp(left_points, right_points)
+        success = self.triangulator.calibrate_from_pnp(left_points, right_points)
         
         if success:
             logging.info("PnP calibration successful")
@@ -252,13 +369,13 @@ class GameAnalyzer(QObject):
         logging.info(f"[COORD DEBUG] Frame {frame_index} - Input coordinates: left={left_point}, right={right_point}")
         
         # Triangulate 3D position
-        points_3d = self.triangulation.triangulate_points(left_np, right_np)
+        points_3d = self.triangulator.triangulate(left_np[0][0], left_np[0][1], right_np[0][0], right_np[0][1])
         
         if points_3d.size == 0:
             logging.warning(f"Triangulation failed for frame {frame_index}")
             return
             
-        position_3d = points_3d[0]
+        position_3d = points_3d
         
         # Log triangulated result with detailed coordinates
         logging.info(f"[COORD DEBUG] Frame {frame_index} - Original triangulated (world): "
@@ -399,7 +516,8 @@ class GameAnalyzer(QObject):
             camera_settings: Camera settings dictionary
         """
         if camera_settings:
-            self.triangulation.set_camera(camera_settings)
+            self.triangulator.set_camera(LEFT_CAMERA_INDEX, camera_settings["left_camera_matrix"], camera_settings["left_camera_distortion"])
+            self.triangulator.set_camera(RIGHT_CAMERA_INDEX, camera_settings["right_camera_matrix"], camera_settings["right_camera_distortion"])
             logging.info("Triangulation service updated with new camera calibration")
             
     @Slot(dict, dict)
@@ -542,10 +660,6 @@ class GameAnalyzer(QObject):
         Args:
             settings_dict: Dictionary with settings for each service
         """
-        # Update triangulation settings
-        if "triangulation" in settings_dict:
-            self.triangulation.set_camera(settings_dict["triangulation"])
-            
         # Update Kalman filter settings
         if "kalman3d" in settings_dict:
             self.kalman.update_params(settings_dict["kalman3d"])
@@ -558,4 +672,115 @@ class GameAnalyzer(QObject):
         if "history_size" in settings_dict:
             self.max_history_size = settings_dict["history_size"]
             
-        logging.info("Game analyzer settings updated") 
+        logging.info("Game analyzer settings updated")
+        
+    def initialize_tracking_file(self):
+        # Create directory if it doesn't exist
+        if not os.path.exists(TRACKING_DATA_DIR):
+            os.makedirs(TRACKING_DATA_DIR)
+            
+        # Generate filename based on current timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = os.path.join(TRACKING_DATA_DIR, f"tracking_data_{timestamp}.csv")
+        
+        try:
+            self.tracking_file = open(filename, 'w', newline='')
+            self.csv_writer = csv.writer(self.tracking_file)
+            
+            # Write header
+            self.csv_writer.writerow([
+                'timestamp', 'x_3d', 'y_3d', 'z_3d', 
+                'x_left', 'y_left', 'x_right', 'y_right',
+                'confidence', 'state'
+            ])
+            
+            self.logger.info(f"Tracking file initialized: {filename}")
+            return filename
+        except Exception as e:
+            self.logger.error(f"Failed to initialize tracking file: {e}")
+            return None
+    
+    @Slot(TrackingDataModel)
+    def add_tracking_data(self, data):
+        """Add new tracking data to the analyzer."""
+        self.logger.debug(f"Adding tracking data: {data}")
+        self.tracking_data.append(data)
+        
+        # Update ball positions
+        if data.position_3d is not None:
+            self.ball_positions.add_position(data.position_3d, data.timestamp)
+        
+        # Write to CSV if file is open
+        if self.csv_writer:
+            try:
+                x_3d, y_3d, z_3d = data.position_3d if data.position_3d else (None, None, None)
+                x_left, y_left = data.position_left if data.position_left else (None, None)
+                x_right, y_right = data.position_right if data.position_right else (None, None)
+                
+                self.csv_writer.writerow([
+                    data.timestamp, x_3d, y_3d, z_3d, 
+                    x_left, y_left, x_right, y_right,
+                    data.confidence, data.state.name
+                ])
+            except Exception as e:
+                self.logger.error(f"Failed to write tracking data: {e}")
+    
+    @Slot()
+    def update_game_state(self):
+        """Update the game state based on current tracking data."""
+        # Skip if no tracking data available
+        if not self.tracking_data:
+            return
+        
+        # Get latest tracking data
+        latest_data = self.tracking_data[-1]
+        
+        # Skip if no 3D position
+        if not latest_data.position_3d:
+            return
+        
+        # Update game state
+        x, y, z = latest_data.position_3d
+        
+        # Determine net zone
+        net_zone = self._determine_net_zone(x, y, z)
+        
+        # Check for scoring conditions
+        if self._check_scoring_conditions(x, y, z, net_zone):
+            # Update score
+            self._update_score(net_zone)
+        
+        # Emit updated game state
+        self.game_state_updated.emit(self.current_game_state)
+    
+    def _determine_net_zone(self, x, y, z):
+        """Determine the net zone based on 3D position."""
+        # Simple mock implementation
+        # In a real system, this would use actual court dimensions
+        if z < 0:
+            return NetZone.LEFT
+        else:
+            return NetZone.RIGHT
+    
+    def _check_scoring_conditions(self, x, y, z, net_zone):
+        """Check if scoring conditions are met."""
+        # Simple mock implementation
+        # In a real system, this would check ball trajectory and court boundaries
+        return False
+    
+    def _update_score(self, net_zone):
+        """Update the score based on the net zone."""
+        if net_zone == NetZone.LEFT:
+            self.current_game_state.right_score += 1
+        else:
+            self.current_game_state.left_score += 1
+    
+    def close(self):
+        """Close tracking file and clean up resources."""
+        if self.tracking_file:
+            self.tracking_file.close()
+            self.tracking_file = None
+            self.csv_writer = None
+        
+        self.update_timer.stop()
+        self.logger.info("GameAnalyzer closed") 

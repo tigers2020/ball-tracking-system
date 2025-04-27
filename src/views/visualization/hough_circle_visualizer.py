@@ -30,6 +30,9 @@ class HoughCircleVisualizer:
         self.left_circles = None
         self.right_circles = None
         
+        # Create visualizer instance
+        self.visualizer = OpenCVVisualizer()
+        
         # Connect to controller signals if it emits circles_processed
         if controller and hasattr(controller, 'circles_processed'):
             controller.circles_processed.connect(self._on_circles_processed)
@@ -69,9 +72,9 @@ class HoughCircleVisualizer:
         detected_circles = self.controller.get_detected_circles()
         
         if left_output is not None and detected_circles and detected_circles[0] is not None:
-            left_output = OpenCVVisualizer.draw_circles(left_output, detected_circles[0])
+            left_output = self.visualizer.draw_circles(left_output, detected_circles[0])
             
         if right_output is not None and detected_circles and detected_circles[1] is not None:
-            right_output = OpenCVVisualizer.draw_circles(right_output, detected_circles[1])
+            right_output = self.visualizer.draw_circles(right_output, detected_circles[1])
             
         return left_output, right_output 
