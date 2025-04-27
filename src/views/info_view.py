@@ -303,14 +303,37 @@ class InfoView(QWidget):
             except Exception as e:
                 logging.error(f"Error checking controller 3D capabilities: {e}")
             
-            # Connect detection_updated signal to handler method (including 3D coordinate update)
-            controller.detection_updated.connect(self._on_detection_updated)
-            
-            # ROI update signal directly
-            SignalBinder.bind(controller, "roi_updated", self, "_on_roi_updated")
-            
-            # Connect prediction update signal for Kalman state
-            SignalBinder.bind(controller, "prediction_updated", self, "_on_kalman_predicted")
+            # Connect detection_updated signal to handler method directly to ensure proper connection
+            try:
+                # Connect detection_updated signal to handler method (including 3D coordinate update)
+                controller.detection_updated.connect(self._on_detection_updated)
+                logging.info("Connected BallTrackingController.detection_updated to InfoView._on_detection_updated")
+                
+                # ROI update signal directly
+                if hasattr(controller, "roi_updated"):
+                    controller.roi_updated.connect(self._on_roi_updated)
+                    logging.info("Connected BallTrackingController.roi_updated to InfoView._on_roi_updated")
+                
+                # Connect prediction update signal for Kalman state
+                if hasattr(controller, "prediction_updated"):
+                    # Try direct connection first
+                    controller.prediction_updated.connect(self._on_kalman_predicted)
+                    logging.info("Connected BallTrackingController.prediction_updated to InfoView._on_kalman_predicted")
+                
+                # Also try SignalBinder as backup
+                SignalBinder.bind(controller, "roi_updated", self, "_on_roi_updated")
+                SignalBinder.bind(controller, "prediction_updated", self, "_on_kalman_predicted")
+            except Exception as e:
+                logging.error(f"Error connecting to BallTrackingController signals: {e}")
+                # Fallback connection method
+                try:
+                    controller.detection_updated.connect(
+                        lambda frame_idx, rate, left, right, pos=None: 
+                        self._on_detection_updated(frame_idx, rate, left, right, pos)
+                    )
+                    logging.info("Fallback connection to detection_updated established")
+                except Exception as e2:
+                    logging.error(f"Fallback connection also failed: {e2}")
             
             # Set up visualizers with controller
             self._setup_visualizers_with_controller(controller)
@@ -334,10 +357,26 @@ class InfoView(QWidget):
                 "court_position_updated": self._on_court_position_updated  # Make sure this signal is connected
             }
             
-            # Connect all signals using SignalBinder
-            SignalBinder.bind_all(analyzer, self, signal_mappings)
-            
-            logging.info("InfoView connected to game analyzer")
+            # Connect all signals directly to ensure proper connection
+            try:
+                analyzer.tracking_updated.connect(self._on_tracking_updated)
+                analyzer.in_out_detected.connect(self.in_out_led.on_in_out)
+                if hasattr(analyzer, "court_position_updated"):
+                    analyzer.court_position_updated.connect(self._on_court_position_updated)
+                
+                # Also try using SignalBinder for redundancy
+                SignalBinder.bind_all(analyzer, self, signal_mappings)
+                
+                logging.info("InfoView connected to game analyzer")
+                logging.debug(f"Signal connections established: tracking_updated, in_out_detected, court_position_updated")
+            except Exception as e:
+                logging.error(f"Error connecting to game analyzer signals: {e}")
+                # Fallback direct connection for tracking_updated
+                try:
+                    analyzer.tracking_updated.connect(self._on_tracking_updated)
+                    logging.info("Fallback connection to tracking_updated established")
+                except Exception as e2:
+                    logging.error(f"Fallback connection failed: {e2}")
     
     def _setup_visualizers_with_controller(self, controller):
         """
@@ -455,15 +494,22 @@ class InfoView(QWidget):
             is_valid (bool): Whether the tracking data is valid
         """
         if position is not None and is_valid:
-            # Display original world coordinates directly
-            self.set_position_coords(position[0], position[1], position[2])
-            
-            # Detailed logging for UI displayed coordinates
-            logging.info(f"[UI COORD DEBUG] Frame {frame_index} - Displaying world coordinates in UI: "
-                       f"x={position[0]:.3f}m, y={position[1]:.3f}m, z={position[2]:.3f}m | "
-                       f"velocity: vx={velocity[0]:.3f}, vy={velocity[1]:.3f}, vz={velocity[2]:.3f}")
-            
-            logging.debug(f"World position updated: ({position[0]:.3f}m, {position[1]:.3f}m, {position[2]:.3f}m)")
+            try:
+                # Display original world coordinates directly
+                self.set_position_coords(position[0], position[1], position[2])
+                
+                # Detailed logging for UI displayed coordinates
+                logging.info(f"[UI COORD DEBUG] Frame {frame_index} - Displaying world coordinates in UI: "
+                           f"x={position[0]:.3f}m, y={position[1]:.3f}m, z={position[2]:.3f}m | "
+                           f"velocity: vx={velocity[0]:.3f}, vy={velocity[1]:.3f}, vz={velocity[2]:.3f}")
+                
+                logging.debug(f"World position updated: ({position[0]:.3f}m, {position[1]:.3f}m, {position[2]:.3f}m)")
+            except (IndexError, TypeError, AttributeError) as e:
+                logging.error(f"Error processing 3D position from tracking_updated: {e}, position={position}, type={type(position)}")
+        elif not is_valid:
+            logging.debug(f"Received invalid tracking data for frame {frame_index}")
+        else:
+            logging.debug(f"Received None position for frame {frame_index}")
     
     def _on_kalman_predicted(self, camera, x, y, vx, vy):
         """

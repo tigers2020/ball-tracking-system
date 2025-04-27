@@ -30,6 +30,9 @@ class KalmanPathVisualizer:
         self.left_predictions = None
         self.right_predictions = None
         
+        # Create visualizer instance
+        self.visualizer = OpenCVVisualizer()
+        
         # Optional: Connect to state_updated signal if available
         if controller and hasattr(controller, 'tracking_updated'):
             controller.tracking_updated.connect(self._on_tracking_updated)
@@ -88,12 +91,12 @@ class KalmanPathVisualizer:
             if left_history:
                 left_positions = [(x, y) for x, y, r, *_ in left_history]
                 if left_output is not None:
-                    left_output = OpenCVVisualizer.draw_trajectory(left_output, left_positions, max_points=20)
+                    left_output = self.visualizer.draw_trajectory(left_output, left_positions, max_points=20)
             
             if right_history:
                 right_positions = [(x, y) for x, y, r, *_ in right_history]
                 if right_output is not None:
-                    right_output = OpenCVVisualizer.draw_trajectory(right_output, right_positions, max_points=20)
+                    right_output = self.visualizer.draw_trajectory(right_output, right_positions, max_points=20)
             
         # Draw Kalman predictions if available
         if left_output is not None and self.left_predictions:
@@ -102,7 +105,7 @@ class KalmanPathVisualizer:
             velocity = (self.left_predictions[2], self.left_predictions[3])
             future_pos = (int(current_pos[0] + velocity[0] * 5), int(current_pos[1] + velocity[1] * 5))
             
-            left_output = OpenCVVisualizer.draw_prediction(
+            left_output = self.visualizer.draw_prediction(
                 left_output,
                 current_pos,
                 future_pos,
@@ -118,7 +121,7 @@ class KalmanPathVisualizer:
             velocity = (self.right_predictions[2], self.right_predictions[3])
             future_pos = (int(current_pos[0] + velocity[0] * 5), int(current_pos[1] + velocity[1] * 5))
             
-            right_output = OpenCVVisualizer.draw_prediction(
+            right_output = self.visualizer.draw_prediction(
                 right_output,
                 current_pos,
                 future_pos,
