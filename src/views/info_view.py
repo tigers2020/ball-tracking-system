@@ -12,8 +12,9 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QGroupBox, QFormLayout
 )
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt
 
+# Fix import errors using correct paths
 from src.utils.constants import LAYOUT
 from src.views.visualization.hsv_mask_visualizer import HSVMaskVisualizer
 from src.views.visualization.roi_mask_visualizer import ROIMaskVisualizer
@@ -56,14 +57,11 @@ class InfoView(QWidget):
         self.tracking_controller = None
         self.game_analyzer = None
         
-        # Visualizers list (will be initialized in _setup_visualizers)
+        # Visualizers list
         self._visualizers = []
         
         # Set up UI
         self._setup_ui()
-        
-        # Setup visualizers
-        self._setup_visualizers()
     
     def _setup_ui(self):
         """Set up the user interface."""
@@ -72,7 +70,7 @@ class InfoView(QWidget):
         main_layout.setSpacing(LAYOUT.SPACING)
         
         # Detection rate group
-        detection_group = QGroupBox("Detection Rate")
+        detection_group = self._create_group_box("Detection Rate")
         detection_layout = QVBoxLayout()
         self.detection_label = QLabel("0.00%")
         self.detection_label.setAlignment(Qt.AlignCenter)
@@ -81,25 +79,15 @@ class InfoView(QWidget):
         
         # Left 2D pixel coordinates group
         left_pixel_group = QGroupBox("Left Camera (2D)")
-        left_pixel_layout = QFormLayout()
-        self.left_pixel_x_label = QLabel("0")
-        self.left_pixel_y_label = QLabel("0")
-        self.left_pixel_r_label = QLabel("0")
-        left_pixel_layout.addRow("X:", self.left_pixel_x_label)
-        left_pixel_layout.addRow("Y:", self.left_pixel_y_label)
-        left_pixel_layout.addRow("R:", self.left_pixel_r_label)
-        left_pixel_group.setLayout(left_pixel_layout)
+        self.left_pixel_x_label, self.left_pixel_y_label, self.left_pixel_r_label = self._setup_coordinate_form(
+            left_pixel_group, ["X:", "Y:", "R:"], ["0", "0", "0"]
+        )
         
         # Right 2D pixel coordinates group
         right_pixel_group = QGroupBox("Right Camera (2D)")
-        right_pixel_layout = QFormLayout()
-        self.right_pixel_x_label = QLabel("0")
-        self.right_pixel_y_label = QLabel("0")
-        self.right_pixel_r_label = QLabel("0")
-        right_pixel_layout.addRow("X:", self.right_pixel_x_label)
-        right_pixel_layout.addRow("Y:", self.right_pixel_y_label)
-        right_pixel_layout.addRow("R:", self.right_pixel_r_label)
-        right_pixel_group.setLayout(right_pixel_layout)
+        self.right_pixel_x_label, self.right_pixel_y_label, self.right_pixel_r_label = self._setup_coordinate_form(
+            right_pixel_group, ["X:", "Y:", "R:"], ["0", "0", "0"]
+        )
         
         # 3D position coordinates group
         position_group = QGroupBox("3D Ball World Coordinate")
@@ -119,21 +107,15 @@ class InfoView(QWidget):
         
         # ROI information group
         roi_group = QGroupBox("ROI")
-        roi_layout = QFormLayout()
-        self.left_roi_label = QLabel("(0, 0, 0, 0)")
-        self.right_roi_label = QLabel("(0, 0, 0, 0)")
-        roi_layout.addRow("Left:", self.left_roi_label)
-        roi_layout.addRow("Right:", self.right_roi_label)
-        roi_group.setLayout(roi_layout)
+        self.left_roi_label, self.right_roi_label = self._setup_coordinate_form(
+            roi_group, ["Left:", "Right:"], ["(0, 0, 0, 0)", "(0, 0, 0, 0)"]
+        )
         
         # Kalman state group
         kalman_group = QGroupBox("Kalman State")
-        kalman_layout = QFormLayout()
-        self.left_state_label = QLabel("pos=(0, 0), vel=(0, 0)")
-        self.right_state_label = QLabel("pos=(0, 0), vel=(0, 0)")
-        kalman_layout.addRow("Left:", self.left_state_label)
-        kalman_layout.addRow("Right:", self.right_state_label)
-        kalman_group.setLayout(kalman_layout)
+        self.left_state_label, self.right_state_label = self._setup_coordinate_form(
+            kalman_group, ["Left:", "Right:"], ["pos=(0, 0), vel=(0, 0)", "pos=(0, 0), vel=(0, 0)"]
+        )
         
         # Add all groups to main layout
         main_layout.addWidget(detection_group)
@@ -143,10 +125,41 @@ class InfoView(QWidget):
         main_layout.addWidget(roi_group)
         main_layout.addWidget(kalman_group)
     
-    def _setup_visualizers(self):
-        """Set up visualizers for different aspects of tracking."""
-        # Initialize empty list (will be populated when controller is connected)
-        self._visualizers = []
+    def _create_group_box(self, title):
+        """
+        그룹 박스를 생성하는 팩토리 메서드
+        
+        Args:
+            title (str): 그룹 박스 제목
+            
+        Returns:
+            QGroupBox: 생성된 그룹 박스
+        """
+        group_box = QGroupBox(title)
+        return group_box
+    
+    def _setup_coordinate_form(self, group_box, row_labels, default_values):
+        """
+        좌표 폼 레이아웃을 설정하는 유틸리티 메서드
+        
+        Args:
+            group_box (QGroupBox): 폼이 추가될 그룹 박스
+            row_labels (list): 행 레이블 목록
+            default_values (list): 기본값 목록
+            
+        Returns:
+            tuple: 생성된 레이블 위젯 튜플
+        """
+        form_layout = QFormLayout()
+        labels = []
+        
+        for label, value in zip(row_labels, default_values):
+            lbl = QLabel(value)
+            form_layout.addRow(label, lbl)
+            labels.append(lbl)
+        
+        group_box.setLayout(form_layout)
+        return tuple(labels)
     
     def set_detection_rate(self, rate):
         """
@@ -205,6 +218,9 @@ class InfoView(QWidget):
         self.position_x_label.setText(f"{x:.3f}")
         self.position_y_label.setText(f"{y:.3f}")
         self.position_z_label.setText(f"{z:.3f}")
+        
+        # Add debug log to verify coordinates are being set
+        logging.info(f"[UI UPDATE] 3D coordinates set to: x={x:.3f}, y={y:.3f}, z={z:.3f}")
     
     def set_left_roi(self, x, y, width, height):
         """
@@ -279,15 +295,18 @@ class InfoView(QWidget):
         if controller:
             self.tracking_controller = controller
             
-            # Define signal mappings with lambda for proper signal signatures
-            SignalBinder.bind_lambda(
-                controller,
-                "detection_updated",
-                lambda frame_idx, detection_rate, left_coords, right_coords:
-                    self._on_detection_updated(frame_idx, detection_rate, left_coords, right_coords)
-            )
+            # Make sure we're getting 3D position data if available
+            try:
+                # Check if controller has 3D position data
+                has_3d = hasattr(controller, "get_3d_position") and callable(getattr(controller, "get_3d_position"))
+                logging.info(f"Controller has 3D position method: {has_3d}")
+            except Exception as e:
+                logging.error(f"Error checking controller 3D capabilities: {e}")
             
-            # Connect ROI update signal directly
+            # Connect detection_updated signal to handler method (including 3D coordinate update)
+            controller.detection_updated.connect(self._on_detection_updated)
+            
+            # ROI update signal directly
             SignalBinder.bind(controller, "roi_updated", self, "_on_roi_updated")
             
             # Connect prediction update signal for Kalman state
@@ -311,7 +330,8 @@ class InfoView(QWidget):
             # Connect signals using SignalBinder
             signal_mappings = {
                 "tracking_updated": self._on_tracking_updated,
-                "in_out_detected": self.in_out_led.on_in_out
+                "in_out_detected": self.in_out_led.on_in_out,
+                "court_position_updated": self._on_court_position_updated  # Make sure this signal is connected
             }
             
             # Connect all signals using SignalBinder
@@ -370,8 +390,19 @@ class InfoView(QWidget):
         else:
             self.set_right_pixel_coords(0, 0, 0)
         
-        # We don't update 3D position from BallTrackingController anymore
-        # This is now handled by the GameAnalyzer's world_position_updated signal
+        # Enhanced 3D position update with better debug logging
+        if position_coords is not None:
+            logging.info(f"Detection updated with position_coords: {position_coords}, type: {type(position_coords)}")
+            
+            if isinstance(position_coords, (tuple, list, np.ndarray)) and len(position_coords) >= 3:
+                try:
+                    self.set_position_coords(position_coords[0], position_coords[1], position_coords[2])
+                    logging.info(f"[3D POS DEBUG] 3D position updated from detection_updated signal: "
+                                f"({position_coords[0]:.3f}, {position_coords[1]:.3f}, {position_coords[2]:.3f})")
+                except (IndexError, TypeError) as e:
+                    logging.error(f"Error processing position_coords {position_coords}: {e}")
+            else:
+                logging.warning(f"Invalid position_coords format received: {position_coords}")
         
         # Log with proper type information
         left_type = type(left_coords).__name__ if left_coords is not None else "None"
@@ -441,6 +472,19 @@ class InfoView(QWidget):
             
         logging.debug(f"Kalman state updated for {camera} camera: pos=({x:.1f}, {y:.1f}), vel=({vx:.1f}, {vy:.1f})")
     
+    def _on_court_position_updated(self, x, y, z):
+        """
+        Handle court position updates from game analyzer.
+        
+        Args:
+            x (float): X coordinate in court space (meters)
+            y (float): Y coordinate in court space (meters)
+            z (float): Z coordinate in court space (meters)
+        """
+        # Update position display
+        self.set_position_coords(x, y, z)
+        logging.info(f"[COURT COORD] Court position updated: x={x:.3f}, y={y:.3f}, z={z:.3f}")
+    
     def get_visualizers(self):
         """
         Get the list of visualizers.
@@ -448,18 +492,4 @@ class InfoView(QWidget):
         Returns:
             list: List of visualizer objects
         """
-        return self._visualizers
-    
-    # This method will be kept for backward compatibility
-    def _on_world_position_updated(self, x, y, z):
-        """
-        Handle world position update signal from game analyzer.
-        This method is kept for backward compatibility but is no longer the primary method.
-        
-        Args:
-            x (float): X coordinate in court space (meters)
-            y (float): Y coordinate in court space (meters)
-            z (float): Z coordinate in court space (meters)
-        """
-        # We're now getting direct world coordinates from tracking_updated signal
-        pass 
+        return self._visualizers 

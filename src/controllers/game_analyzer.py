@@ -496,6 +496,18 @@ class GameAnalyzer(QObject):
                 return td.velocity_3d
         return None
         
+    def get_latest_tracking_data(self):
+        """
+        Get the latest valid tracking data.
+        
+        Returns:
+            Latest TrackingData object or None if not available
+        """
+        for td in reversed(self.tracking_history):
+            if td.is_valid:
+                return td
+        return None
+        
     def get_tracking_statistics(self):
         """
         Get tracking statistics.

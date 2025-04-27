@@ -238,6 +238,22 @@ class AppController(QObject):
         
         # Pass to game analyzer for 3D tracking
         self.game_analyzer.on_ball_detected(frame_idx, timestamp, detection_rate, left_point, right_point)
+        
+        # Ensure 3D coordinates are displayed in InfoView by direct update if available
+        if hasattr(self.view, 'image_view') and hasattr(self.view.image_view, 'info_view'):
+            info_view = self.view.image_view.info_view
+            
+            # Try to get most recent 3D coordinates from game analyzer
+            if hasattr(self.game_analyzer, 'get_latest_tracking_data'):
+                try:
+                    tracking_data = self.game_analyzer.get_latest_tracking_data()
+                    if tracking_data and tracking_data.is_valid and tracking_data.position_3d is not None:
+                        # Update info view with 3D position
+                        position_3d = tracking_data.position_3d
+                        logging.info(f"[3D COORD FIX] Directly updating InfoView with latest 3D position: {position_3d}")
+                        info_view.set_position_coords(position_3d[0], position_3d[1], position_3d[2])
+                except Exception as e:
+                    logging.error(f"Error getting latest tracking data for InfoView update: {e}")
     
     def show(self):
         """Show the main window."""
