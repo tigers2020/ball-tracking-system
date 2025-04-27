@@ -381,3 +381,64 @@ class STEREO:
     # Triangulation parameters
     MIN_DISPARITY: float = 5.0  # Minimum disparity in pixels
     TRIANGULATION_METHOD: int = 0  # Use cv2.triangulatePoints function instead of a constant 
+
+# =============================================
+# UI Colors (CSS Format for stylesheets)
+# =============================================
+
+@dataclass
+class UI_COLORS:
+    """Color constants in CSS format for UI styling"""
+    # Background gradients
+    BG_DARK: str = "#12122a"  
+    BG_MID: str = "#151530"   
+    BG_LIGHT: str = "#1a1a2e"  
+    
+    # Accent colors
+    ACCENT_PRIMARY: str = "#5d48e0"  
+    ACCENT_SECONDARY: str = "#b545e0"  
+    ACCENT_TERTIARY: str = "#4848e0"  
+    
+    # Feature colors
+    FEATURE_TITLE: str = "#80d8ff"  
+    FEATURE_TEXT: str = "#c5d0e0"  
+    
+    # Tab colors
+    TAB_BG: str = "#1c1c35"  
+    TAB_BG_HOVER: str = "#2f2f65"  
+    TAB_TEXT: str = "#b0b0d0"  
+    TAB_TEXT_SELECTED: str = "#ffffff"  
+    
+    # Card colors
+    CARD_BG_DARK: str = "#151533"  
+    CARD_BG_LIGHT: str = "#191940"  
+    CARD_BORDER: str = "rgba(100, 100, 255, 0.1)"  
+    
+    # Highlight colors
+    HIGHLIGHT_YELLOW: str = "#ffd966"  
+    HIGHLIGHT_PINK: str = "#ff7eb9"  
+    
+    # Converts BGR COLOR constants to CSS hex format
+    @staticmethod
+    def bgr_to_css(bgr_color):
+        """Convert BGR color tuple to CSS hex color string"""
+        if len(bgr_color) == 3:
+            b, g, r = bgr_color
+            return f"#{r:02x}{g:02x}{b:02x}"
+        return None
+        
+    # COLOR class constants converted to CSS
+    RED: str = "#ff0000"  # COLOR.RED in CSS
+    GREEN: str = "#00ff00"  # COLOR.GREEN in CSS
+    BLUE: str = "#0000ff"  # COLOR.BLUE in CSS
+    YELLOW: str = "#ffff00"  # COLOR.YELLOW in CSS
+    MAGENTA: str = "#ff00ff"  # COLOR.MAGENTA in CSS
+    CYAN: str = "#00ffff"  # COLOR.CYAN in CSS
+    WHITE: str = "#ffffff"  # COLOR.WHITE in CSS
+    BLACK: str = "#000000"  # COLOR.BLACK in CSS
+    GRAY: str = "#808080"  # COLOR.GRAY in CSS
+    LIGHT_GRAY: str = "#c0c0c0"  # COLOR.LIGHT_GRAY in CSS
+    DARK_GRAY: str = "#404040"  # COLOR.DARK_GRAY in CSS
+    ORANGE: str = "#ffa500"  # COLOR.ORANGE in CSS
+    PURPLE: str = "#800080"  # COLOR.PURPLE in CSS
+    LIME: str = "#bfff00"  # COLOR.LIME in CSS 

@@ -354,8 +354,16 @@ class BallTrackingController(QObject):
             hsv_values = self.get_hsv_values()
             roi_settings = self.get_roi_settings()
             
-            # Apply HSV threshold to create masks
-            left_mask, right_mask = self._apply_hsv_threshold(left_image, right_image, hsv_values)
+            # Apply HSV threshold to create masks and get pixel counts
+            left_mask, right_mask, left_pixel_count, right_pixel_count = self._apply_hsv_threshold(
+                left_image, right_image, hsv_values)
+            
+            # Check if pixel count is too low (less than 50 pixels)
+            # Skip processing if both masks have too few pixels
+            min_pixel_threshold = 50  # Minimum number of white pixels required
+            if left_pixel_count < min_pixel_threshold and right_pixel_count < min_pixel_threshold:
+                logging.warning(f"HSV mask pixel count too low: left={left_pixel_count}, right={right_pixel_count}. Skipping frame.")
+                return
             
             # Set the masks to the model
             self.model.left_mask = left_mask
@@ -534,7 +542,7 @@ class BallTrackingController(QObject):
                         max_points=20         # 더 많은 히스토리 포인트 표시
                     )
                     logging.debug(f"Drew left trajectory with {len(left_history)} points")
-            
+                    
             if right_prediction:
                 # Extract current position from circles and predicted position from Kalman
                 current_pos = (int(right_circles[0][0]), int(right_circles[0][1])) if right_circles and len(right_circles) > 0 else None
@@ -562,7 +570,7 @@ class BallTrackingController(QObject):
                         max_points=20         # 더 많은 히스토리 포인트 표시
                     )
                     logging.debug(f"Drew right trajectory with {len(right_history)} points")
-            
+                    
             # 4. Emit processed images signal with visualization
             self.circles_processed.emit(left_viz_image, right_viz_image)
             
@@ -604,7 +612,8 @@ class BallTrackingController(QObject):
             hsv_values (dict): Dictionary containing HSV min/max values
             
         Returns:
-            tuple: (left_mask, right_mask) - Binary masks for both images
+            tuple: (left_mask, right_mask) - Binary masks for both images,
+                   (pixel_count_left, pixel_count_right) - White pixel counts for both masks
         """
         # Process left image
         left_hsv = cv2.cvtColor(left_image, cv2.COLOR_BGR2HSV)
@@ -626,7 +635,11 @@ class BallTrackingController(QObject):
                                 hsv_values.get('s_max', HSV.s_max), 
                                 hsv_values.get('v_max', HSV.v_max)))
         
-        return left_mask, right_mask
+        # Count white pixels in each mask
+        pixel_count_left = cv2.countNonZero(left_mask)
+        pixel_count_right = cv2.countNonZero(right_mask)
+        
+        return left_mask, right_mask, pixel_count_left, pixel_count_right
     
     def _compute_rois(self, left_image, right_image, roi_settings):
         """

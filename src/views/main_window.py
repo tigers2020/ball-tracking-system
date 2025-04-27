@@ -10,16 +10,18 @@ import os
 import logging
 
 from PySide6.QtCore import Qt, Slot, Signal
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtGui import QAction, QIcon, QPixmap, QBrush, QPalette
 from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QWidget, QFileDialog, QMenuBar, 
     QMenu, QStatusBar, QMessageBox, QProgressDialog, QTabWidget
 )
 
 from src.utils.ui_constants import WindowSize, Messages, Layout, FileDialog, Icons
+from src.utils.constants import UI_COLORS
 from src.views.image_view import ImageView
 from src.views.setting_view import SettingView
 from src.views.calibration_view import CalibrationView
+from src.views.project_info_tab import ProjectInfoTab
 from src.models.calibration_model import CalibrationModel
 from src.controllers.calibration_controller import CalibrationController
 from src.views.widgets.inout_indicator import InOutLED
@@ -47,11 +49,53 @@ class MainWindow(QMainWindow):
         self.resize(WindowSize.DEFAULT_WIDTH, WindowSize.DEFAULT_HEIGHT)
         self.setMinimumSize(WindowSize.MIN_WIDTH, WindowSize.MIN_HEIGHT)
         
+        # Set background image
+        self._set_background_image()
+        
         # Set up UI
         self._setup_ui()
         
         # Show ready message
         self.status_bar.showMessage(Messages.READY)
+    
+    def _set_background_image(self):
+        """Set the background image for the main window."""
+        try:
+            # Try multiple possible locations for the background image
+            possible_paths = [
+                os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                            "src", "resources", "images", "background.png"),
+                os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                            "src", "resources", "background.png"),
+                os.path.join(os.path.dirname(os.path.dirname(__file__)), 
+                            "resources", "images", "background.png"),
+                os.path.join(os.path.dirname(os.path.dirname(__file__)), 
+                            "resources", "background.png")
+            ]
+            
+            # Find the first existing path
+            background_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    background_path = path
+                    break
+            
+            if background_path:
+                pixmap = QPixmap(background_path)
+                if not pixmap.isNull():
+                    # Create semi-transparent background effect
+                    palette = self.palette()
+                    brush = QBrush(pixmap)
+                    palette.setBrush(QPalette.Window, brush)
+                    self.setPalette(palette)
+                    self.setAutoFillBackground(True)
+                    logging.info(f"Background image loaded from {background_path}")
+                else:
+                    logging.warning("Could not load background image: pixmap is null")
+            else:
+                logging.warning("Background image not found in any of the expected locations")
+        except Exception as e:
+            logging.error(f"Error setting background image: {e}")
     
     def _setup_ui(self):
         """Set up the user interface."""
@@ -63,21 +107,8 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(Layout.MARGIN, Layout.MARGIN, Layout.MARGIN, Layout.MARGIN)
         main_layout.setSpacing(Layout.SPACING)
         
-        # Create tab widget
-        self.tab_widget = QTabWidget()
-        main_layout.addWidget(self.tab_widget)
-        
-        # Create image view tab
-        self.image_view = ImageView()
-        self.tab_widget.addTab(self.image_view, "Image View")
-        
-        # Create settings tab
-        self.setting_view = SettingView()
-        self.tab_widget.addTab(self.setting_view, "Settings")
-        
-        # Create calibration view
-        self.calibration_view = CalibrationView()
-        self.tab_widget.addTab(self.calibration_view, "Calibration")
+        # Create tab widget with enhanced styling
+        self._setup_tab_widget()
         
         # Create IN/OUT LED indicator
         self.inout_led = InOutLED()
@@ -98,6 +129,49 @@ class MainWindow(QMainWindow):
         # Set up status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
+    
+    def _setup_tab_widget(self):
+        """Set up the tab widget for different views."""
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setStyleSheet(f"""
+            QTabWidget::pane {{ 
+                border: 1px solid #444; 
+                border-radius: 8px;
+                padding: 25px; 
+                background-color: rgba(30, 30, 45, 210);
+            }}
+            QTabBar::tab {{ 
+                padding: 12px 28px;
+                margin: 2px 6px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                background-color: {UI_COLORS.TAB_BG};
+                color: {UI_COLORS.TAB_TEXT};
+                font-family: 'Segoe UI';
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QTabBar::tab:selected, QTabBar::tab:hover {{
+                background-color: {UI_COLORS.TAB_BG_HOVER};
+                color: {UI_COLORS.TAB_TEXT_SELECTED};
+                border-bottom: 3px solid {UI_COLORS.ACCENT_PRIMARY};
+            }}
+        """)
+        
+        # Create and add tabs
+        self.image_view = ImageView()
+        self.setting_view = SettingView()
+        self.calibration_view = CalibrationView()
+        self.project_info_tab = ProjectInfoTab()
+        
+        # Add tabs to the tab widget
+        self.tab_widget.addTab(self.image_view, "Image View")
+        self.tab_widget.addTab(self.setting_view, "Settings")
+        self.tab_widget.addTab(self.calibration_view, "Calibration")
+        self.tab_widget.addTab(self.project_info_tab, "Project Information")
+        
+        # Add tab widget to main layout
+        self.centralWidget().layout().addWidget(self.tab_widget)
     
     def _setup_menu_bar(self):
         """Set up the menu bar."""
