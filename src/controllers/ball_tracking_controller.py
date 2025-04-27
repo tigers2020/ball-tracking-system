@@ -2102,3 +2102,25 @@ class BallTrackingController(QObject):
             right_circles = [(x + right_x, y + right_y, r) for x, y, r in right_circles]
         
         return left_circles, right_circles
+
+    def update_kalman_settings(self, kalman_settings: Dict[str, Any]) -> None:
+        """
+        Update Kalman filter settings for ball tracking.
+        
+        Args:
+            kalman_settings: Dictionary containing Kalman filter parameters
+        """
+        # Update internal settings
+        self.kalman_settings.update(kalman_settings)
+        
+        # Update Kalman processor with new settings
+        if hasattr(self, 'kalman_processor') and self.kalman_processor is not None:
+            self.kalman_processor.update_params(kalman_settings)
+            logging.info(f"Kalman filter settings updated")
+        
+        # Update configuration
+        self.config_manager.set_kalman_settings(kalman_settings)
+        
+        # Reprocess current frame if tracking is enabled
+        if self.is_enabled and (self.model.left_image is not None or self.model.right_image is not None):
+            self._process_images()

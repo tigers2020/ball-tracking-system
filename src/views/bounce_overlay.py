@@ -17,6 +17,9 @@ from PySide6.QtCore import Qt, QPointF, QRectF, Signal, Slot, QTimer
 from PySide6.QtGui import QPen, QBrush, QColor, QPainterPath, QTransform, QPainter
 
 from src.services.geometry.court_frame import CourtFrame
+from src.utils.signal_binder import SignalBinder
+from src.utils.constants import COURT
+from src.utils.ui_theme import Colors
 
 
 class CourtGraphicsItem(QGraphicsItem):
@@ -533,16 +536,22 @@ class BounceOverlayWidget(QGraphicsView):
         Args:
             game_analyzer: The GameAnalyzer instance
         """
-        # Disconnect any existing connections
+        # Disconnect any existing connections using SignalBinder
         if self.game_analyzer:
-            self.game_analyzer.court_position_updated.disconnect(self._on_ball_position_updated)
-            self.game_analyzer.bounce_detected.disconnect(self._on_bounce_detected)
+            SignalBinder.unbind(self.game_analyzer, "court_position_updated", self)
+            SignalBinder.unbind(self.game_analyzer, "bounce_detected", self)
         
         self.game_analyzer = game_analyzer
         
         if game_analyzer:
-            game_analyzer.court_position_updated.connect(self._on_ball_position_updated)
-            game_analyzer.bounce_detected.connect(self._on_bounce_detected)
+            # Connect signals using SignalBinder
+            signal_mappings = {
+                "court_position_updated": self._on_ball_position_updated,
+                "bounce_detected": self._on_bounce_detected
+            }
+            
+            # Connect all signals using SignalBinder
+            SignalBinder.bind_all(game_analyzer, self, signal_mappings)
             
     def _on_ball_position_updated(self, x: float, y: float, z: float):
         """

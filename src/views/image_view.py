@@ -15,6 +15,7 @@ from src.views.playback_controls_widget import PlaybackControlsWidget
 from src.views.info_view import InfoView
 from src.views.bounce_overlay import BounceOverlayWidget
 from src.utils.ui_constants import Layout
+from src.utils.signal_binder import SignalBinder
 
 
 class ImageView(QWidget):
@@ -229,14 +230,15 @@ class ImageView(QWidget):
             controller: BallTrackingController instance
         """
         if controller:
-            # Connect mask update signal
-            controller.mask_updated.connect(self.set_masks)
+            # Define signal mappings
+            signal_mappings = {
+                "mask_updated": self.set_masks,
+                "roi_updated": self.set_rois,
+                "circles_processed": self.set_circle_images
+            }
             
-            # Connect ROI update signal
-            controller.roi_updated.connect(self.set_rois)
-            
-            # Connect circles processed signal
-            controller.circles_processed.connect(self.set_circle_images)
+            # Connect all signals using SignalBinder
+            SignalBinder.bind_all(controller, self, signal_mappings)
             
             # Connect info view to controller
             self.info_view.connect_tracking_controller(controller)
@@ -264,11 +266,8 @@ class ImageView(QWidget):
             # Connect info view directly to game analyzer
             self.info_view.connect_game_analyzer(analyzer)
             
-            # No longer need to connect to court_position_updated separately 
-            # since InfoView now connects directly
-            
-            # Connect bounce events to info view
-            analyzer.bounce_detected.connect(self._on_bounce_detected)
+            # Connect bounce events to info view using SignalBinder
+            SignalBinder.bind(analyzer, "bounce_detected", self, "_on_bounce_detected")
             
             logging.info("Connected to game analyzer")
     

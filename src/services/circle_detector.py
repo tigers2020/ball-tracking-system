@@ -12,6 +12,7 @@ import numpy as np
 from typing import Dict, Tuple, List, Optional, Any
 
 from src.utils.constants import HOUGH, COLOR, MORPHOLOGY
+from src.utils.logging_utils import log_service_init, log_service_update
 
 
 class CircleDetector:
@@ -35,7 +36,7 @@ class CircleDetector:
         """
         self.hough_settings = hough_settings.copy()
         self.adaptive = hough_settings.get('adaptive', False)
-        logging.info(f"Circle detector initialized with settings: {self.hough_settings}")
+        log_service_init("Circle detector", self.hough_settings)
 
     def update_settings(self, hough_settings: Dict[str, Any]) -> None:
         """
@@ -46,7 +47,7 @@ class CircleDetector:
         """
         self.hough_settings = hough_settings.copy()
         self.adaptive = hough_settings.get('adaptive', False)
-        logging.info(f"Circle detector settings updated: {self.hough_settings}")
+        log_service_update("Circle detector", self.hough_settings)
 
     def detect_circles(self, img: np.ndarray, mask: Optional[np.ndarray] = None, roi: Optional[Dict[str, int]] = None, 
                     hsv_center: Optional[Tuple[int, int]] = None, 

@@ -12,31 +12,11 @@ import cv2
 from typing import Optional, Tuple, Dict, Any, Union, List
 
 from src.geometry.court_frame import get_calibration_points
-
-DEG2RAD = np.pi / 180.0
-
-def _rot_mat(rx, ry, rz):
-    """
-    Create a 3D rotation matrix from Euler angles.
-    
-    Args:
-        rx: Rotation around X-axis (radians)
-        ry: Rotation around Y-axis (radians)
-        rz: Rotation around Z-axis (radians)
-        
-    Returns:
-        3x3 rotation matrix (numpy array)
-    """
-    Rx = np.array([[1, 0, 0],
-                   [0, np.cos(rx), -np.sin(rx)],
-                   [0, np.sin(rx),  np.cos(rx)]])
-    Ry = np.array([[ np.cos(ry), 0, np.sin(ry)],
-                   [0, 1, 0],
-                   [-np.sin(ry), 0, np.cos(ry)]])
-    Rz = np.array([[np.cos(rz), -np.sin(rz), 0],
-                   [np.sin(rz),  np.cos(rz), 0],
-                   [0, 0, 1]])
-    return Rz @ Ry @ Rx          # Z-Y-X intrinsic
+from src.utils.geometry_utils import (
+    DEG2RAD, create_rotation_matrix, triangulate_points as utils_triangulate_points,
+    triangulate_point as utils_triangulate_point, calculate_reprojection_error,
+    transform_to_world
+)
 
 class TriangulationService:
     """
@@ -122,7 +102,7 @@ class TriangulationService:
         angles = np.array([cfg.get("camera_rotation_x", 0.0),
                           cfg.get("camera_rotation_y", 0.0),
                           cfg.get("camera_rotation_z", 0.0)]) * DEG2RAD
-        R = _rot_mat(*angles).astype(np.float32)  # Use float32 consistently
+        R = create_rotation_matrix(*angles).astype(np.float32)  # Use float32 consistently
         
         # Camera projection matrices (legacy method)
         self.R_left = R
@@ -249,68 +229,46 @@ class TriangulationService:
         projected_points = projected_points.reshape(-1, 2)
         
         # Calculate error
-        errors = np.sqrt(np.sum((image_points - projected_points) ** 2, axis=1))
-        return np.mean(errors)
+        error = np.sqrt(np.sum((image_points - projected_points) ** 2, axis=1))
+        return np.mean(error)
 
     def triangulate_points(self, points_left: np.ndarray, points_right: np.ndarray) -> np.ndarray:
         """
-        Triangulate 3D world coordinates from stereo image points.
-        Handles batch triangulation of multiple points at once.
+        Triangulate multiple 3D points from stereo image points.
         
         Args:
-            points_left: Nx2 array of points in left image
-            points_right: Nx2 array of points in right image
+            points_left: Points in left image (Nx2)
+            points_right: Points in right image (Nx2)
             
         Returns:
-            Nx3 array of 3D points in world coordinates, or empty array if fails
+            Array of 3D points (Nx3)
         """
         if not self.is_calibrated:
-            logging.error("Cannot triangulate: service not calibrated")
+            logging.error("Triangulation failed: system not calibrated")
+            return np.array([])
+            
+        if points_left.shape[0] == 0 or points_right.shape[0] == 0:
             return np.array([])
             
         if points_left.shape != points_right.shape:
-            logging.error(f"Point count mismatch: left={points_left.shape}, right={points_right.shape}")
+            logging.error(f"Point count mismatch: left={points_left.shape[0]}, right={points_right.shape[0]}")
             return np.array([])
-            
-        if points_left.shape[0] == 0:
-            return np.array([])
-            
-        try:
-            # Use different triangulation methods based on calibration type
-            if self.use_pnp and self.pnp_calibrated:
-                # Use OpenCV triangulation with projection matrices from PnP
-                points_4d = cv2.triangulatePoints(
-                    self.P_left, 
-                    self.P_right,
-                    points_left.T, 
-                    points_right.T
-                )
-                
-                # Convert from homogeneous coordinates to 3D
-                points_3d = points_4d[:3] / points_4d[3]
-                return points_3d.T  # Return as Nx3
-                
-            else:
-                # Legacy method using baseline and disparity
-                # For compatibility with older code
-                results = []
-                for (left, right) in zip(points_left, points_right):
-                    point = self.triangulate(left[0], left[1], right[0], right[1])
-                    if point is not None:
-                        results.append(point)
-                
-                if not results:
-                    return np.array([])
-                    
-                return np.array(results)
-                
-        except Exception as e:
-            logging.error(f"Triangulation failed: {e}")
-            return np.array([])
+        
+        # Use PnP-based projection matrices if available
+        if self.use_pnp and self.pnp_calibrated:
+            P_left = self.P_left
+            P_right = self.P_right
+        else:
+            # Otherwise, create projection matrices from calibration
+            P_left = self.K @ np.hstack((self.R_left, self.T_left))
+            P_right = self.K @ np.hstack((self.R_right, self.T_right))
+        
+        # Use the utility function for triangulation
+        return utils_triangulate_points(points_left, points_right, P_left, P_right)
 
     def triangulate(self, uL: float, vL: float, uR: float, vR: float) -> Optional[np.ndarray]:
         """
-        Triangulate 3D world coordinates from a single pair of stereo image points.
+        Triangulate a 3D point from stereo image points.
         
         Args:
             uL: x-coordinate in left image (pixels)
@@ -319,39 +277,25 @@ class TriangulationService:
             vR: y-coordinate in right image (pixels)
             
         Returns:
-            3D point in world coordinates (X,Y,Z) in meters, or None if invalid
+            3D world coordinates (X,Y,Z) in meters, or None if invalid
         """
-        # Calculate disparity
-        d = float(uL - uR)
-        
-        # Check for valid disparity
-        if abs(d) < 0.1:  # Threshold to avoid division by zero or invalid results
-            logging.warning(f"Invalid disparity: {d} (uL={uL}, uR={uR})")
+        if not self.is_calibrated:
+            logging.warning("Triangulation failed: system not calibrated")
             return None
             
-        # Camera parameters
-        fx = self.K[0, 0]
-        B = self.cfg["baseline_m"]
-
-        # Triangulate depth
-        Z = fx * B / d                      # depth (m)
-        X_cam = (uL - self.K[0, 2]) * Z / fx
-        Y_cam = (vL - self.K[1, 2]) * Z / self.K[1, 1]
+        # Use PnP-based projection matrices if available
+        if self.use_pnp and self.pnp_calibrated:
+            P_left = self.P_left
+            P_right = self.P_right
+        else:
+            # Otherwise, create projection matrices from calibration
+            P_left = self.K @ np.hstack((self.R_left, self.T_left))
+            P_right = self.K @ np.hstack((self.R_right, self.T_right))
         
-        cam_pt = np.array([[X_cam], [Y_cam], [Z]])
-
-        # Transform from camera to world coordinates
-        world_pt = self.R_T @ cam_pt + self.T_left
-        
-        result = world_pt.ravel()  # (X,Y,Z)
-        
-        # Sanity check on result
-        if not np.all(np.isfinite(result)):
-            logging.warning(f"Non-finite values in triangulated point: {result}")
-            return None
-            
-        logging.debug(f"Triangulated point: {result} from image points L({uL},{vL}), R({uR},{vR})")
-        return result
+        # Use utility function for point triangulation
+        left_point = (uL, vL)
+        right_point = (uR, vR)
+        return utils_triangulate_point(left_point, right_point, P_left, P_right)
 
     def get_reprojection_error(self, world_point: np.ndarray, image_points: Tuple[float, float, float, float]) -> float:
         """
@@ -359,95 +303,99 @@ class TriangulationService:
         
         Args:
             world_point: 3D point in world coordinates (X,Y,Z)
-            image_points: Tuple of (uL, vL, uR, vR) original image points
+            image_points: Tuple of (uL, vL, uR, vR) image coordinates
             
         Returns:
-            Reprojection error in pixels (average of left and right)
+            Average reprojection error in pixels
         """
+        if not self.is_calibrated:
+            return float('inf')
+            
+        # Extract image coordinates
         uL, vL, uR, vR = image_points
+        left_point = (uL, vL)
+        right_point = (uR, vR)
         
-        # Project world point back to image coordinates
-        cam_pt = self.R_left @ (world_point.reshape(3, 1) - self.T_left)
-        
-        # Ensure positive depth
-        if cam_pt[2, 0] <= 0:
-            return float('inf')
-            
-        # Project to left and right images
-        z = cam_pt[2, 0]
-        x_left = self.K[0, 0] * cam_pt[0, 0] / z + self.K[0, 2]
-        y_left = self.K[1, 1] * cam_pt[1, 0] / z + self.K[1, 2]
-        
-        # Right camera is shifted by baseline
-        cam_pt_right = self.R_right @ (world_point.reshape(3, 1) - self.T_right)
-        
-        # Ensure positive depth for right camera
-        if cam_pt_right[2, 0] <= 0:
-            return float('inf')
-            
-        z_right = cam_pt_right[2, 0]
-        x_right = self.K[0, 0] * cam_pt_right[0, 0] / z_right + self.K[0, 2]
-        y_right = self.K[1, 1] * cam_pt_right[1, 0] / z_right + self.K[1, 2]
-        
-        # Calculate reprojection errors
-        err_left = np.sqrt((x_left - uL)**2 + (y_left - vL)**2)
-        err_right = np.sqrt((x_right - uR)**2 + (y_right - vR)**2)
-        
-        return (err_left + err_right) / 2.0 
+        # Use utility function for error calculation
+        return calculate_reprojection_error(
+            world_point, 
+            left_point, 
+            right_point, 
+            self.K, 
+            self.R_left, 
+            self.T_left, 
+            self.R_right, 
+            self.T_right
+        )
 
     def project_point_to_image(self, world_point: np.ndarray, camera: str = 'left') -> Optional[np.ndarray]:
         """
-        Project a 3D world point to 2D image coordinates.
+        Project a 3D world point back onto the camera image plane.
         
         Args:
-            world_point: 3D point in world coordinates (X,Y,Z)
+            world_point: 3D point in world coordinates [X, Y, Z]
             camera: Which camera to project to ('left' or 'right')
             
         Returns:
-            2D point in image coordinates (u,v), or None if invalid
+            2D image point [u, v] or None if projection fails
         """
         if not self.is_calibrated:
-            logging.error("Cannot project: service not calibrated")
+            logging.warning("Cannot project point: system not calibrated")
             return None
             
-        world_point = np.array(world_point, dtype=np.float64).reshape(3, 1)
+        world_point = np.array(world_point).reshape(3, 1)
         
-        try:
-            if camera.lower() == 'left':
-                R, T = self.R_left, self.T_left
-            elif camera.lower() == 'right':
-                R, T = self.R_right, self.T_right
-            else:
-                logging.error(f"Invalid camera: {camera}")
-                return None
-                
-            # Transform from world to camera coordinates
-            cam_pt = R @ (world_point - T)
-            
-            # Check if point is in front of camera
-            if cam_pt[2, 0] <= 0:
-                return None
-                
-            # Project to image coordinates
-            u = self.K[0, 0] * cam_pt[0, 0] / cam_pt[2, 0] + self.K[0, 2]
-            v = self.K[1, 1] * cam_pt[1, 0] / cam_pt[2, 0] + self.K[1, 2]
-            
-            return np.array([u, v])
-            
-        except Exception as e:
-            logging.error(f"Projection error: {e}")
+        # Select camera parameters
+        if camera.lower() == 'left':
+            R = self.R_left
+            T = self.T_left
+        elif camera.lower() == 'right':
+            R = self.R_right
+            T = self.T_right
+        else:
+            logging.error(f"Invalid camera: {camera}, must be 'left' or 'right'")
             return None
+        
+        # Transform point to camera coordinates
+        camera_point = R @ (world_point - T)
+        
+        # Ensure the point is in front of the camera
+        if camera_point[2, 0] <= 0:
+            return None
+            
+        # Project to image plane
+        z = camera_point[2, 0]
+        x = self.K[0, 0] * camera_point[0, 0] / z + self.K[0, 2]
+        y = self.K[1, 1] * camera_point[1, 0] / z + self.K[1, 2]
+        
+        return np.array([x, y])
 
     def get_calibration_status(self) -> Dict[str, Any]:
         """
-        Get current calibration status.
+        Get the current calibration status.
         
         Returns:
-            Dictionary with calibration status information
+            Dictionary with calibration status
         """
-        return {
+        status = {
             "is_calibrated": self.is_calibrated,
             "use_pnp": self.use_pnp,
             "pnp_calibrated": self.pnp_calibrated,
-            "has_intrinsics": self.K is not None
-        } 
+        }
+        
+        if self.is_calibrated:
+            status.update({
+                "image_width": self.w,
+                "image_height": self.h,
+                "intrinsic_matrix": self.K.tolist() if self.K is not None else None,
+            })
+            
+        if self.pnp_calibrated:
+            status.update({
+                "left_camera_rotation": self.R_left.tolist() if self.R_left is not None else None,
+                "left_camera_translation": self.T_left.flatten().tolist() if self.T_left is not None else None,
+                "right_camera_rotation": self.R_right.tolist() if self.R_right is not None else None,
+                "right_camera_translation": self.T_right.flatten().tolist() if self.T_right is not None else None,
+            })
+            
+        return status 

@@ -20,6 +20,7 @@ from src.views.visualization.roi_mask_visualizer import ROIMaskVisualizer
 from src.views.visualization.hough_circle_visualizer import HoughCircleVisualizer
 from src.views.visualization.kalman_path_visualizer import KalmanPathVisualizer
 from src.views.widgets.inout_indicator import InOutLED
+from src.utils.signal_binder import SignalBinder
 
 
 class InfoView(QWidget):
@@ -278,20 +279,19 @@ class InfoView(QWidget):
         if controller:
             self.tracking_controller = controller
             
-            # Connect detection update signal with proper signature
-            controller.detection_updated.connect(
+            # Define signal mappings with lambda for proper signal signatures
+            SignalBinder.bind_lambda(
+                controller,
+                "detection_updated",
                 lambda frame_idx, detection_rate, left_coords, right_coords:
-                self._on_detection_updated(frame_idx, detection_rate, left_coords, right_coords)
+                    self._on_detection_updated(frame_idx, detection_rate, left_coords, right_coords)
             )
             
-            # Connect ROI update signal
-            controller.roi_updated.connect(self._on_roi_updated)
-            
-            # We no longer connect to tracking_updated from BallTrackingController
-            # This is now handled by the GameAnalyzer connection
+            # Connect ROI update signal directly
+            SignalBinder.bind(controller, "roi_updated", self, "_on_roi_updated")
             
             # Connect prediction update signal for Kalman state
-            controller.prediction_updated.connect(self._on_kalman_predicted)
+            SignalBinder.bind(controller, "prediction_updated", self, "_on_kalman_predicted")
             
             # Set up visualizers with controller
             self._setup_visualizers_with_controller(controller)
@@ -308,12 +308,14 @@ class InfoView(QWidget):
         if analyzer:
             self.game_analyzer = analyzer
             
-            # Connect to world position updates (x, y, z in world coordinate system)
-            # Use tracking_updated signal instead of court_position_updated to get original world coordinates
-            analyzer.tracking_updated.connect(self._on_tracking_updated)
+            # Connect signals using SignalBinder
+            signal_mappings = {
+                "tracking_updated": self._on_tracking_updated,
+                "in_out_detected": self.in_out_led.on_in_out
+            }
             
-            # Connect to in/out signal for the LED indicator
-            analyzer.in_out_detected.connect(self.in_out_led.on_in_out)
+            # Connect all signals using SignalBinder
+            SignalBinder.bind_all(analyzer, self, signal_mappings)
             
             logging.info("InfoView connected to game analyzer")
     

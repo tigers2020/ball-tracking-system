@@ -66,10 +66,8 @@ class GameAnalyzer(QObject):
         self.kalman = Kalman3DService()
         self.bounce_detector = BounceDetector()
         
-        # 좌표계 설정 가져오기
-        coordinate_config = config_manager.get_section("coordinate_settings", {})
-        # coordinate_service 초기화 (설정 파라미터와 함께)
-        self.coordinate_service = CoordinateService(coordinate_config)
+        # Initialize coordinate service with the ConfigManager instance
+        self.coordinate_service = CoordinateService(self.config_manager)
         
         # State tracking
         self.is_enabled = False

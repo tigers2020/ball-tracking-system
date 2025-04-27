@@ -11,20 +11,24 @@ import cv2
 import numpy as np
 from typing import Dict, Tuple, Optional, Any
 
+from src.utils.parameter_handler import ROIParameterHandler
+
 
 class ROIComputer:
     """
     Service class for computing Region of Interest (ROI) from masks.
     """
     
-    def __init__(self, roi_settings: Dict[str, Any]):
+    def __init__(self, roi_settings: Dict[str, Any] = None):
         """
         Initialize the ROI computer.
         
         Args:
             roi_settings: Dictionary containing ROI settings (width, height, auto_center, etc.)
         """
-        self.roi_settings = roi_settings
+        # Use the ROIParameterHandler for parameter management
+        self.parameter_handler = ROIParameterHandler(roi_settings)
+        self.roi_settings = self.parameter_handler.get_params()
     
     def update_roi_settings(self, roi_settings: Dict[str, Any]) -> None:
         """
@@ -33,7 +37,10 @@ class ROIComputer:
         Args:
             roi_settings: Dictionary containing ROI settings
         """
-        self.roi_settings = roi_settings.copy()
+        # Use the parameter handler to update and validate settings
+        self.parameter_handler.update_params(roi_settings)
+        # Update local reference to current settings
+        self.roi_settings = self.parameter_handler.get_params()
     
     def compute_roi(self, mask: np.ndarray, image: np.ndarray) -> Optional[Dict[str, int]]:
         """
@@ -54,18 +61,21 @@ class ROIComputer:
             # Get image dimensions
             img_height, img_width = image.shape[:2]
             
+            # Get current ROI settings from parameter handler
+            roi_settings = self.parameter_handler.get_params()
+            
             # Get ROI width and height from settings and ensure they're positive
-            roi_width = max(1, abs(self.roi_settings.get("width", 100)))
-            roi_height = max(1, abs(self.roi_settings.get("height", 100)))
+            roi_width = max(1, abs(roi_settings.get("width", 100)))
+            roi_height = max(1, abs(roi_settings.get("height", 100)))
             
             # Calculate center coordinates
-            if self.roi_settings.get("auto_center", True):
+            if roi_settings.get("auto_center", True):
                 # Use mask centroid
                 center_x, center_y = self.compute_mask_centroid(mask)
             else:
                 # Use manual center if provided, otherwise use image center
-                center_x = self.roi_settings.get("center_x")
-                center_y = self.roi_settings.get("center_y")
+                center_x = roi_settings.get("center_x")
+                center_y = roi_settings.get("center_y")
                 
                 # If center coordinates not provided, use image center
                 if center_x is None or center_y is None:

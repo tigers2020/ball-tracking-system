@@ -11,6 +11,8 @@ import numpy as np
 from typing import Dict, Tuple, List, Optional, Any
 import cv2
 
+from src.utils.logging_utils import log_kalman_init, log_kalman_update
+
 
 class KalmanProcessor:
     """
@@ -64,9 +66,15 @@ class KalmanProcessor:
         # Initialize the filters
         self._init_kalman_filters()
         
-        logging.info(f"Kalman processor initialized with dt={self.dt}, process_noise={self.process_noise}, "
-                    f"measurement_noise={self.measurement_noise}, reset_threshold={self.reset_threshold}, "
-                    f"velocity_decay={self.velocity_decay_factor}, position_memory={self.position_memory_factor}")
+        # Use the new logging utility instead of direct logging
+        log_kalman_init(
+            self.dt, 
+            self.process_noise, 
+            self.measurement_noise, 
+            self.reset_threshold, 
+            self.velocity_decay_factor, 
+            self.position_memory_factor
+        )
 
     def update_params(self, settings: dict) -> None:
         """
@@ -94,9 +102,15 @@ class KalmanProcessor:
         # Re-initialize the filters with updated parameters
         self._init_kalman_filters()
         
-        logging.info(f"Kalman parameters updated: dt={self.dt}, process_noise={self.process_noise}, "
-                   f"measurement_noise={self.measurement_noise}, reset_threshold={self.reset_threshold}, "
-                   f"velocity_decay={self.velocity_decay_factor}, position_memory={self.position_memory_factor}")
+        # Use the new logging utility instead of direct logging
+        log_kalman_update(
+            self.dt, 
+            self.process_noise, 
+            self.measurement_noise, 
+            self.reset_threshold, 
+            self.velocity_decay_factor, 
+            self.position_memory_factor
+        )
 
     def _init_kalman_filters(self) -> None:
         """

@@ -19,6 +19,8 @@ from src.models.stereo_image_model import StereoImageModel
 from src.views.main_window import MainWindow
 from src.utils.ui_constants import Messages, Timing
 from src.utils.config_manager import ConfigManager
+from src.utils.parameter_manager import ParameterManager
+from src.utils.signal_binder import SignalBinder
 from src.controllers.ball_tracking_controller import BallTrackingController, TrackingState
 from src.controllers.game_analyzer import GameAnalyzer
 from src.views.ball_tracking_settings_dialog import BallTrackingSettingsDialog
@@ -67,6 +69,9 @@ class AppController(QObject):
         
         # Create configuration manager
         self.config_manager = ConfigManager()
+        
+        # Create parameter manager
+        self.parameter_manager = ParameterManager(self.config_manager)
         
         # Create model and view
         self.model = StereoImageModel()
@@ -120,7 +125,7 @@ class AppController(QObject):
         # Variables
         self.progress_dialog = None
         
-        # Initialize ball tracking controller with the same config manager
+        # Initialize ball tracking controller with the parameter_manager
         self.ball_tracking_controller = BallTrackingController(self.model, self.config_manager)
         
         # Initialize game analyzer controller with the same config manager
@@ -158,6 +163,9 @@ class AppController(QObject):
         # Set the config manager to the calibration controller
         self.view.calibration_controller.set_config_manager(self.config_manager)
         
+        # Connect parameter_manager signals to controllers
+        self._connect_parameter_manager_signals()
+        
         # Tracking data save settings
         self.tracking_data_save_enabled = True  # Enable/disable saving
         self.tracking_data_folder = os.path.join(os.getcwd(), "tracking_data")  # Default folder
@@ -166,25 +174,31 @@ class AppController(QObject):
         """
         Connect the ball tracking controller to game analyzer for 3D analysis.
         """
-        # Connect ball tracking 2D detection signals to game analyzer
-        connected = self.ball_tracking_controller.detection_updated.connect(
+        # Connect ball tracking 2D detection signals to game analyzer using a lambda function
+        connected = SignalBinder.bind_lambda(
+            self.ball_tracking_controller, 
+            "detection_updated",
             lambda frame_idx, detection_rate, left_coords, right_coords: 
-            self._on_ball_detection_updated(frame_idx, detection_rate, left_coords, right_coords)
+                self._on_ball_detection_updated(frame_idx, detection_rate, left_coords, right_coords)
         )
         
         # Check if connection was successful
         logging.info(f"Ball tracking detection signal connected to game analyzer: {connected}")
         
-        # No longer need to connect tracking_updated to on_ball_position_updated
-        # since GameAnalyzer now handles triangulation directly
+        # Connect ball tracking controller signals using SignalBinder for lambda connections
+        SignalBinder.bind_lambda(
+            self.ball_tracking_controller,
+            "tracking_enabled_changed",
+            lambda enabled: self.view.image_view.playback_controls.ball_tracking_button.setChecked(enabled)
+        )
         
-        # Connect ball tracking controller signals
-        self.ball_tracking_controller.tracking_enabled_changed.connect(
-            lambda enabled: self.view.image_view.playback_controls.ball_tracking_button.setChecked(enabled))
-        self.ball_tracking_controller.tracking_state_changed.connect(
-            lambda state: self.game_analyzer.enable(state == TrackingState.TRACKING or state == TrackingState.TRACKING_LOST))
+        SignalBinder.bind_lambda(
+            self.ball_tracking_controller,
+            "tracking_state_changed",
+            lambda state: self.game_analyzer.enable(state == TrackingState.TRACKING or state == TrackingState.TRACKING_LOST)
+        )
         
-        # Connect bounce overlay to game analyzer to visualize bounces and ball positions
+        # Connect bounce overlay to game analyzer
         self.view.image_view.bounce_overlay.connect_game_analyzer(self.game_analyzer)
         
         logging.info("Ball tracking controller connected to game analyzer")
@@ -767,4 +781,32 @@ class AppController(QObject):
             self.view.update_calibration_images(
                 self.current_left_image,
                 self.current_right_image
-            ) 
+            )
+
+    def _connect_parameter_manager_signals(self):
+        """
+        Connect parameter manager signals to appropriate controllers.
+        """
+        # Define lambda functions for parameter updates
+        parameter_connections = {
+            "hsv_parameters_updated": lambda params: self.ball_tracking_controller.set_hsv_values(params)
+                if hasattr(self.ball_tracking_controller, 'set_hsv_values') else None,
+            "roi_parameters_updated": lambda params: self.ball_tracking_controller.set_roi_settings(params)
+                if hasattr(self.ball_tracking_controller, 'set_roi_settings') else None,
+            "hough_parameters_updated": lambda params: self.ball_tracking_controller.set_hough_circle_settings(params)
+                if hasattr(self.ball_tracking_controller, 'set_hough_circle_settings') else None,
+            "kalman_parameters_updated": lambda params: self.ball_tracking_controller.update_kalman_settings(params)
+                if hasattr(self.ball_tracking_controller, 'update_kalman_settings') else None,
+            "camera_parameters_updated": lambda params: self.ball_tracking_controller.update_camera_settings(params)
+                if hasattr(self.ball_tracking_controller, 'update_camera_settings') else None,
+        }
+        
+        # Connect all parameter signals using SignalBinder
+        for signal_name, handler_lambda in parameter_connections.items():
+            SignalBinder.bind_lambda(
+                self.parameter_manager,
+                signal_name,
+                handler_lambda
+            )
+        
+        logging.info("Parameter manager signals connected to controllers") 

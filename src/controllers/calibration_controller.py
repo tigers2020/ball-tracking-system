@@ -93,8 +93,10 @@ class CalibrationController(QObject):
         self.right_offset_y = 0
         
         # Try to load calibration points from config if available
-        if self.config_manager:
-            self._load_points_from_config()
+        self._load_points_from_config()
+        
+        # Also load camera settings from config if available
+        self._load_cameras_settings()
     
     @Slot(str, float, float)
     def on_add_point(self, side: str, scene_x: float, scene_y: float):
@@ -423,6 +425,9 @@ class CalibrationController(QObject):
             # Update view with loaded points
             self._render_points()
             
+            # Load camera settings as well
+            self._load_cameras_settings()
+            
             # Show success message
             left_point_count = len(self.model.get_points('left'))
             right_point_count = len(self.model.get_points('right'))
@@ -544,26 +549,32 @@ class CalibrationController(QObject):
             
     def _load_points_from_config(self):
         """
-        Load calibration points from the configuration manager.
-        Called during initialization if config_manager is available.
+        Load calibration points from configuration.
+        This is called during initialization and whenever needed.
         """
-        try:
-            if not self.config_manager:
-                return
-                
-            # Get calibration data from config
-            calibration_data = self.config_manager.get_calibration_points()
+        if not self.config_manager:
+            logger.warning("No config manager available for loading calibration points")
+            return
             
-            if not calibration_data or not calibration_data.get("left") or not calibration_data.get("right"):
-                logger.debug("No calibration points found in configuration during initialization")
-                return
-                
-            # We'll defer loading the points until we have a valid scene with dimensions
-            # This will be triggered when the view is shown and images are loaded
-            logger.info("Calibration data found in config, will load when view is ready")
+        # Get calibration data from config using the ConfigManager API
+        calibration_data = self.config_manager.get_calibration_points()
+        
+        if not calibration_data:
+            logger.info("No calibration data found in configuration")
+            return
             
-        except Exception as e:
-            logger.error(f"Error loading calibration points from config during initialization: {e}")
+        # Check if we have any points in either side
+        if not (calibration_data.get("left") or calibration_data.get("right")):
+            logger.info("No calibration points found in configuration data")
+            return
+            
+        # Load normalized data into model
+        self.model.from_normalized_dict(calibration_data)
+        
+        # Update view with loaded points
+        self._render_points()
+        
+        logger.info("Loaded calibration points from config")
     
     def _render_points(self):
         """Render all points in the view."""
@@ -885,3 +896,31 @@ class CalibrationController(QObject):
         same_column = abs(point1.x - point2.x) < GRID_TOLERANCE
         
         return same_row or same_column 
+
+    def _load_cameras_settings(self):
+        """
+        Load camera configuration settings.
+        """
+        if not self.config_manager:
+            logger.warning("No config manager available for loading camera settings")
+            return
+            
+        # Get camera settings from config using the ConfigManager API
+        camera_settings = self.config_manager.get_camera_settings()
+        
+        if not camera_settings:
+            logger.info("No camera settings found in configuration")
+            return
+            
+        # Extract left and right camera settings
+        left_camera = camera_settings.get("left_camera", {})
+        right_camera = camera_settings.get("right_camera", {})
+        
+        # Check if we have valid settings
+        if not left_camera or not right_camera:
+            logger.warning("Invalid camera settings in configuration")
+            return
+            
+        # Set camera settings in the model
+        self.model.set_camera_settings(left_camera, right_camera)
+        logger.info("Loaded camera settings from config") 

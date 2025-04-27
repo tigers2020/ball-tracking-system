@@ -12,6 +12,7 @@ import logging
 from typing import Dict, Tuple, Optional, List, Any
 
 from src.utils.constants import HSV, MORPHOLOGY, COLOR
+from src.utils.logging_utils import log_service_init, log_service_update
 
 
 class HSVMaskGenerator:
@@ -42,7 +43,8 @@ class HSVMaskGenerator:
             if param not in self.hsv_settings:
                 logging.warning(f"Missing HSV parameter: {param}, using default")
         
-        logging.info(f"HSV mask generator initialized with settings: {self.hsv_settings}")
+        # Use the new logging utility instead of direct logging
+        log_service_init("HSV mask generator", self.hsv_settings)
 
     def _normalize_hsv_keys(self) -> None:
         """
@@ -78,7 +80,8 @@ class HSVMaskGenerator:
         self.hsv_settings.update(hsv_settings.copy())
         # Apply key normalization after updating settings
         self._normalize_hsv_keys()
-        logging.info(f"HSV mask generator settings updated: {self.hsv_settings}")
+        # Use the new logging utility instead of direct logging
+        log_service_update("HSV mask generator", self.hsv_settings)
 
     def update_hsv_values(self, hsv_values: Dict[str, Any]) -> None:
         """

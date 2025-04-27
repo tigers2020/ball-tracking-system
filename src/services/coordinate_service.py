@@ -8,10 +8,11 @@ This module provides unified coordinate transformation and validation services.
 
 import logging
 import numpy as np
-from typing import Tuple
+from typing import Tuple, Optional
 from PySide6.QtCore import QObject, Signal
 
 from src.utils.constants import ANALYSIS, COURT, STEREO
+from src.utils.config_manager import ConfigManager
 
 
 class CoordinateService(QObject):
@@ -23,14 +24,17 @@ class CoordinateService(QObject):
     # Signal for notifying position updates in court coordinate system
     court_position_updated = Signal(float, float, float)  # x, y, z in court frame
     
-    def __init__(self, config=None):
+    def __init__(self, config_manager: Optional[ConfigManager] = None):
         """
         Initialize the coordinate service.
         
         Args:
-            config (dict, optional): Configuration dictionary with camera and coordinate settings
+            config_manager (ConfigManager, optional): Configuration manager instance
         """
         super(CoordinateService, self).__init__()
+        
+        # Store config manager reference
+        self.config_manager = config_manager
         
         # Default values
         self.pitch = 0.0  # rotation around X axis (in radians)
@@ -48,11 +52,78 @@ class CoordinateService(QObject):
         self.R_stereo = np.eye(3, dtype=STEREO.DATA_TYPE)  # Rotation between left and right cameras
         self.T_stereo = np.array([self.baseline, 0, 0], dtype=STEREO.DATA_TYPE)  # Translation between cameras
         
-        # Apply config if provided
-        if config:
-            self.update_config(config)
+        # Load configuration if config_manager is provided
+        if self.config_manager:
+            self.load_from_config()
             
         logging.info("Coordinate service initialized")
+    
+    def load_from_config(self):
+        """
+        Load coordinate service parameters from config_manager.
+        """
+        if not self.config_manager:
+            logging.warning("Cannot load from config: no config_manager provided")
+            return
+            
+        # Load coordinate settings
+        coordinate_settings = self.config_manager.get_coordinate_settings()
+        rotation = coordinate_settings.get("rotation", {})
+        
+        # Load rotation angles (in degrees, convert to radians)
+        if "x" in rotation:
+            self.pitch = np.deg2rad(rotation["x"])
+        if "y" in rotation:
+            self.roll = np.deg2rad(rotation["y"])
+        if "z" in rotation:
+            self.yaw = np.deg2rad(rotation["z"])
+            
+        # Load scale and camera height
+        self.scale = coordinate_settings.get("scale", STEREO.DEFAULT_SCALE)
+        self.camera_height = coordinate_settings.get("camera_height", STEREO.DEFAULT_CAMERA_HEIGHT_M)
+        
+        # Load camera settings
+        camera_settings = self.config_manager.get_camera_settings()
+        self.baseline = camera_settings.get("baseline_m", STEREO.DEFAULT_BASELINE_M)
+            
+        # Update transformation matrices
+        self._update_rotation_matrix()
+        
+        logging.info(f"Coordinate service loaded from config with pitch={np.rad2deg(self.pitch):.1f}°, "
+                   f"roll={np.rad2deg(self.roll):.1f}°, yaw={np.rad2deg(self.yaw):.1f}°, "
+                   f"scale={self.scale:.4f}, camera_height={self.camera_height:.2f}m")
+        logging.info(f"Using stereo baseline: {self.baseline:.2f}m")
+    
+    def save_to_config(self):
+        """
+        Save coordinate service parameters to config_manager.
+        """
+        if not self.config_manager:
+            logging.warning("Cannot save to config: no config_manager provided")
+            return
+            
+        # Convert rotation angles to degrees
+        rotation = {
+            "x": np.rad2deg(self.pitch),
+            "y": np.rad2deg(self.roll),
+            "z": np.rad2deg(self.yaw)
+        }
+        
+        # Create coordinate settings dictionary
+        coordinate_settings = {
+            "rotation": rotation,
+            "scale": self.scale,
+            "camera_height": self.camera_height
+        }
+        
+        # Save to config manager
+        self.config_manager.set_coordinate_settings(coordinate_settings)
+        
+        # Save camera baseline
+        camera_settings = {"baseline_m": self.baseline}
+        self.config_manager.set_camera_settings(camera_settings)
+        
+        logging.info(f"Coordinate service settings saved to config")
     
     def update_config(self, config):
         """
@@ -100,10 +171,24 @@ class CoordinateService(QObject):
         # Update rotation matrix
         self._update_rotation_matrix()
         
+        # If we have a config manager, save the updated settings
+        if hasattr(self, 'config_manager') and self.config_manager:
+            self.save_to_config()
+        
         logging.info(f"Coordinate service updated with pitch={np.rad2deg(self.pitch):.1f}°, "
                    f"roll={np.rad2deg(self.roll):.1f}°, yaw={np.rad2deg(self.yaw):.1f}°, "
                    f"scale={self.scale:.4f}, camera_height={self.camera_height:.2f}m")
         logging.info(f"Using stereo baseline: {self.baseline:.2f}m")
+    
+    def set_config_manager(self, config_manager: ConfigManager):
+        """
+        Set the configuration manager.
+        
+        Args:
+            config_manager (ConfigManager): Configuration manager instance
+        """
+        self.config_manager = config_manager
+        self.load_from_config()
     
     def _update_rotation_matrix(self):
         """Calculate the 3x3 rotation matrix from Euler angles."""

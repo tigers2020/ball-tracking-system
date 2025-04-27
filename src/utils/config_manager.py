@@ -90,6 +90,15 @@ class ConfigManager:
                 "left_image_path": None,
                 "right_image_path": None,
                 "calib_ver": 1.2
+            },
+            "coordinate_settings": {
+                "rotation": {
+                    "x": 0.0,  # Pitch in degrees
+                    "y": 0.0,  # Roll in degrees
+                    "z": 0.0   # Yaw in degrees
+                },
+                "scale": 0.01,  # Scale factor (meters per pixel)
+                "camera_height": 3.0  # Camera height in meters
             }
         }
         
@@ -515,4 +524,170 @@ class ConfigManager:
         # Apply validated settings
         self.set_roi_settings(validated_settings)
         
-        return validated_settings 
+        return validated_settings
+
+    def get_coordinate_settings(self):
+        """
+        Get the coordinate system settings.
+        
+        Returns:
+            dict: Coordinate system settings
+        """
+        return self.get("coordinate_settings", self.default_config["coordinate_settings"]).copy()
+    
+    def set_coordinate_settings(self, coordinate_settings):
+        """
+        Set the coordinate system settings.
+        
+        Args:
+            coordinate_settings (dict): Coordinate system settings
+        """
+        current_settings = self.get_coordinate_settings().copy()
+        current_settings.update(coordinate_settings)
+        self.set("coordinate_settings", current_settings)
+        # Don't save immediately, allow throttling
+        self.save_config(force=False)
+    
+    def get_coordinate_rotation(self):
+        """
+        Get the coordinate system rotation.
+        
+        Returns:
+            dict: Rotation settings (x, y, z in degrees)
+        """
+        coordinate_settings = self.get_coordinate_settings()
+        return coordinate_settings.get("rotation", self.default_config["coordinate_settings"]["rotation"]).copy()
+    
+    def set_coordinate_rotation(self, rotation):
+        """
+        Set the coordinate system rotation.
+        
+        Args:
+            rotation (dict): Rotation settings (x, y, z in degrees)
+        """
+        coordinate_settings = self.get_coordinate_settings().copy()
+        if "rotation" not in coordinate_settings:
+            coordinate_settings["rotation"] = {}
+        coordinate_settings["rotation"].update(rotation)
+        self.set("coordinate_settings", coordinate_settings)
+        # Don't save immediately, allow throttling
+        self.save_config(force=False)
+    
+    def get_coordinate_scale(self):
+        """
+        Get the coordinate system scale.
+        
+        Returns:
+            float: Scale factor (meters per pixel)
+        """
+        coordinate_settings = self.get_coordinate_settings()
+        return coordinate_settings.get("scale", self.default_config["coordinate_settings"]["scale"])
+    
+    def set_coordinate_scale(self, scale):
+        """
+        Set the coordinate system scale.
+        
+        Args:
+            scale (float): Scale factor (meters per pixel)
+        """
+        coordinate_settings = self.get_coordinate_settings().copy()
+        coordinate_settings["scale"] = scale
+        self.set("coordinate_settings", coordinate_settings)
+        # Don't save immediately, allow throttling
+        self.save_config(force=False)
+    
+    def get_camera_height(self):
+        """
+        Get the camera height.
+        
+        Returns:
+            float: Camera height in meters
+        """
+        coordinate_settings = self.get_coordinate_settings()
+        return coordinate_settings.get("camera_height", self.default_config["coordinate_settings"]["camera_height"])
+    
+    def set_camera_height(self, height):
+        """
+        Set the camera height.
+        
+        Args:
+            height (float): Camera height in meters
+        """
+        coordinate_settings = self.get_coordinate_settings().copy()
+        coordinate_settings["camera_height"] = height
+        self.set("coordinate_settings", coordinate_settings)
+        # Don't save immediately, allow throttling
+        self.save_config(force=False)
+        
+    def get_camera_baseline(self):
+        """
+        Get the stereo camera baseline.
+        
+        Returns:
+            float: Baseline in meters
+        """
+        camera_settings = self.get_camera_settings()
+        return camera_settings.get("baseline_m", self.default_config["camera_settings"]["baseline_m"])
+    
+    def set_camera_baseline(self, baseline):
+        """
+        Set the stereo camera baseline.
+        
+        Args:
+            baseline (float): Baseline in meters
+        """
+        camera_settings = self.get_camera_settings().copy()
+        camera_settings["baseline_m"] = baseline
+        self.set("camera_settings", camera_settings)
+        # Don't save immediately, allow throttling
+        self.save_config(force=False)
+    
+    def get_camera_focal_length(self):
+        """
+        Get the camera focal length.
+        
+        Returns:
+            float: Focal length in millimeters
+        """
+        camera_settings = self.get_camera_settings()
+        return camera_settings.get("focal_length_mm", self.default_config["camera_settings"]["focal_length_mm"])
+    
+    def set_camera_focal_length(self, focal_length):
+        """
+        Set the camera focal length.
+        
+        Args:
+            focal_length (float): Focal length in millimeters
+        """
+        camera_settings = self.get_camera_settings().copy()
+        camera_settings["focal_length_mm"] = focal_length
+        self.set("camera_settings", camera_settings)
+        # Don't save immediately, allow throttling
+        self.save_config(force=False)
+    
+    def get_camera_sensor_dimensions(self):
+        """
+        Get the camera sensor dimensions.
+        
+        Returns:
+            tuple: (width, height) in millimeters
+        """
+        camera_settings = self.get_camera_settings()
+        width = camera_settings.get("sensor_width_mm", self.default_config["camera_settings"]["sensor_width_mm"])
+        height = camera_settings.get("sensor_height_mm", self.default_config["camera_settings"]["sensor_height_mm"])
+        return (width, height)
+    
+    def set_camera_sensor_dimensions(self, width, height):
+        """
+        Set the camera sensor dimensions.
+        
+        Args:
+            width (float): Sensor width in millimeters
+            height (float): Sensor height in millimeters
+        """
+        camera_settings = self.get_camera_settings().copy()
+        camera_settings["sensor_width_mm"] = width
+        camera_settings["sensor_height_mm"] = height
+        self.set("camera_settings", camera_settings)
+        # Don't save immediately, allow throttling
+        self.save_config(force=False) 
