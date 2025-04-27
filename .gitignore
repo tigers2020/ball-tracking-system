@@ -30,7 +30,9 @@ env/
 
 # IDE
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 *.swp
 *.swo
 .DS_Store
@@ -73,6 +75,14 @@ cache/
 exports/
 *.log
 frames_info.xml
+app.log
+__pycache__/
+.pytest_cache/
+
+# Exclude scripts from gitignore
+!run.ps1
+!run.sh
+!activate_venv.ps1
 
 # Windows
 Thumbs.db
