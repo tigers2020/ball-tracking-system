@@ -10,7 +10,7 @@ import logging
 import numpy as np
 from typing import Optional, Dict, Any
 
-from src.views.visualization.roi_visualizer import draw_roi
+from src.views.visualization import OpenCVVisualizer
 
 
 class ROIMaskVisualizer:
@@ -62,7 +62,7 @@ class ROIMaskVisualizer:
         right_output = right_image.copy() if right_image is not None else None
         
         if left_output is not None and self.left_roi is not None:
-            left_output = draw_roi(
+            left_output = OpenCVVisualizer.draw_roi(
                 left_output, 
                 self.left_roi, 
                 color=(255, 255, 0),  # Yellow
@@ -71,7 +71,7 @@ class ROIMaskVisualizer:
             )
         
         if right_output is not None and self.right_roi is not None:
-            right_output = draw_roi(
+            right_output = OpenCVVisualizer.draw_roi(
                 right_output, 
                 self.right_roi, 
                 color=(255, 255, 0),  # Yellow

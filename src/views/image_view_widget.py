@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QHBoxLayout, QSizePo
 import logging
 
 from src.utils.ui_constants import Layout, ROI
+from src.views.visualization import OpenCVVisualizer
 
 
 class ImageViewWidget(QWidget):
@@ -186,11 +187,8 @@ class ImageViewWidget(QWidget):
             logging.debug(f"Mask: {mask.shape}, non-zero: {non_zero}, ratio: {mask_ratio:.4f}")
         
         try:
-            # Import visualization module
-            from src.views.visualization.hsv_visualizer import apply_mask_overlay
-            
             # Apply mask overlay with dynamic color if HSV settings are available
-            result = apply_mask_overlay(
+            result = OpenCVVisualizer.apply_mask_overlay(
                 image, 
                 mask, 
                 alpha=0.3,  # Semi-transparent
@@ -235,58 +233,17 @@ class ImageViewWidget(QWidget):
             return image
         
         try:
-            # Import visualization module
-            from src.views.visualization.roi_visualizer import draw_roi
-            
-            # Safely extract ROI information with default values
-            try:
-                x = int(roi.get("x", 0))
-                y = int(roi.get("y", 0))
-                w = int(roi.get("width", 100))
-                h = int(roi.get("height", 100))
-                center_x = int(roi.get("center_x", x + w // 2))
-                center_y = int(roi.get("center_y", y + h // 2))
-                
-                # Ensure all values are valid
-                if w <= 0 or h <= 0:
-                    logging.warning(f"Invalid ROI dimensions: w={w}, h={h}, using defaults")
-                    w = max(1, w)
-                    h = max(1, h)
-                
-                # Ensure coordinates are within image bounds
-                img_h, img_w = image.shape[:2]
-                x = max(0, min(x, img_w - 1))
-                y = max(0, min(y, img_h - 1))
-                w = min(w, img_w - x)
-                h = min(h, img_h - y)
-                center_x = max(0, min(center_x, img_w - 1))
-                center_y = max(0, min(center_y, img_h - 1))
-                
-                # Update ROI with validated values
-                validated_roi = {
-                    'x': x,
-                    'y': y,
-                    'width': w,
-                    'height': h,
-                    'center_x': center_x,
-                    'center_y': center_y
-                }
-                
-            except (ValueError, TypeError) as e:
-                logging.error(f"ROI value conversion error: {e}")
-                return image
-            
-            # Draw ROI using visualization module
-            result = draw_roi(
+            # Apply ROI visualization with dynamic color if HSV settings are available
+            result = OpenCVVisualizer.draw_roi(
                 image, 
-                validated_roi, 
+                roi, 
                 color=ROI.BORDER_COLOR, 
                 thickness=ROI.BORDER_THICKNESS, 
                 show_center=True, 
                 center_color=ROI.CENTER_MARKER_COLOR
             )
             
-            logging.debug(f"ROI drawn: x={x}, y={y}, w={w}, h={h}, center=({center_x}, {center_y})")
+            logging.debug(f"ROI drawn: x={roi['x']}, y={roi['y']}, w={roi['width']}, h={roi['height']}, center=({roi['center_x']}, {roi['center_y']})")
             return result
             
         except Exception as e:

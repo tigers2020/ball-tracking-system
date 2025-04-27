@@ -14,11 +14,8 @@ import logging
 # Add the project root to sys.path if not already there
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-# Import visualization modules
-from views.visualization.hsv_visualizer import apply_mask_overlay, draw_centroid
-from views.visualization.roi_visualizer import draw_roi
-from views.visualization.hough_visualizer import draw_circles
-from views.visualization.kalman_visualizer import draw_prediction, draw_trajectory
+# Import visualization modules using the proper interface
+from src.views.visualization import OpenCVVisualizer
 
 def create_test_image(width=640, height=480):
     """Create a test image with a gradient background."""
@@ -61,10 +58,10 @@ def test_hsv_visualizer():
     mask = create_test_mask()
     
     # Test mask overlay
-    overlay_img = apply_mask_overlay(img, mask)
+    overlay_img = OpenCVVisualizer.apply_mask_overlay(img, mask)
     
     # Test centroid drawing
-    centroid_img = draw_centroid(img, (img.shape[1] // 2, img.shape[0] // 2), radius=10)
+    centroid_img = OpenCVVisualizer.draw_centroid(img, (img.shape[1] // 2, img.shape[0] // 2), radius=10)
     
     # Save results
     cv2.imwrite("hsv_overlay_test.jpg", overlay_img)
@@ -90,7 +87,7 @@ def test_roi_visualizer():
     }
     
     # Test ROI drawing
-    roi_img = draw_roi(img, roi, color=(0, 255, 255))
+    roi_img = OpenCVVisualizer.draw_roi(img, roi, color=(0, 255, 255))
     
     # Save result
     cv2.imwrite("roi_test.jpg", roi_img)
@@ -112,7 +109,7 @@ def test_hough_visualizer():
     ]
     
     # Test circle drawing
-    circles_img = draw_circles(img, circles)
+    circles_img = OpenCVVisualizer.draw_circles(img, circles)
     
     # Save result
     cv2.imwrite("circles_test.jpg", circles_img)
@@ -129,7 +126,7 @@ def test_kalman_visualizer():
     # Test prediction arrow
     current_pos = (100, 100)
     predicted_pos = (200, 150)
-    prediction_img = draw_prediction(img, current_pos, predicted_pos)
+    prediction_img = OpenCVVisualizer.draw_prediction(img, current_pos, predicted_pos)
     
     # Test trajectory
     positions = [
@@ -140,10 +137,10 @@ def test_kalman_visualizer():
         (250, 180),
         (300, 200)
     ]
-    trajectory_img = draw_trajectory(img, positions)
+    trajectory_img = OpenCVVisualizer.draw_trajectory(img, positions)
     
     # Combine prediction and trajectory
-    combined_img = draw_prediction(trajectory_img, current_pos, predicted_pos)
+    combined_img = OpenCVVisualizer.draw_prediction(trajectory_img, current_pos, predicted_pos)
     
     # Save results
     cv2.imwrite("prediction_test.jpg", prediction_img)

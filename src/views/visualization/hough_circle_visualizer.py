@@ -10,7 +10,7 @@ import logging
 import numpy as np
 from typing import Optional, Dict, Any, List, Tuple
 
-from src.views.visualization.hough_visualizer import draw_circles
+from src.views.visualization import OpenCVVisualizer
 
 
 class HoughCircleVisualizer:
@@ -52,44 +52,26 @@ class HoughCircleVisualizer:
         self.right_circles = [right_circles] if right_circles else None
         logging.debug("Hough circle visualizer updated")
     
-    def draw(self, left_image, right_image):
+    def visualize(self, left_frame, right_frame):
         """
-        Draw detected circles on left and right images.
+        Draw detected circles on both frames.
         
         Args:
-            left_image: Left camera image
-            right_image: Right camera image
+            left_frame: The left camera frame
+            right_frame: The right camera frame
             
         Returns:
-            tuple: (left_output, right_output) - Images with circles drawn
+            Tuple of frames with circles drawn
         """
-        left_output = left_image.copy() if left_image is not None else None
-        right_output = right_image.copy() if right_image is not None else None
+        left_output = left_frame.copy() if left_frame is not None else None
+        right_output = right_frame.copy() if right_frame is not None else None
         
-        # Fetch latest circle data from controller if not already updated via signal
-        if not self.left_circles or not self.right_circles:
-            left_coords, right_coords = self.controller.get_latest_coordinates()
-            self.left_circles = [left_coords] if left_coords else None
-            self.right_circles = [right_coords] if right_coords else None
+        detected_circles = self.controller.get_detected_circles()
         
-        if left_output is not None and self.left_circles:
-            left_output = draw_circles(
-                left_output, 
-                self.left_circles, 
-                main_color=(0, 255, 0),  # Green
-                secondary_color=(255, 0, 0),  # Blue
-                center_color=(0, 0, 255),  # Red
-                thickness=2
-            )
-        
-        if right_output is not None and self.right_circles:
-            right_output = draw_circles(
-                right_output, 
-                self.right_circles, 
-                main_color=(0, 255, 0),  # Green
-                secondary_color=(255, 0, 0),  # Blue
-                center_color=(0, 0, 255),  # Red
-                thickness=2
-            )
-        
+        if left_output is not None and detected_circles and detected_circles[0] is not None:
+            left_output = OpenCVVisualizer.draw_circles(left_output, detected_circles[0])
+            
+        if right_output is not None and detected_circles and detected_circles[1] is not None:
+            right_output = OpenCVVisualizer.draw_circles(right_output, detected_circles[1])
+            
         return left_output, right_output 

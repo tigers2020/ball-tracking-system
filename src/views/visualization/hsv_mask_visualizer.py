@@ -10,7 +10,7 @@ import logging
 import numpy as np
 from typing import Optional, Dict, Any
 
-from src.views.visualization.hsv_visualizer import apply_mask_overlay, draw_centroid
+from src.views.visualization import OpenCVVisualizer
 
 
 class HSVMaskVisualizer:
@@ -65,7 +65,7 @@ class HSVMaskVisualizer:
         right_output = right_image.copy() if right_image is not None else None
         
         if left_output is not None and self.left_mask is not None:
-            left_output = apply_mask_overlay(
+            left_output = OpenCVVisualizer.apply_mask_overlay(
                 left_output, 
                 self.left_mask, 
                 alpha=0.3,
@@ -75,10 +75,10 @@ class HSVMaskVisualizer:
             # Draw HSV centroid if available
             left_coords = self.controller.get_latest_coordinates()[0]
             if left_coords:
-                left_output = draw_centroid(left_output, (left_coords[0], left_coords[1]))
+                left_output = OpenCVVisualizer.draw_centroid(left_output, (left_coords[0], left_coords[1]))
         
         if right_output is not None and self.right_mask is not None:
-            right_output = apply_mask_overlay(
+            right_output = OpenCVVisualizer.apply_mask_overlay(
                 right_output, 
                 self.right_mask, 
                 alpha=0.3,
@@ -88,6 +88,22 @@ class HSVMaskVisualizer:
             # Draw HSV centroid if available
             right_coords = self.controller.get_latest_coordinates()[1]
             if right_coords:
-                right_output = draw_centroid(right_output, (right_coords[0], right_coords[1]))
+                right_output = OpenCVVisualizer.draw_centroid(right_output, (right_coords[0], right_coords[1]))
         
         return left_output, right_output 
+
+    def visualize(self, frame, mask):
+        """
+        Apply HSV mask overlay to the frame.
+        
+        Args:
+            frame: The original frame
+            mask: The HSV mask to overlay
+            
+        Returns:
+            The frame with HSV mask overlay
+        """
+        if frame is None or mask is None:
+            return frame
+            
+        return OpenCVVisualizer.apply_mask_overlay(frame, mask) 
