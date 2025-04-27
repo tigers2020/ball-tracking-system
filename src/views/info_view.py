@@ -285,7 +285,7 @@ class InfoView(QWidget):
             y (float): Y coordinate in world space (meters)
             z (float): Z coordinate in world space (meters)
         """
-        logging.debug(f"[InfoView DEBUG] set_position_coords called with x={x:.3f}, y={y:.3f}, z={z:.3f}")
+        logging.info(f"[INFO_VIEW] set_position_coords called with x={x:.3f}, y={y:.3f}, z={z:.3f}")
         self.position_coords_3d["x"] = x
         self.position_coords_3d["y"] = y
         self.position_coords_3d["z"] = z
@@ -297,7 +297,7 @@ class InfoView(QWidget):
         self.position_3d = (x, y, z)
         
         # Add debug log to verify coordinates are being set
-        logging.info(f"[UI UPDATE] 3D coordinates set to: x={x:.3f}, y={y:.3f}, z={z:.3f}")
+        logging.info(f"[INFO_VIEW] 3D coordinates set to: x={x:.3f}, y={y:.3f}, z={z:.3f}")
         self.update()  # Force UI refresh
     
     def set_left_roi(self, x, y, width, height):
@@ -507,24 +507,30 @@ class InfoView(QWidget):
                 self.set_right_pixel_coords(right_coords[0], right_coords[1], right_coords[2] if len(right_coords) > 2 else 0)
             
             if position_3d:
-                logger.debug(f"Received 3D position: {position_3d}")
+                logger.info(f"[INFO_VIEW] Received 3D position: {position_3d}, type={type(position_3d)}")
                 self.set_position_3d(position_3d)
-                # Direct update of UI labels
-                self.set_position_coords(position_3d[0], position_3d[1], position_3d[2])
+                # Direct update of UI labels with explicit conversion
+                try:
+                    x, y, z = float(position_3d[0]), float(position_3d[1]), float(position_3d[2])
+                    logger.info(f"[INFO_VIEW] Setting position coords to x={x:.3f}, y={y:.3f}, z={z:.3f}")
+                    self.set_position_coords(x, y, z)
+                except (TypeError, ValueError, IndexError) as e:
+                    logger.error(f"[INFO_VIEW] Failed to convert 3D position: {e}, position_3d={position_3d}")
+            else:
+                logger.warning(f"[INFO_VIEW] Received None or empty 3D position in frame {frame_idx}")
             
             # 탐지율 업데이트
             self.set_detection_rate(detection_rate)
             
-            # 30 프레임마다 로그 기록 (디버그 레벨)
-            if frame_idx % 30 == 0:
-                logger.debug(f"Detection updated - Frame: {frame_idx}, "
-                           f"Left: {left_coords}, "
-                           f"Right: {right_coords}, "
-                           f"3D: {position_3d}")
+            # 로그 기록 더 상세하게 변경
+            logger.info(f"[INFO_VIEW] Detection updated - Frame: {frame_idx}, "
+                      f"Left: {left_coords}, "
+                      f"Right: {right_coords}, "
+                      f"3D: {position_3d}")
         
         except Exception as e:
-            logger.error(f"Error in detection update handler: {e}")
-            logger.debug(traceback.format_exc())
+            logger.error(f"[INFO_VIEW] Error in detection update handler: {e}")
+            logger.error(f"[INFO_VIEW] Traceback: {traceback.format_exc()}")
     
     def _on_roi_updated(self, left_roi, right_roi):
         """
