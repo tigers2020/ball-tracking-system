@@ -56,7 +56,15 @@ class ImageView(QWidget):
         
         # Create tracking overlay at the top
         self.tracking_overlay = TrackingOverlay()
+        
+        # 트래킹 오버레이 가시성 및 스타일 설정
+        self.tracking_overlay.setVisible(True)  # 명시적으로 가시성 설정
+        self.tracking_overlay.setStyleSheet("background-color: rgba(40, 40, 60, 180); color: white;")  # 배경색 설정
+        self.tracking_overlay.setMinimumHeight(40)  # 최소 높이 설정
+        
+        # 트래킹 오버레이 레이아웃에 추가 (맨 위)
         main_layout.addWidget(self.tracking_overlay)
+        logging.info("TrackingOverlay added to layout")
         
         # Create splitter for image view and bounce overlay
         self.splitter = QSplitter(Qt.Horizontal)
@@ -281,8 +289,15 @@ class ImageView(QWidget):
             # Connect all signals using SignalBinder
             SignalBinder.bind_all(controller, self, signal_mappings)
             
-            # 추가: detection_updated 신호를 _on_detection_updated 메서드에 직접 연결
+            # 추가 1: detection_updated 신호를 _on_detection_updated 메서드에 직접 연결
             controller.detection_updated.connect(self._on_detection_updated)
+            
+            # 추가 2: detection_updated 신호를 TrackingOverlay에도 직접 연결 
+            if hasattr(self, 'tracking_overlay') and self.tracking_overlay:
+                logging.info("Connecting detection_updated signal directly to TrackingOverlay")
+                controller.detection_updated.connect(self.tracking_overlay.on_detection_updated)
+            else:
+                logging.warning("TrackingOverlay not found, direct connection skipped")
             
             logging.info("Connected to ball tracking controller")
     

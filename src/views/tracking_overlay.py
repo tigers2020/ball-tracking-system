@@ -142,6 +142,36 @@ class TrackingOverlay(QWidget):
         self.time_value_label.setText("-- ms")
         self.status_value_label.setText("No tracking")
     
+    @Slot(int, float, tuple, tuple, tuple)
+    def on_detection_updated(self, frame_idx, detection_rate, left_coords, right_coords, world_coords):
+        """
+        Handle direct detection updates from ball tracking controller.
+        
+        Args:
+            frame_idx (int): Frame index
+            detection_rate (float): Detection rate
+            left_coords (tuple): Left camera coordinates (x, y)
+            right_coords (tuple): Right camera coordinates (x, y)
+            world_coords (tuple): 3D world coordinates (x, y, z)
+        """
+        # 로그 추가 - 시그널 수신 확인
+        logging.info(f"TrackingOverlay received direct detection update: frame={frame_idx}")
+        logging.debug(f"Detection details: rate={detection_rate}, left={left_coords}, right={right_coords}, 3D={world_coords}")
+        
+        # 시그널 파라미터를 tracking_data dict로 변환
+        tracking_data = {
+            'frame_idx': frame_idx,
+            'left_2d': left_coords,
+            'right_2d': right_coords,
+            'world_3d': world_coords,
+            'processing_time': 0.0,  # 필요시 실제 처리 시간을 넣도록 확장
+            'status': 'Tracking' if detection_rate > 0.2 else 'Lost',
+            'confidence': detection_rate
+        }
+        
+        # 기존 메서드 호출하여 UI 업데이트
+        self.update_tracking_info(tracking_data)
+    
     def update_tracking_info(self, tracking_data=None):
         """Update tracking information display with current tracking data.
         

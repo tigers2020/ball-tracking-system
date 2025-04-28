@@ -188,6 +188,17 @@ class AppController(QObject):
         """
         트래킹 좌표 오버레이 컴포넌트 초기화 및 연결
         """
+        logging.info("Setting up tracking overlay component...")
+        
+        # 이미지 뷰에 트래킹 오버레이가 있는지 확인
+        if not hasattr(self.view.image_view, 'tracking_overlay') or not self.view.image_view.tracking_overlay:
+            logging.error("ImageView does not have tracking_overlay attribute")
+            return
+            
+        # TrackingOverlay 객체 참조 획득
+        tracking_overlay = self.view.image_view.tracking_overlay
+        logging.debug(f"TrackingOverlay object: {tracking_overlay}")
+        
         # 트래킹 좌표 컨트롤러 설정 및 연결
         self.tracking_coord_controller = setup_tracking_overlay(
             app_window=self,
@@ -204,10 +215,19 @@ class AppController(QObject):
         self.ball_tracking_controller.detection_updated.connect(
             self.view.image_view._on_detection_updated
         )
+        
+        # ball_tracking_controller의 detection_updated 시그널과 TrackingOverlay의 on_detection_updated 메소드 직접 연결
+        logging.info("Connecting detection_updated signal directly to TrackingOverlay.on_detection_updated")
+        if hasattr(tracking_overlay, 'on_detection_updated'):
+            self.ball_tracking_controller.detection_updated.connect(tracking_overlay.on_detection_updated)
+            logging.info("Direct connection established")
+        else:
+            logging.error("TrackingOverlay does not have on_detection_updated method")
 
         # 트래킹 활성화 상태 로깅
         logging.info("Tracking coordinates overlay initialized and connected")
         logging.debug(f"Tracking overlay visible: {self.view.image_view.tracking_overlay.isVisible()}")
+        logging.debug(f"Tracking overlay in layout: {self.view.image_view.layout().indexOf(self.view.image_view.tracking_overlay) >= 0}")
         logging.debug(f"Ball tracking controller enabled: {self.ball_tracking_controller.is_enabled}")
         
         # Ball tracking 버튼이 있는지 확인하고 활성화
