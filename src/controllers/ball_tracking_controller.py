@@ -27,12 +27,12 @@ from src.models.tracking_data_model import TrackingDataModel
 from src.services.hsv_mask_generator import HSVMaskGenerator
 from src.services.roi_computer import ROIComputer
 from src.services.circle_detector import CircleDetector
-from src.services.kalman_processor import KalmanProcessor
 from src.services.data_saver import DataSaver
 from src.services.coordinate_combiner import CoordinateCombiner
+from src.services.kalman_processor import KalmanProcessor
 from src.utils.config_manager import ConfigManager
 from src.utils.coord_utils import fuse_coordinates
-from src.utils.constants import HSV, ROI, COLOR, STEREO, TRACKING, ANALYSIS, HOUGH
+from src.utils.constants import HSV, ROI, COLOR, STEREO, TRACKING, ANALYSIS, HOUGH, KALMAN
 # 누락된 STATUS를 추가하기 위한 임시 클래스
 class STATUS(Enum):
     """Constants for status messages"""
@@ -94,13 +94,38 @@ class BallTrackingController(QObject):
         Initialize the ball tracking controller.
         
         Args:
-            model: Data model for ball tracking
-            config_manager: Configuration manager for accessing settings
+            model (Any): Model for storing tracking state and data
+            config_manager (ConfigManager): Configuration manager
         """
-        super(BallTrackingController, self).__init__()
+        super().__init__()
         
+        # Store references to model and config
         self.model = model
         self.config_manager = config_manager
+        
+        # Initialize internal variables
+        logging.info("Initializing ball tracking controller")
+        
+        # Get settings
+        self.hsv_settings = self.config_manager.get_hsv_settings()
+        self.roi_settings = self.config_manager.get_roi_settings()
+        self.camera_settings = self.config_manager.get_camera_settings()
+        self.kalman_settings = self.config_manager.get_kalman_settings()
+        
+        # Initialize services
+        try:
+            # IMPORTANT: Initialize coordinate combiner with camera settings
+            self.coordinate_combiner = CoordinateCombiner(camera_settings=self.config_manager.get_camera_settings())
+            
+            # Create kalman filter service
+            kalman_settings = self.kalman_settings
+            self.kalman_processor = KalmanProcessor(
+                settings=kalman_settings
+            )
+        except Exception as e:
+            logging.error(f"Error initializing services: {e}")
+            self.coordinate_combiner = CoordinateCombiner()
+            self.kalman_processor = KalmanProcessor()
         
         # Initialize internal state
         self._out_of_bounds_counter = 0
@@ -173,144 +198,18 @@ class BallTrackingController(QObject):
             self.model.set_hough_settings(hough_settings)
         elif hasattr(self.model, 'hough_settings'):
             self.model.hough_settings = hough_settings
-        
-        # Create services with proper configuration
+            
+        # Initialize services
         self.hsv_mask_generator = HSVMaskGenerator(hsv_values)
-        self.roi_computer = ROIComputer(roi_settings)
-        
-        # Initialize CircleDetector with original settings from config_manager
-        # This ensures we don't create a new detector for each frame
+        self.roi_computer = ROIComputer()
         self.circle_detector = CircleDetector(hough_settings)
         
-        # Get Kalman settings and initialize processor
-        self.kalman_settings = self.config_manager.get_kalman_settings()
-        self.kalman_processor = KalmanProcessor(self.kalman_settings)
+        # Set up Kalman filter and prediction - We already initialized this, so just update settings
+        # kalman_settings = self.config_manager.get_kalman_settings()
+        # self.kalman_processor = KalmanProcessor()
         
-        # Initialize triangulation service with camera settings
-        self.camera_settings = self.config_manager.get_camera_settings()
-        
-        # 먼저 ConfigManager에서 기존에 생성된 triangulator가 있는지 확인
-        self.triangulator = self.config_manager.get_triangulator()
-        
-        # 기존 triangulator가 없는 경우에만 새로 생성
-        if self.triangulator is None:
-            logging.critical("No pre-existing triangulator found in ConfigManager, creating new one...")
-            # 실제 삼각측량 서비스 생성 (이전 TriangulationServiceMock 대신)
-            try:
-                # 기본 linear 방식의 triangulator 생성 (DLT 알고리즘 사용)
-                triangulation_config = {
-                    'method': 'linear',
-                    'sub_method': 'dlt'
-                }
-                self.triangulator = TriangulationFactory.create_triangulator_from_config(
-                    triangulation_config,
-                    self.camera_settings
-                )
-                
-                # triangulate 메서드를 wrapper 형태로 제공하여 기존 코드와 호환성 유지
-                def triangulate_wrapper(uL, vL, uR, vR):
-                    """
-                    삼각측량을 수행하는 래퍼 함수
-                    
-                    Args:
-                        uL, vL: 왼쪽 이미지의 x, y 좌표 (픽셀)
-                        uR, vR: 오른쪽 이미지의 x, y 좌표 (픽셀)
-                        
-                    Returns:
-                        np.ndarray: 삼각측량된 3D 좌표 (미터 단위)
-                    """
-                    points_2d = [(float(uL), float(vL)), (float(uR), float(vR))]
-                    logging.critical(f"Triangulating points: {points_2d}")
-                    
-                    # 삼각측량기가 보정되었는지 확인
-                    if not self.triangulator.is_ready():
-                        logging.critical("Triangulator not calibrated, attempting to recalibrate")
-                        # 카메라 설정으로부터 보정 시도
-                        self.triangulator.set_camera_parameters(self.camera_settings)
-                        
-                        # 여전히 보정이 안되면 기본값 반환
-                        if not self.triangulator.is_ready():
-                            default_coords = np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
-                            scale_factor = 0.01  # 1 픽셀 = 1cm = 0.01m
-                            scaled_coords = default_coords * scale_factor
-                            logging.critical(f"Triangulation calibration failed, returning scaled default coordinates: {scaled_coords}")
-                            return scaled_coords
-                    
-                    # 삼각측량 실행
-                    point_3d = self.triangulator.triangulate_point(points_2d)
-                    logging.critical(f"Triangulation result: {point_3d}")
-                    
-                    # 삼각측량 결과 유효성 검사
-                    if point_3d is None or not self.triangulator.is_valid_point(point_3d):
-                        logging.critical("Triangulation failed or produced invalid point")
-                        # 실패 시 기본 값을 계산하되 스케일 적용
-                        default_coords = np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
-                        
-                        # 픽셀 좌표를 실제 단위(미터)로 변환하기 위한 스케일 팩터
-                        scale_factor = 0.01  # 1 픽셀 = 1cm = 0.01m
-                        
-                        # 기본 좌표에 스케일 적용
-                        scaled_coords = default_coords * scale_factor
-                        logging.critical(f"Using scaled default coordinates: {scaled_coords}")
-                        return scaled_coords
-                    
-                    # 삼각측량 성공 시에도 스케일 적용
-                    scale_factor = 0.01  # 1 픽셀 = 1cm = 0.01m
-                    scaled_point_3d = np.array([
-                        float(point_3d[0]) * scale_factor,
-                        float(point_3d[1]) * scale_factor,
-                        float(point_3d[2]) * scale_factor
-                    ])
-                    
-                    # 재투영 오차 계산 (선택적)
-                    try:
-                        reprojection_error = self.triangulator.calculate_reprojection_error(point_3d, points_2d)
-                        logging.critical(f"Reprojection error: {reprojection_error}")
-                        
-                        # 재투영 오차가 너무 크면 경고 로그 추가
-                        if reprojection_error > 5.0:  # 픽셀 단위의 임계값
-                            logging.warning(f"High reprojection error: {reprojection_error}")
-                    except Exception as e:
-                        logging.error(f"Error calculating reprojection error: {e}")
-                    
-                    logging.critical(f"Scaled triangulation result: {scaled_point_3d}")
-                    return scaled_point_3d
-                
-                # 원래 triangulate 메서드를 대체
-                self.triangulator.triangulate = triangulate_wrapper
-                
-                # ConfigManager에 등록하여 다른 컨트롤러에서도 사용할 수 있도록 함
-                self.config_manager.set_triangulator(self.triangulator)
-                
-                logging.critical("Created actual triangulation service with camera settings and registered with ConfigManager")
-            except Exception as e:
-                # 오류 발생 시 MockService로 폴백
-                logging.error(f"Error creating triangulator: {e}, falling back to mock")
-                self.triangulator = TriangulationServiceMock(self.camera_settings)
-        else:
-            logging.critical("Using pre-existing triangulator from ConfigManager")
-            
-            # 기존 triangulator에 wrapper가 없는 경우 추가 (호환성 보장)
-            if not hasattr(self.triangulator, 'triangulate') or callable(getattr(self.triangulator, 'triangulate')):
-                def triangulate_wrapper(uL, vL, uR, vR):
-                    points_2d = [(float(uL), float(vL)), (float(uR), float(vR))]
-                    logging.critical(f"Triangulating points: {points_2d}")
-                    
-                    # 삼각측량 실행
-                    point_3d = self.triangulator.triangulate_point(points_2d)
-                    logging.critical(f"Triangulation result: {point_3d}")
-                    
-                    if point_3d is None:
-                        # 실패 시 기본 값 반환
-                        logging.critical("Triangulation failed, returning default coordinates")
-                        return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
-                    
-                    # 확실히 numpy 배열로 변환
-                    return np.array([float(point_3d[0]), float(point_3d[1]), float(point_3d[2])])
-                
-                # 원래 triangulate 메서드를 대체
-                self.triangulator.triangulate = triangulate_wrapper
-                logging.critical("Added triangulate wrapper to existing triangulator")
+        # Initialize triangulation service
+        self._initialize_triangulation_service()
         
         # Initialize coordinate combiner service
         self.coordinate_combiner = CoordinateCombiner(self.triangulator)
@@ -354,13 +253,10 @@ class BallTrackingController(QObject):
     @property
     def detection_stats(self):
         """
-        Get detection statistics.
-        
-        Returns:
-            dict: Detection statistics including tracking status and counters
+        Property getter for detection statistics.
         """
         if hasattr(self.model, 'detection_stats'):
-            return self.model.detection_stats
+          return self.model.detection_stats
         else:
             # Return internal detection stats if model doesn't have this attribute
             return self._detection_stats
@@ -1214,12 +1110,20 @@ class BallTrackingController(QObject):
                                             logging.critical("★★★ Triangulated point is invalid according to validation criteria")
                                             # Simple fallback
                                             import numpy as np
-                                            return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                                            x_disparity = abs(float(uL) - float(uR))
+                                            # 미터 단위로 Z 좌표 계산 (시차에 반비례)
+                                            z_estimate = 1000.0 / max(x_disparity, 1.0)  # 시차가 클수록 가까운 거리
+                                            z_estimate = min(max(z_estimate, 0.1), 10.0)  # 0.1~10m 범위로 제한
+                                            return np.array([(uL + uR) / 2.0, vL, z_estimate])
                                     
                                     if point_3d is None:
-                                        # Simple fallback
-                                        import numpy as np
-                                        return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                                        # 실패 시 기본 값 반환 - 미터 단위의 Z 좌표 계산
+                                        logging.critical("Triangulation failed, returning default coordinates")
+                                        x_disparity = abs(float(uL) - float(uR))
+                                        # 미터 단위로 Z 좌표 계산 (시차에 반비례)
+                                        z_estimate = 1000.0 / max(x_disparity, 1.0)  # 시차가 클수록 가까운 거리
+                                        z_estimate = min(max(z_estimate, 0.1), 10.0)  # 0.1~10m 범위로 제한
+                                        return np.array([(uL + uR) / 2.0, vL, z_estimate])
                                     
                                     # Convert to numpy array
                                     import numpy as np
@@ -1227,7 +1131,11 @@ class BallTrackingController(QObject):
                                 else:
                                     # Fallback if no triangulate_point
                                     import numpy as np
-                                    return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                                    x_disparity = abs(float(uL) - float(uR))
+                                    # 미터 단위로 Z 좌표 계산 (시차에 반비례)
+                                    z_estimate = 1000.0 / max(x_disparity, 1.0)  # 시차가 클수록 가까운 거리
+                                    z_estimate = min(max(z_estimate, 0.1), 10.0)  # 0.1~10m 범위로 제한
+                                    return np.array([(uL + uR) / 2.0, vL, z_estimate])
                             
                             # Add the method
                             triangulator.triangulate = triangulate_wrapper
@@ -1235,6 +1143,8 @@ class BallTrackingController(QObject):
                         
                         self.triangulator = triangulator
                         self.coordinate_combiner.set_triangulation_service(triangulator)
+                        # Pass camera settings to coordinate combiner
+                        self.coordinate_combiner.set_camera_settings(self.config_manager.get_camera_settings())
                         self.config_manager.set_triangulator(triangulator)
                 
             except Exception as e:
@@ -1284,8 +1194,9 @@ class BallTrackingController(QObject):
                 x_center = (float(left_coords[0]) + float(right_coords[0])) / 2.0
                 y_center = (float(left_coords[1]) + float(right_coords[1])) / 2.0
                 x_disparity = abs(float(left_coords[0]) - float(right_coords[0]))
-                z_estimate = 100.0 / max(x_disparity, 0.1)  # Avoid division by near-zero
-                z_estimate = min(max(z_estimate, 1.0), 1000.0)  # Limit to reasonable range
+                # 스케일링 값을 100.0에서 1000.0으로 변경하여 작은 Z 값(미터 단위)을 얻습니다
+                z_estimate = 1000.0 / max(x_disparity, 1.0)  # Avoid division by near-zero
+                z_estimate = min(max(z_estimate, 0.1), 10.0)  # 미터 단위로 0.1~10m 범위 내로 제한
                 
                 self._last_3d_coordinates = (x_center, y_center, z_estimate)
                 logging.critical(f"★★★ Using fallback 3D coordinates: {self._last_3d_coordinates}")
@@ -1345,8 +1256,9 @@ class BallTrackingController(QObject):
                     x_disparity = abs(float(left_coords[0]) - float(right_coords[0]))
                     
                     # Simple stereo formula (very rough approximation)
-                    z_estimate = 100.0 / max(x_disparity, 0.1)  # Avoid division by near-zero
-                    z_estimate = min(max(z_estimate, 1.0), 1000.0)  # Limit to reasonable range
+                    # 스케일링 값을 100.0에서 1000.0으로 변경하여 작은 Z 값(미터 단위)을 얻습니다
+                    z_estimate = 1000.0 / max(x_disparity, 1.0)  # Avoid division by near-zero
+                    z_estimate = min(max(z_estimate, 0.1), 10.0)  # 미터 단위로 0.1~10m 범위 내로 제한
                     
                     self._last_3d_coordinates = (x_center, y_center, z_estimate)
                     logging.critical(f"★★★ Using fallback 3D coordinates based on disparity: {self._last_3d_coordinates}")
@@ -1374,7 +1286,9 @@ class BallTrackingController(QObject):
                     x_center = (float(left_coords[0]) + float(right_coords[0])) / 2.0
                     y_center = (float(left_coords[1]) + float(right_coords[1])) / 2.0
                     x_disparity = abs(float(left_coords[0]) - float(right_coords[0]))
-                    z_estimate = 100.0 / max(x_disparity, 0.1)
+                    # 스케일링 값을 100.0에서 1000.0으로 변경하여 작은 Z 값(미터 단위)을 얻습니다
+                    z_estimate = 1000.0 / max(x_disparity, 1.0)
+                    z_estimate = min(max(z_estimate, 0.1), 10.0)  # 미터 단위로 0.1~10m 범위 내로 제한
                     return (x_center, y_center, z_estimate)
                 except:
                     # Last resort
@@ -2254,98 +2168,25 @@ class BallTrackingController(QObject):
 
     def update_camera_settings(self, camera_settings: Dict[str, Any]) -> None:
         """
-        Update camera settings for tracking and 3D reconstruction.
+        Update the camera settings.
         
         Args:
             camera_settings (Dict[str, Any]): New camera settings
         """
-        # Store camera settings
-        self.camera_settings = camera_settings
+        logging.info(f"Updating camera settings: {camera_settings}")
         
-        # Update config
+        # Update settings in config manager
         self.config_manager.set_camera_settings(camera_settings)
         
-        # Log the update
-        logging.critical(f"★★★ Updating camera settings: {camera_settings}")
-        
-        # Update triangulator with new settings
-        if hasattr(self, 'triangulator') and self.triangulator is not None:
-            logging.critical("★★★ Updating existing triangulator with new camera settings")
-            try:
-                self.triangulator.set_camera(camera_settings)
-                
-                # Check if triangulator needs calibration
-                if hasattr(self.triangulator, 'is_calibrated'):
-                    logging.critical(f"★★★ Triangulator calibration status: is_calibrated={self.triangulator.is_calibrated}")
-                    
-                    if not self.triangulator.is_calibrated:
-                        # Try to calibrate or reinitialize triangulator
-                        logging.critical("★★★ Triangulator not calibrated. Attempting to reinitialize...")
-                        try:
-                            # Create a new triangulator
-                            from src.core.geometry.triangulation.factory import TriangulationFactory
-                            new_triangulator = TriangulationFactory.create_triangulator(
-                                method='linear', 
-                                sub_method='dlt',
-                                camera_params=camera_settings
-                            )
-                            
-                            if new_triangulator is not None:
-                                logging.critical("★★★ Successfully created new triangulator")
-                                self.triangulator = new_triangulator
-                                self.config_manager.set_triangulator(self.triangulator)
-                        except Exception as e:
-                            logging.critical(f"★★★ Failed to create new triangulator: {e}")
-            except Exception as e:
-                logging.critical(f"★★★ Error updating triangulator: {e}")
-                
-                # Attempt to recreate triangulator
-                try:
-                    from src.core.geometry.triangulation.factory import TriangulationFactory
-                    logging.critical("★★★ Creating new triangulator after update error")
-                    
-                    new_triangulator = TriangulationFactory.create_triangulator(
-                        method='linear', 
-                        sub_method='dlt',
-                        camera_params=camera_settings
-                    )
-                    
-                    if new_triangulator is not None:
-                        logging.critical("★★★ Successfully created replacement triangulator")
-                        self.triangulator = new_triangulator
-                        self.config_manager.set_triangulator(self.triangulator)
-                except Exception as e2:
-                    logging.critical(f"★★★ Failed to create replacement triangulator: {e2}")
-        else:
-            # Create new triangulator
-            try:
-                from src.core.geometry.triangulation.factory import TriangulationFactory
-                logging.critical("★★★ No existing triangulator found, creating new one")
-                
-                self.triangulator = TriangulationFactory.create_triangulator(
-                    method='linear', 
-                    sub_method='dlt',
-                    camera_params=camera_settings
-                )
-                
-                if self.triangulator is not None:
-                    logging.critical("★★★ Successfully created new triangulator")
-                    self.config_manager.set_triangulator(self.triangulator)
-            except Exception as e:
-                logging.critical(f"★★★ Failed to create new triangulator: {e}")
-        
-        # Update coordinate combiner with new triangulator
+        # Update settings in coordinate combiner
         if hasattr(self, 'coordinate_combiner') and self.coordinate_combiner is not None:
-            logging.critical("★★★ Updating coordinate_combiner with triangulator")
-            self.coordinate_combiner.set_triangulation_service(self.triangulator)
+            self.coordinate_combiner.set_camera_settings(camera_settings)
+            
+        # Reinitialize triangulator if available
+        self._initialize_triangulation_service()
         
-        # Log success
-        logging.info(f"Camera settings updated for tracking: {camera_settings}")
-        
-        # Force reprocess images if enabled
-        if self.is_enabled and (self.model.left_image is not None or self.model.right_image is not None):
-            logging.critical("★★★ Reprocessing images with new camera settings")
-            self._process_images()
+        # Save settings
+        self.config_manager.save_config()
 
     def set_hough_circle_settings(self, hough_settings):
         """
@@ -2753,3 +2594,62 @@ class BallTrackingController(QObject):
         if hasattr(self, 'data_saver') and self.data_saver is not None:
             # Add frame to XML tracking data
             self.append_frame_xml(frame_idx)
+
+    def _initialize_triangulation_service(self):
+        """Initialize or reinitialize the triangulation service with current settings"""
+        try:
+            # Try to get existing triangulator from ConfigManager
+            self.triangulator = self.config_manager.get_triangulator()
+            
+            # If no triangulator exists, create a new one
+            if self.triangulator is None:
+                try:
+                    from src.core.geometry.triangulation.factory import TriangulationFactory
+                    logging.info("Creating new triangulation service")
+                    
+                    # Create triangulator with camera settings
+                    self.triangulator = TriangulationFactory.create_triangulator(
+                        method='linear', 
+                        sub_method='dlt',
+                        camera_params=self.camera_settings
+                    )
+                    
+                    if self.triangulator is not None:
+                        logging.info("Successfully created triangulator")
+                        self.triangulator = self.triangulator
+                        self.coordinate_combiner.set_triangulation_service(self.triangulator)
+                        # Pass camera settings to coordinate combiner
+                        self.coordinate_combiner.set_camera_settings(self.config_manager.get_camera_settings())
+                        self.config_manager.set_triangulator(self.triangulator)
+                except Exception as e:
+                    logging.error(f"Failed to create new triangulator: {e}")
+                    self.triangulator = None
+                    self.coordinate_combiner.set_triangulation_service(None)
+                    self.coordinate_combiner.set_camera_settings(None)
+                    self.config_manager.set_triangulator(None)
+            # Create new triangulator
+            try:
+                from src.core.geometry.triangulation.factory import TriangulationFactory
+                logging.info("Initializing triangulation service")
+                
+                triangulator = TriangulationFactory.create_triangulator(
+                method='linear', 
+                sub_method='dlt',
+                camera_params=self.camera_settings
+                )
+                
+                if triangulator is not None:
+                    logging.info("Successfully created triangulator")
+                    self.triangulator = triangulator
+                    self.coordinate_combiner.set_triangulation_service(triangulator)
+                    # Pass camera settings to coordinate combiner
+                    self.coordinate_combiner.set_camera_settings(self.config_manager.get_camera_settings())
+                    self.config_manager.set_triangulator(triangulator)
+            except Exception as e:
+                logging.error(f"Failed to initialize triangulation service: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
+        except Exception as outer_e:
+            logging.error(f"Outer error in triangulation initialization: {outer_e}")
+            import traceback
+            logging.error(traceback.format_exc())

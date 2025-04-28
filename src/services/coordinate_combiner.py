@@ -8,6 +8,8 @@ This module contains the CoordinateCombiner class for combining coordinates from
 
 import logging
 import numpy as np
+import cv2
+import math
 from typing import Dict, List, Tuple, Optional, Any, Union
 import time
 
@@ -18,14 +20,28 @@ class CoordinateCombiner:
     Combines HSV, Hough Circle, and Kalman filter coordinates to produce final 2D and 3D positions.
     """
     
-    def __init__(self, triangulation_service=None):
+    def __init__(self, triangulation_service=None, camera_settings=None):
         """
         Initialize the coordinate combiner.
         
         Args:
             triangulation_service: Service for performing 3D triangulation
+            camera_settings: Camera calibration settings
         """
         self.triangulation_service = triangulation_service
+        self.camera_settings = camera_settings
+        
+        # Initialize camera matrices
+        self.camera_matrix_left = None
+        self.camera_matrix_right = None
+        self.dist_coeffs_left = np.zeros((4, 1))  # Assuming no distortion for simplicity
+        self.dist_coeffs_right = np.zeros((4, 1))  # Assuming no distortion for simplicity
+        self.projection_matrix_left = None
+        self.projection_matrix_right = None
+        
+        # Initialize if camera settings are provided
+        if camera_settings:
+            self.initialize_camera_parameters(camera_settings)
         
         # Initialize tracking performance metrics
         self.processing_start_time = 0
@@ -45,6 +61,129 @@ class CoordinateCombiner:
         self.confidence = 0.0
         self.last_3d_position = (0.0, 0.0, 0.0)
     
+    def initialize_camera_parameters(self, camera_settings):
+        """
+        Initialize camera matrices from settings.
+        
+        Args:
+            camera_settings: Dictionary with camera calibration parameters
+        """
+        logging.info("Initializing camera parameters for triangulation")
+        
+        try:
+            # Extract camera parameters
+            focal_length_mm = float(camera_settings.get('focal_length_mm', 50.0))
+            sensor_width_mm = float(camera_settings.get('sensor_width_mm', 36.0))
+            sensor_height_mm = float(camera_settings.get('sensor_height_mm', 24.0))
+            baseline_m = float(camera_settings.get('baseline_m', 1.0))
+            
+            # Get image dimensions
+            image_width_px = int(camera_settings.get('image_width_px', 640))
+            image_height_px = int(camera_settings.get('image_height_px', 480))
+            
+            # Get principal point
+            cx = float(camera_settings.get('principal_point_x', image_width_px / 2))
+            cy = float(camera_settings.get('principal_point_y', image_height_px / 2))
+            
+            # Calculate focal length in pixels
+            fx = (focal_length_mm / sensor_width_mm) * image_width_px
+            fy = (focal_length_mm / sensor_height_mm) * image_height_px
+            
+            # Create camera matrix (intrinsic parameters)
+            self.camera_matrix_left = np.array([
+                [fx, 0, cx],
+                [0, fy, cy],
+                [0, 0, 1]
+            ], dtype=np.float32)
+            
+            # Right camera has the same intrinsic parameters
+            self.camera_matrix_right = self.camera_matrix_left.copy()
+            
+            # Get camera location and rotation
+            camera_location_x = float(camera_settings.get('camera_location_x', 0.0))
+            camera_location_y = float(camera_settings.get('camera_location_y', 0.0))
+            camera_location_z = float(camera_settings.get('camera_location_z', 0.0))
+            camera_rotation_x = float(camera_settings.get('camera_rotation_x', 0.0))
+            camera_rotation_y = float(camera_settings.get('camera_rotation_y', 0.0))
+            camera_rotation_z = float(camera_settings.get('camera_rotation_z', 0.0))
+            
+            # Create rotation matrix
+            R = self.create_rotation_matrix(
+                math.radians(camera_rotation_x),
+                math.radians(camera_rotation_y),
+                math.radians(camera_rotation_z)
+            )
+            
+            # Create translation vector for left camera (assumed at origin of stereo rig)
+            T_left = np.zeros(3, dtype=np.float32)
+            
+            # Create translation vector for right camera (shifted by baseline along X)
+            T_right = np.array([baseline_m, 0, 0], dtype=np.float32)
+            
+            # Create projection matrices
+            self.projection_matrix_left = np.zeros((3, 4), dtype=np.float32)
+            self.projection_matrix_right = np.zeros((3, 4), dtype=np.float32)
+            
+            # Set rotation part (first 3 columns)
+            self.projection_matrix_left[:, :3] = R
+            self.projection_matrix_right[:, :3] = R
+            
+            # Set translation part (4th column)
+            self.projection_matrix_left[:, 3] = T_left
+            self.projection_matrix_right[:, 3] = T_right
+            
+            # Multiply by camera matrix to get final projection matrices
+            self.projection_matrix_left = self.camera_matrix_left @ self.projection_matrix_left
+            self.projection_matrix_right = self.camera_matrix_right @ self.projection_matrix_right
+            
+            logging.info("Camera parameters initialized successfully")
+            logging.debug(f"Camera matrix left: {self.camera_matrix_left}")
+            logging.debug(f"Projection matrix left: {self.projection_matrix_left}")
+            logging.debug(f"Projection matrix right: {self.projection_matrix_right}")
+            
+        except Exception as e:
+            logging.error(f"Error initializing camera parameters: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+    
+    def create_rotation_matrix(self, pitch, roll, yaw):
+        """
+        Create a 3D rotation matrix from pitch, roll, and yaw angles.
+        
+        Args:
+            pitch (float): X-axis rotation in radians
+            roll (float): Y-axis rotation in radians
+            yaw (float): Z-axis rotation in radians
+            
+        Returns:
+            numpy.ndarray: 3x3 rotation matrix
+        """
+        # X-axis rotation (pitch)
+        Rx = np.array([
+            [1, 0, 0],
+            [0, np.cos(pitch), -np.sin(pitch)],
+            [0, np.sin(pitch), np.cos(pitch)]
+        ], dtype=np.float32)
+        
+        # Y-axis rotation (roll)
+        Ry = np.array([
+            [np.cos(roll), 0, np.sin(roll)],
+            [0, 1, 0],
+            [-np.sin(roll), 0, np.cos(roll)]
+        ], dtype=np.float32)
+        
+        # Z-axis rotation (yaw)
+        Rz = np.array([
+            [np.cos(yaw), -np.sin(yaw), 0],
+            [np.sin(yaw), np.cos(yaw), 0],
+            [0, 0, 1]
+        ], dtype=np.float32)
+        
+        # Combine rotations: R = Rz * Ry * Rx
+        R = Rz @ Ry @ Rx
+        
+        return R
+    
     def set_triangulation_service(self, service):
         """
         Set the triangulation service.
@@ -53,6 +192,16 @@ class CoordinateCombiner:
             service: Service for performing 3D triangulation
         """
         self.triangulation_service = service
+    
+    def set_camera_settings(self, camera_settings):
+        """
+        Set camera calibration settings and reinitialize parameters.
+        
+        Args:
+            camera_settings: Dictionary with camera calibration parameters
+        """
+        self.camera_settings = camera_settings
+        self.initialize_camera_parameters(camera_settings)
     
     def set_detection_weights(self, hsv_weight: float, hough_weight: float, kalman_weight: float):
         """
@@ -191,100 +340,95 @@ class CoordinateCombiner:
             logging.error("Cannot calculate 3D position: One or both 2D coordinates are None")
             return None
         
-        # Verify triangulation service
-        if self.triangulation_service is None:
-            logging.critical("Cannot calculate 3D position: No triangulation service provided")
-            # Always return a fallback position instead of None
-            return self._calculate_fallback_position(left_coords, right_coords)
-            
-        # Check if triangulation method exists
-        if not hasattr(self.triangulation_service, 'triangulate'):
-            logging.critical("Triangulation service is missing the 'triangulate' method - cannot perform triangulation")
-            # Always return a fallback position instead of None
-            return self._calculate_fallback_position(left_coords, right_coords)
-            
-        # Check if triangulation method is callable
-        if not callable(getattr(self.triangulation_service, 'triangulate')):
-            logging.critical("Triangulation service's 'triangulate' method is not callable - implementation error")
-            # Always return a fallback position instead of None
-            return self._calculate_fallback_position(left_coords, right_coords)
-        
-        try:
-            # Clean and validate coordinates to ensure they're properly formatted
+        # If we have a triangulation service, use it first
+        if self.triangulation_service is not None:
             try:
+                if hasattr(self.triangulation_service, 'triangulate'):
+                    # Extract coordinates
+                    x_left, y_left = float(left_coords[0]), float(left_coords[1])
+                    x_right, y_right = float(right_coords[0]), float(right_coords[1])
+                    
+                    # Log input coordinates for debugging
+                    logging.debug(f"Triangulation input coordinates: left=({x_left}, {y_left}), right=({x_right}, {y_right})")
+                    
+                    # Try triangulation through the service
+                    world_coords = self.triangulation_service.triangulate(x_left, y_left, x_right, y_right)
+                    
+                    # If successful, return the result
+                    if world_coords is not None and not (isinstance(world_coords, np.ndarray) and np.isnan(world_coords).any()):
+                        # Convert to tuple if it's an array
+                        if isinstance(world_coords, np.ndarray):
+                            position = tuple(float(x) for x in world_coords[:3])
+                        else:
+                            position = tuple(map(float, world_coords[:3]))
+                        
+                        # Update last valid position
+                        self.last_3d_position = position
+                        logging.debug(f"Triangulation service returned 3D position: {position}")
+                        return position
+                    
+                    logging.debug("Triangulation service failed, falling back to OpenCV triangulation")
+            except Exception as e:
+                logging.error(f"Error using triangulation service: {e}")
+                logging.debug("Falling back to OpenCV triangulation")
+        
+        # If we have camera matrices, use OpenCV triangulation
+        if self.projection_matrix_left is not None and self.projection_matrix_right is not None:
+            try:
+                # Extract coordinates
                 x_left, y_left = float(left_coords[0]), float(left_coords[1])
                 x_right, y_right = float(right_coords[0]), float(right_coords[1])
-            except (TypeError, ValueError, IndexError) as e:
-                logging.critical(f"Invalid coordinate format: {e}")
-                logging.critical(f"left_coords={left_coords}, right_coords={right_coords}")
-                return self._calculate_fallback_position(left_coords, right_coords)
-            
-            # Log input coordinates for debugging
-            logging.critical(f"Triangulation input coordinates: left=({x_left}, {y_left}), right=({x_right}, {y_right})")
-            
-            # Calculate disparity - useful for debugging
-            disparity_x = abs(x_left - x_right)
-            disparity_y = abs(y_left - y_right)
-            logging.critical(f"Coordinate disparities: x={disparity_x}, y={disparity_y}")
-            
-            # Check for large y-disparity which could indicate poor calibration or noise
-            if disparity_y > 30:  # Pixel threshold
-                logging.warning(f"Large y-disparity ({disparity_y} px) in stereo coordinates - triangulation may be unreliable")
-                self.confidence *= max(0.5, 1.0 - (disparity_y - 30) / 100.0)  # Reduce confidence
-            
-            # Perform triangulation
-            logging.critical(f"Calling triangulation_service.triangulate({x_left}, {y_left}, {x_right}, {y_right})")
-            
-            # Try triangulation
-            world_coords = self.triangulation_service.triangulate(x_left, y_left, x_right, y_right)
-            
-            # Log the raw result
-            logging.critical(f"Triangulation raw result: {world_coords}")
-            
-            # Check for invalid results
-            if world_coords is None:
-                logging.critical("Triangulation returned None - fallback to default values")
-                return self._calculate_fallback_position(left_coords, right_coords)
                 
-            if isinstance(world_coords, np.ndarray) and np.isnan(world_coords).any():
-                logging.critical("Triangulation returned NaN values - fallback to default values")
-                return self._calculate_fallback_position(left_coords, right_coords)
-            
-            # Validate the result is a 3D point
-            if isinstance(world_coords, np.ndarray):
-                # Check array dimensions
-                if len(world_coords) < 3:
-                    logging.critical(f"Triangulation result has wrong dimensions: {world_coords}")
-                    return self._calculate_fallback_position(left_coords, right_coords)
-                    
-                # Convert numpy array to tuple
-                position = (float(world_coords[0]), float(world_coords[1]), float(world_coords[2]))
-            else:
-                # Check if it's a sequence with at least 3 elements
-                if not hasattr(world_coords, '__len__') or len(world_coords) < 3:
-                    logging.critical(f"Triangulation result has wrong format: {world_coords}")
-                    return self._calculate_fallback_position(left_coords, right_coords)
-                    
-                # Assume triangulation returned a tuple or list
-                position = tuple(map(float, world_coords[:3]))
-            
-            # Store the result as the last valid 3D position
-            self.last_3d_position = position
-            
-            # Return the 3D position
-            logging.critical(f"Final calculated 3D position: {position}")
-            return position
+                # Convert to numpy arrays
+                left_point = np.array([[x_left, y_left]], dtype=np.float32)
+                right_point = np.array([[x_right, y_right]], dtype=np.float32)
+                
+                # Undistort points (convert to normalized camera coordinates)
+                left_point_norm = cv2.undistortPoints(left_point, self.camera_matrix_left, self.dist_coeffs_left)
+                right_point_norm = cv2.undistortPoints(right_point, self.camera_matrix_right, self.dist_coeffs_right)
+                
+                # Triangulate points
+                points_4d = cv2.triangulatePoints(
+                    self.projection_matrix_left,
+                    self.projection_matrix_right,
+                    left_point_norm,
+                    right_point_norm
+                )
+                
+                # Convert from homogeneous coordinates to 3D
+                points_3d = cv2.convertPointsFromHomogeneous(points_4d.T)
+                
+                # Extract the 3D point
+                x3d, y3d, z3d = points_3d[0][0]
+                
+                # Validate the result (check for NaN or unreasonable values)
+                if np.isnan(x3d) or np.isnan(y3d) or np.isnan(z3d) or z3d <= 0 or z3d > 1000:
+                    logging.warning(f"Invalid triangulation result: ({x3d}, {y3d}, {z3d})")
+                    return self._calculate_opencv_fallback(left_coords, right_coords)
+                
+                # Create position tuple
+                position = (float(x3d), float(y3d), float(z3d))
+                
+                # Update last valid position
+                self.last_3d_position = position
+                logging.debug(f"OpenCV triangulation returned 3D position: {position}")
+                
+                return position
+                
+            except Exception as e:
+                logging.error(f"Error during OpenCV triangulation: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
+                return self._calculate_opencv_fallback(left_coords, right_coords)
         
-        except Exception as e:
-            logging.critical(f"Error during 3D position calculation: {str(e)}")
-            import traceback
-            logging.critical(traceback.format_exc())
-            return self._calculate_fallback_position(left_coords, right_coords)
-            
-    def _calculate_fallback_position(self, left_coords, right_coords):
+        # If neither triangulation service nor camera matrices are available,
+        # use fallback method
+        return self._calculate_opencv_fallback(left_coords, right_coords)
+    
+    def _calculate_opencv_fallback(self, left_coords, right_coords):
         """
-        Calculate a fallback 3D position based on disparity when triangulation fails.
-        This is a simplified approximation of depth from stereo vision.
+        Calculate a 3D position fallback using simplified stereo equations
+        when proper triangulation fails.
         
         Args:
             left_coords (tuple): (x, y) coordinates in left image
@@ -295,44 +439,70 @@ class CoordinateCombiner:
         """
         try:
             # Extract coordinates
-            try:
-                x_left, y_left = float(left_coords[0]), float(left_coords[1])
-                x_right, y_right = float(right_coords[0]), float(right_coords[1])
-            except (TypeError, ValueError, IndexError):
-                # If parsing fails, return zeros
-                return (0.0, 0.0, 0.0)
-                
-            # Calculate average x, y position
-            x_avg = (x_left + x_right) / 2.0
-            y_avg = (y_left + y_right) / 2.0
+            x_left, y_left = float(left_coords[0]), float(left_coords[1])
+            x_right, y_right = float(right_coords[0]), float(right_coords[1])
             
-            # Calculate disparity (x-difference between images)
+            # Get camera parameters (or use defaults if not available)
+            if self.camera_settings:
+                focal_length_px = (float(self.camera_settings.get('focal_length_mm', 50.0)) / 
+                                 float(self.camera_settings.get('sensor_width_mm', 36.0)) * 
+                                 float(self.camera_settings.get('image_width_px', 640)))
+                baseline = float(self.camera_settings.get('baseline_m', 1.0))
+            else:
+                # Default values if no camera settings are available
+                focal_length_px = 800.0  # Common approximate value for 640x480 images
+                baseline = 1.0  # 1 meter default baseline
+            
+            # Calculate disparity
             disparity = abs(x_left - x_right)
             
-            # Simple depth calculation: Z = focal_length * baseline / disparity
-            # Since we don't know focal length and baseline, use a scaling factor
-            # Larger disparity = closer object
-            depth_scale = 100.0  # Arbitrary scale factor
-            
-            if disparity < 0.1:  # Avoid division by very small numbers
-                z_approx = depth_scale  # Default depth if disparity is too small
+            # Avoid division by zero or very small values
+            if disparity < 0.1:
+                z = 10.0  # Default 10 meters if disparity is too small
             else:
-                z_approx = depth_scale / disparity
+                # Basic stereo formula: Z = baseline * focal_length / disparity
+                z = baseline * focal_length_px / disparity
                 
-            # Limit z to reasonable range (adjust as needed)
-            z_approx = min(max(z_approx, 1.0), 1000.0)
+                # Limit to reasonable range (0.1 to 100 meters)
+                z = min(max(z, 0.1), 100.0)
             
-            # Create fallback position
-            position = (x_avg, y_avg, z_approx)
+            # Calculate X and Y world coordinates using average image position and Z
+            # Assuming camera is centered and aligned with world coordinates
+            if self.camera_matrix_left is not None:
+                # If we have camera matrix, use it for more accurate X,Y calculation
+                cx = self.camera_matrix_left[0, 2]
+                cy = self.camera_matrix_left[1, 2]
+                fx = self.camera_matrix_left[0, 0]
+                fy = self.camera_matrix_left[1, 1]
+                
+                # Use average of left and right X coordinates
+                x_avg = (x_left + x_right) / 2.0
+                
+                # Calculate X and Y in world coordinates
+                x = (x_avg - cx) * z / fx
+                y = (y_left - cy) * z / fy
+            else:
+                # Simple approximation if camera matrix is not available
+                x_avg = (x_left + x_right) / 2.0
+                y_avg = (y_left + y_right) / 2.0
+                
+                # Use average pixel coordinates (approximate center of image is origin)
+                image_width = float(self.camera_settings.get('image_width_px', 640)) if self.camera_settings else 640
+                image_height = float(self.camera_settings.get('image_height_px', 480)) if self.camera_settings else 480
+                x = (x_avg - image_width/2) * z / focal_length_px
+                y = (y_avg - image_height/2) * z / focal_length_px
             
-            # Store as last valid position
+            # Create position tuple
+            position = (float(x), float(y), float(z))
+            
+            # Update last valid position
             self.last_3d_position = position
+            logging.warning(f"Using fallback stereo calculation: {position}")
             
-            logging.critical(f"Using fallback 3D position based on disparity: {position}")
             return position
             
         except Exception as e:
-            logging.critical(f"Error calculating fallback position: {e}")
+            logging.error(f"Error calculating fallback position: {e}")
             # Last resort: return zeros
             return (0.0, 0.0, 0.0)
     
