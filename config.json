@@ -171,12 +171,12 @@
             ]
         ],
         "left_image_size": {
-            "width": 1920,
-            "height": 1080
+            "width": 640,
+            "height": 480
         },
         "right_image_size": {
-            "width": 1920,
-            "height": 1080
+            "width": 640,
+            "height": 480
         },
         "left_image_path": null,
         "right_image_path": null,

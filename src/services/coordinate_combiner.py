@@ -191,38 +191,92 @@ class CoordinateCombiner:
             logging.error("Cannot calculate 3D position: One or both 2D coordinates are None")
             return None
         
-        # Check if triangulation service is available
+        # Verify triangulation service
         if self.triangulation_service is None:
-            logging.warning("Cannot calculate 3D position: No triangulation service provided")
+            logging.critical("Cannot calculate 3D position: No triangulation service provided")
+            return None
+            
+        # Check if triangulation method exists
+        if not hasattr(self.triangulation_service, 'triangulate'):
+            logging.critical("Triangulation service is missing the 'triangulate' method - cannot perform triangulation")
+            return None
+            
+        # Check if triangulation method is callable
+        if not callable(getattr(self.triangulation_service, 'triangulate')):
+            logging.critical("Triangulation service's 'triangulate' method is not callable - implementation error")
             return None
         
         try:
-            # 좌표 확인
-            logging.critical(f"calculate_3d_position called: left={left_coords}, right={right_coords}")
+            # Clean and validate coordinates to ensure they're properly formatted
+            try:
+                x_left, y_left = float(left_coords[0]), float(left_coords[1])
+                x_right, y_right = float(right_coords[0]), float(right_coords[1])
+            except (TypeError, ValueError, IndexError) as e:
+                logging.critical(f"Invalid coordinate format: {e}")
+                logging.critical(f"left_coords={left_coords}, right_coords={right_coords}")
+                return None
             
-            # Extract coordinates
-            x_left, y_left = float(left_coords[0]), float(left_coords[1])
-            x_right, y_right = float(right_coords[0]), float(right_coords[1])
+            # Log input coordinates for debugging
+            logging.critical(f"Triangulation input coordinates: left=({x_left}, {y_left}), right=({x_right}, {y_right})")
             
-            # Calculate disparity threshold - large disparity in y could indicate noise
+            # Calculate disparity - useful for debugging
+            disparity_x = abs(x_left - x_right)
             disparity_y = abs(y_left - y_right)
-            if disparity_y > 30:  # Pixel threshold - adjust as needed
-                logging.warning(f"Large y-disparity ({disparity_y} px) in stereo coordinates")
+            logging.critical(f"Coordinate disparities: x={disparity_x}, y={disparity_y}")
+            
+            # Check for large y-disparity which could indicate poor calibration or noise
+            if disparity_y > 30:  # Pixel threshold
+                logging.warning(f"Large y-disparity ({disparity_y} px) in stereo coordinates - triangulation may be unreliable")
                 self.confidence *= max(0.5, 1.0 - (disparity_y - 30) / 100.0)  # Reduce confidence
             
             # Perform triangulation
-            logging.critical(f"Calling triangulation with: ({x_left}, {y_left}) and ({x_right}, {y_right})")
+            logging.critical(f"Calling triangulation_service.triangulate({x_left}, {y_left}, {x_right}, {y_right})")
+            
+            # Try triangulation
             world_coords = self.triangulation_service.triangulate(x_left, y_left, x_right, y_right)
+            
+            # Log the raw result
             logging.critical(f"Triangulation raw result: {world_coords}")
             
-            if world_coords is None or (isinstance(world_coords, np.ndarray) and np.isnan(world_coords).any()):
-                logging.critical("Triangulation failed or returned NaN values")
+            # Check for invalid results
+            if world_coords is None:
+                logging.critical("Triangulation returned None - fallback to default values")
+                # Create a simple fallback depth estimation based on disparity
+                # This is very rough but better than nothing in case triangulation fails
+                if disparity_x > 0:
+                    # Simple stereo formula: Z = baseline * focal_length / disparity
+                    # We don't have actual baseline and focal length, so we use a reasonable scale
+                    estimated_z = 100.0 / disparity_x  # Very rough approximation
+                    position = ((x_left + x_right)/2, (y_left + y_right)/2, estimated_z)
+                    logging.critical(f"Using fallback position based on disparity: {position}")
+                    return position
+                return None
+                
+            if isinstance(world_coords, np.ndarray) and np.isnan(world_coords).any():
+                logging.critical("Triangulation returned NaN values - fallback to default values")
+                # Create a simple fallback depth estimation
+                if disparity_x > 0:
+                    estimated_z = 100.0 / disparity_x  # Very rough approximation
+                    position = ((x_left + x_right)/2, (y_left + y_right)/2, estimated_z)
+                    logging.critical(f"Using fallback position based on disparity: {position}")
+                    return position
                 return None
             
+            # Validate the result is a 3D point
             if isinstance(world_coords, np.ndarray):
+                # Check array dimensions
+                if len(world_coords) < 3:
+                    logging.critical(f"Triangulation result has wrong dimensions: {world_coords}")
+                    return None
+                    
                 # Convert numpy array to tuple
                 position = (float(world_coords[0]), float(world_coords[1]), float(world_coords[2]))
             else:
+                # Check if it's a sequence with at least 3 elements
+                if not hasattr(world_coords, '__len__') or len(world_coords) < 3:
+                    logging.critical(f"Triangulation result has wrong format: {world_coords}")
+                    return None
+                    
                 # Assume triangulation returned a tuple or list
                 position = tuple(map(float, world_coords[:3]))
             
@@ -234,7 +288,7 @@ class CoordinateCombiner:
             return position
         
         except Exception as e:
-            logging.error(f"Error during 3D position calculation: {str(e)}")
+            logging.critical(f"Error during 3D position calculation: {str(e)}")
             import traceback
             logging.critical(traceback.format_exc())
             return None

@@ -1098,7 +1098,66 @@ class BallTrackingController(QObject):
         # Log input coordinates with high visibility
         logging.critical(f"★★★ Fusing coordinates: left={left_coords}, right={right_coords}")
         
+        # Verify triangulator is initialized
+        if not hasattr(self, 'coordinate_combiner') or self.coordinate_combiner is None:
+            logging.critical("★★★ Error: coordinate_combiner is not initialized")
+            return None
+            
+        # Verify triangulation service exists
+        if not hasattr(self.coordinate_combiner, 'triangulation_service') or self.coordinate_combiner.triangulation_service is None:
+            logging.critical("★★★ Error: triangulation_service is not available in coordinate_combiner")
+            
+            # Try to re-initialize triangulation service
+            try:
+                logging.critical("★★★ Attempting to reinitialize triangulation service...")
+                # Ensure camera settings are available
+                if not hasattr(self, 'camera_settings') or self.camera_settings is None:
+                    logging.critical("★★★ No camera settings available for triangulation")
+                    if hasattr(self, 'config_manager') and self.config_manager is not None:
+                        # Try to get from config
+                        self.camera_settings = self.config_manager.get_camera_settings()
+                        logging.critical(f"★★★ Retrieved camera settings from config: {self.camera_settings is not None}")
+                
+                # If we have camera settings, create a triangulator
+                if hasattr(self, 'camera_settings') and self.camera_settings is not None:
+                    from src.core.geometry.triangulation.factory import TriangulationFactory
+                    
+                    # Try to create a new triangulator
+                    triangulator = TriangulationFactory.create_triangulator(
+                        method='linear', 
+                        sub_method='dlt',
+                        camera_params=self.camera_settings
+                    )
+                    
+                    if triangulator is not None:
+                        logging.critical("★★★ Created new triangulator, setting to coordinate_combiner")
+                        self.coordinate_combiner.set_triangulation_service(triangulator)
+                
+            except Exception as e:
+                logging.critical(f"★★★ Failed to reinitialize triangulation service: {e}")
+        
         try:
+            # Validate coordinates are in the expected format
+            if (not isinstance(left_coords, tuple) and not isinstance(left_coords, list)) or \
+               (not isinstance(right_coords, tuple) and not isinstance(right_coords, list)):
+                logging.critical(f"★★★ Invalid coordinate format: left={type(left_coords)}, right={type(right_coords)}")
+                
+                # Try to convert to proper format
+                try:
+                    left_coords = tuple(map(float, left_coords[:2]))
+                    right_coords = tuple(map(float, right_coords[:2]))
+                    logging.critical(f"★★★ Converted coordinates: left={left_coords}, right={right_coords}")
+                except (TypeError, ValueError, IndexError) as e:
+                    logging.critical(f"★★★ Failed to convert coordinates: {e}")
+                    return None
+            
+            # Before calling coordinate_combiner, log the triangulation service
+            if hasattr(self.coordinate_combiner, 'triangulation_service') and self.coordinate_combiner.triangulation_service is not None:
+                triangulator_info = f"triangulation_service={type(self.coordinate_combiner.triangulation_service).__name__}"
+                if hasattr(self.coordinate_combiner.triangulation_service, 'is_calibrated'):
+                    triangulator_info += f", is_calibrated={self.coordinate_combiner.triangulation_service.is_calibrated}"
+                logging.critical(f"★★★ Using {triangulator_info}")
+            
             # Use the coordinate combiner service to calculate 3D position
             # Start processing timer
             self.coordinate_combiner.start_processing()
@@ -1135,8 +1194,20 @@ class BallTrackingController(QObject):
             else:
                 # If calculation failed, use previous coordinates or default
                 logging.critical("★★★ 3D position calculation failed, using previous coordinates")
+                
+                # If we don't have previous coordinates, create fallback based on 2D positions
                 if self._last_3d_coordinates is None:
-                    self._last_3d_coordinates = (0.0, 0.0, 0.0)
+                    # Fallback: create rough 3D estimate based on 2D positions
+                    # Calculate center position and estimate depth based on x-disparity
+                    x_center = (float(left_coords[0]) + float(right_coords[0])) / 2.0
+                    y_center = (float(left_coords[1]) + float(right_coords[1])) / 2.0
+                    x_disparity = abs(float(left_coords[0]) - float(right_coords[0]))
+                    
+                    # Simple stereo formula (very rough approximation)
+                    z_estimate = 100.0 / max(x_disparity, 0.1)  # Avoid division by near-zero
+                    
+                    self._last_3d_coordinates = (x_center, y_center, z_estimate)
+                    logging.critical(f"★★★ Using fallback 3D coordinates based on disparity: {self._last_3d_coordinates}")
             
             # Return 3D coordinates for other uses
             return self._last_3d_coordinates
@@ -2150,25 +2221,98 @@ class BallTrackingController(QObject):
 
     def update_camera_settings(self, camera_settings: Dict[str, Any]) -> None:
         """
-        Update camera settings and reconfigure triangulation service.
+        Update camera settings for tracking and 3D reconstruction.
         
         Args:
-            camera_settings (Dict[str, Any]): Camera settings dictionary
+            camera_settings (Dict[str, Any]): New camera settings
         """
+        # Store camera settings
         self.camera_settings = camera_settings
         
-        # Update triangulation service with new settings
-        if hasattr(self, 'triangulator') and self.triangulator is not None:
-            self.triangulator.set_camera(camera_settings)
-            logging.info("Updated triangulation service with new camera settings")
-        
-        # Update coordinate combiner's triangulation service
-        if hasattr(self, 'coordinate_combiner') and self.coordinate_combiner is not None:
-            self.coordinate_combiner.set_triangulation_service(self.triangulator)
-            logging.info("Updated coordinate combiner with new triangulation service")
-        
-        # Save settings to config
+        # Update config
         self.config_manager.set_camera_settings(camera_settings)
+        
+        # Log the update
+        logging.critical(f"★★★ Updating camera settings: {camera_settings}")
+        
+        # Update triangulator with new settings
+        if hasattr(self, 'triangulator') and self.triangulator is not None:
+            logging.critical("★★★ Updating existing triangulator with new camera settings")
+            try:
+                self.triangulator.set_camera(camera_settings)
+                
+                # Check if triangulator needs calibration
+                if hasattr(self.triangulator, 'is_calibrated'):
+                    logging.critical(f"★★★ Triangulator calibration status: is_calibrated={self.triangulator.is_calibrated}")
+                    
+                    if not self.triangulator.is_calibrated:
+                        # Try to calibrate or reinitialize triangulator
+                        logging.critical("★★★ Triangulator not calibrated. Attempting to reinitialize...")
+                        try:
+                            # Create a new triangulator
+                            from src.core.geometry.triangulation.factory import TriangulationFactory
+                            new_triangulator = TriangulationFactory.create_triangulator(
+                                method='linear', 
+                                sub_method='dlt',
+                                camera_params=camera_settings
+                            )
+                            
+                            if new_triangulator is not None:
+                                logging.critical("★★★ Successfully created new triangulator")
+                                self.triangulator = new_triangulator
+                                self.config_manager.set_triangulator(self.triangulator)
+                        except Exception as e:
+                            logging.critical(f"★★★ Failed to create new triangulator: {e}")
+            except Exception as e:
+                logging.critical(f"★★★ Error updating triangulator: {e}")
+                
+                # Attempt to recreate triangulator
+                try:
+                    from src.core.geometry.triangulation.factory import TriangulationFactory
+                    logging.critical("★★★ Creating new triangulator after update error")
+                    
+                    new_triangulator = TriangulationFactory.create_triangulator(
+                        method='linear', 
+                        sub_method='dlt',
+                        camera_params=camera_settings
+                    )
+                    
+                    if new_triangulator is not None:
+                        logging.critical("★★★ Successfully created replacement triangulator")
+                        self.triangulator = new_triangulator
+                        self.config_manager.set_triangulator(self.triangulator)
+                except Exception as e2:
+                    logging.critical(f"★★★ Failed to create replacement triangulator: {e2}")
+        else:
+            # Create new triangulator
+            try:
+                from src.core.geometry.triangulation.factory import TriangulationFactory
+                logging.critical("★★★ No existing triangulator found, creating new one")
+                
+                self.triangulator = TriangulationFactory.create_triangulator(
+                    method='linear', 
+                    sub_method='dlt',
+                    camera_params=camera_settings
+                )
+                
+                if self.triangulator is not None:
+                    logging.critical("★★★ Successfully created new triangulator")
+                    self.config_manager.set_triangulator(self.triangulator)
+            except Exception as e:
+                logging.critical(f"★★★ Failed to create new triangulator: {e}")
+        
+        # Update coordinate combiner with new triangulator
+        if hasattr(self, 'coordinate_combiner') and self.coordinate_combiner is not None:
+            logging.critical("★★★ Updating coordinate_combiner with triangulator")
+            self.coordinate_combiner.set_triangulation_service(self.triangulator)
+        
+        # Log success
+        logging.info(f"Camera settings updated for tracking: {camera_settings}")
+        
+        # Force reprocess images if enabled
+        if self.is_enabled and (self.model.left_image is not None or self.model.right_image is not None):
+            logging.critical("★★★ Reprocessing images with new camera settings")
+            self._process_images()
 
     def set_hough_circle_settings(self, hough_settings):
         """

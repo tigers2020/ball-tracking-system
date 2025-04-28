@@ -165,14 +165,48 @@ class AppController(QObject):
         # Set the config manager to the calibration controller
         self.view.calibration_controller.set_config_manager(self.config_manager)
         
-        # 주입이 제대로 이루어졌는지 확인
+        # Check if ConfigManager was properly injected
         if self.view.calibration_controller.config_manager is None:
             logging.critical("ConfigManager was not properly injected to CalibrationController!")
         else:
             logging.critical("ConfigManager successfully injected to CalibrationController")
-            # 명시적으로 카메라 설정과 교정점 로드 호출
+            # Explicitly load camera settings and calibration points
             self.view.calibration_controller._load_cameras_settings()
             self.view.calibration_controller._load_points_from_config()
+            
+            # Verify triangulator initialization
+            triangulator = self.config_manager.get_triangulator()
+            if triangulator is None:
+                logging.critical("No triangulator found in ConfigManager. Attempting to create one...")
+                # Try to manually create triangulator with the current camera settings
+                from src.core.geometry.triangulation.factory import TriangulationFactory
+                
+                camera_settings = self.config_manager.get_camera_settings()
+                if camera_settings:
+                    try:
+                        new_triangulator = TriangulationFactory.create_triangulator(
+                            method='linear', 
+                            sub_method='dlt',
+                            camera_params=camera_settings
+                        )
+                        
+                        if new_triangulator is not None:
+                            logging.critical("Successfully created triangulator in AppController")
+                            self.config_manager.set_triangulator(new_triangulator)
+                            
+                            # Ensure ball_tracking_controller has the triangulator
+                            if hasattr(self, 'ball_tracking_controller') and self.ball_tracking_controller is not None:
+                                self.ball_tracking_controller.triangulator = new_triangulator
+                                if hasattr(self.ball_tracking_controller, 'coordinate_combiner'):
+                                    self.ball_tracking_controller.coordinate_combiner.set_triangulation_service(new_triangulator)
+                                    logging.critical("Updated coordinate_combiner with new triangulator")
+                    except Exception as e:
+                        logging.critical(f"Failed to create triangulator in AppController: {e}")
+            else:
+                logging.critical(f"Triangulator exists in ConfigManager: {type(triangulator).__name__}")
+                # Check if triangulator is properly configured
+                if hasattr(triangulator, 'is_calibrated'):
+                    logging.critical(f"Triangulator calibration status: is_calibrated={triangulator.is_calibrated}")
         
         # Connect parameter_manager signals to controllers
         self._connect_parameter_manager_signals()
