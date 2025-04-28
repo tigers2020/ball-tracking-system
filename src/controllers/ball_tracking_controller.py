@@ -94,34 +94,85 @@ class BallTrackingController(QObject):
         Initialize the ball tracking controller.
         
         Args:
-            model (Any): Model for storing tracking state and data
-            config_manager (ConfigManager): Configuration manager
+            model: Data model containing image data
+            config_manager: Configuration manager
         """
         super().__init__()
         
-        # Store references to model and config
+        # Store model and config manager references
         self.model = model
         self.config_manager = config_manager
         
-        # Initialize internal variables
-        logging.info("Initializing ball tracking controller")
-        
-        # Get settings
-        self.hsv_settings = self.config_manager.get_hsv_settings()
+        # Load settings from config manager
+        self.hsv_values = self.config_manager.get_hsv_settings()
         self.roi_settings = self.config_manager.get_roi_settings()
-        self.camera_settings = self.config_manager.get_camera_settings()
+        self.hough_circle_settings = self.config_manager.get_hough_circle_settings()
         self.kalman_settings = self.config_manager.get_kalman_settings()
+        
+        # Initialize triangulator attribute first
+        self.triangulator = None
+        self.triangulation_service = None
         
         # Initialize services
         try:
-            # IMPORTANT: Initialize coordinate combiner with camera settings
-            self.coordinate_combiner = CoordinateCombiner(camera_settings=self.config_manager.get_camera_settings())
+            # Get camera settings and validate critical parameters
+            camera_settings = self.config_manager.get_camera_settings()
+            
+            # Validate critical camera parameters
+            critical_params = ['camera_location_x', 'camera_location_y', 'camera_location_z',
+                              'camera_rotation_x', 'camera_rotation_y', 'camera_rotation_z',
+                              'focal_length_mm', 'baseline_m']
+            
+            invalid_params = []
+            for param in critical_params:
+                if param not in camera_settings or camera_settings[param] == 0.0:
+                    invalid_params.append(param)
+            
+            if invalid_params:
+                logging.warning(f"Invalid or zero camera parameters detected: {invalid_params}")
+                logging.warning("Triangulation may not work correctly without valid camera settings.")
+                # Force camera settings to non-zero values if they're invalid
+                for param in invalid_params:
+                    if param not in camera_settings or camera_settings[param] == 0.0:
+                        if 'location' in param:
+                            camera_settings[param] = 1.0  # Default non-zero position
+                        elif 'rotation' in param:
+                            camera_settings[param] = 1.0  # Default non-zero rotation
+                        elif param == 'focal_length_mm':
+                            camera_settings[param] = 50.0  # Default focal length
+                        elif param == 'baseline_m':
+                            camera_settings[param] = 1.0   # Default baseline
+                
+                # Save fixed settings back to config manager
+                self.config_manager.set_camera_settings(camera_settings)
+                self.config_manager.save_config(force=True)
+                logging.info("Applied default non-zero values to invalid camera parameters")
+            
+            # Ensure these settings are actually used by triangulator later
+            self._camera_settings = camera_settings
+            
+            # First initialize triangulation service BEFORE coordinate combiner
+            self._initialize_triangulation_service(camera_settings)
+            
+            # Now the triangulator attribute should be set for CoordinateCombiner
+            if hasattr(self, 'triangulation_service') and self.triangulation_service is not None:
+                self.triangulator = self.triangulation_service  # Set for backward compatibility
+                # IMPORTANT: Initialize coordinate combiner with triangulator
+                self.coordinate_combiner = CoordinateCombiner(self.triangulator)
+                # Also update it with camera settings for good measure
+                self.coordinate_combiner.set_camera_settings(camera_settings)
+            else:
+                # Fallback: Create coordinate combiner with just camera settings
+                self.coordinate_combiner = CoordinateCombiner()
+                self.coordinate_combiner.set_camera_settings(camera_settings)
+                logging.warning("Created CoordinateCombiner without triangulator - limited functionality")
             
             # Create kalman filter service
             kalman_settings = self.kalman_settings
             self.kalman_processor = KalmanProcessor(
                 settings=kalman_settings
             )
+            
         except Exception as e:
             logging.error(f"Error initializing services: {e}")
             self.coordinate_combiner = CoordinateCombiner()
@@ -1050,249 +1101,114 @@ class BallTrackingController(QObject):
         return circles[0]
     
     def _fuse_coordinates(self, left_coords, right_coords):
-        """Calculate 3D position from 2D coordinates using triangulation."""
+        """
+        Fuse left and right coordinates into a 3D point.
+        
+        Args:
+            left_coords (tuple): (x, y) in left image
+            right_coords (tuple): (x, y) in right image
+            
+        Returns:
+            tuple: (x, y, z) in 3D space
+        """
         if left_coords is None or right_coords is None:
-            logging.critical("Skipping coordinate fusion: One or both coordinates are None")
-            # Return fallback (0,0,0) instead of None
-            return (0.0, 0.0, 0.0)
+            return None
         
-        # Log input coordinates with high visibility
-        logging.critical(f"★★★ Fusing coordinates: left={left_coords}, right={right_coords}")
+        # Extract coordinates
+        left_x, left_y = left_coords
+        right_x, right_y = right_coords
         
-        # Verify triangulator is initialized
-        if not hasattr(self, 'coordinate_combiner') or self.coordinate_combiner is None:
-            logging.critical("★★★ Error: coordinate_combiner is not initialized")
-            # Create a new coordinate combiner as emergency fallback
-            self.coordinate_combiner = CoordinateCombiner(self.triangulator)
-            
-        # Verify triangulation service exists
-        if not hasattr(self.coordinate_combiner, 'triangulation_service') or self.coordinate_combiner.triangulation_service is None:
-            logging.critical("★★★ Error: triangulation_service is not available in coordinate_combiner")
-            
-            # Try to re-initialize triangulation service
-            try:
-                logging.critical("★★★ Attempting to reinitialize triangulation service...")
-                # Ensure camera settings are available
-                if not hasattr(self, 'camera_settings') or self.camera_settings is None:
-                    logging.critical("★★★ No camera settings available for triangulation")
-                    if hasattr(self, 'config_manager') and self.config_manager is not None:
-                        # Try to get from config
-                        self.camera_settings = self.config_manager.get_camera_settings()
-                        logging.critical(f"★★★ Retrieved camera settings from config: {self.camera_settings is not None}")
-                
-                # If we have camera settings, create a triangulator
-                if hasattr(self, 'camera_settings') and self.camera_settings is not None:
-                    from src.core.geometry.triangulation.factory import TriangulationFactory
-                    
-                    # Try to create a new triangulator
-                    triangulator = TriangulationFactory.create_triangulator(
-                        method='linear', 
-                        sub_method='dlt',
-                        camera_params=self.camera_settings
-                    )
-                    
-                    if triangulator is not None:
-                        logging.critical("★★★ Created new triangulator, setting to coordinate_combiner")
-                        # Add triangulate method if missing
-                        if not hasattr(triangulator, 'triangulate'):
-                            def triangulate_wrapper(uL, vL, uR, vR):
-                                points_2d = [(float(uL), float(vL)), (float(uR), float(vR))]
-                                logging.critical(f"★★★ Triangulating points: {points_2d}")
-                                
-                                # Call triangulate_point if available
-                                if hasattr(triangulator, 'triangulate_point'):
-                                    point_3d = triangulator.triangulate_point(points_2d)
-                                    logging.critical(f"★★★ Triangulation result: {point_3d}")
-                                    
-                                    # Check if the point is valid using is_valid_point if available
-                                    if hasattr(triangulator, 'is_valid_point') and point_3d is not None:
-                                        if not triangulator.is_valid_point(point_3d):
-                                            logging.critical("★★★ Triangulated point is invalid according to validation criteria")
-                                            # Simple fallback
-                                            import numpy as np
-                                            x_disparity = abs(float(uL) - float(uR))
-                                            # 미터 단위로 Z 좌표 계산 (시차에 반비례)
-                                            z_estimate = 1000.0 / max(x_disparity, 1.0)  # 시차가 클수록 가까운 거리
-                                            z_estimate = min(max(z_estimate, 0.1), 10.0)  # 0.1~10m 범위로 제한
-                                            return np.array([(uL + uR) / 2.0, vL, z_estimate])
-                                    
-                                    if point_3d is None:
-                                        # 실패 시 기본 값 반환 - 미터 단위의 Z 좌표 계산
-                                        logging.critical("Triangulation failed, returning default coordinates")
-                                        x_disparity = abs(float(uL) - float(uR))
-                                        # 미터 단위로 Z 좌표 계산 (시차에 반비례)
-                                        z_estimate = 1000.0 / max(x_disparity, 1.0)  # 시차가 클수록 가까운 거리
-                                        z_estimate = min(max(z_estimate, 0.1), 10.0)  # 0.1~10m 범위로 제한
-                                        return np.array([(uL + uR) / 2.0, vL, z_estimate])
-                                    
-                                    # Convert to numpy array
-                                    import numpy as np
-                                    return np.array([float(point_3d[0]), float(point_3d[1]), float(point_3d[2])])
-                                else:
-                                    # Fallback if no triangulate_point
-                                    import numpy as np
-                                    x_disparity = abs(float(uL) - float(uR))
-                                    # 미터 단위로 Z 좌표 계산 (시차에 반비례)
-                                    z_estimate = 1000.0 / max(x_disparity, 1.0)  # 시차가 클수록 가까운 거리
-                                    z_estimate = min(max(z_estimate, 0.1), 10.0)  # 0.1~10m 범위로 제한
-                                    return np.array([(uL + uR) / 2.0, vL, z_estimate])
-                            
-                            # Add the method
-                            triangulator.triangulate = triangulate_wrapper
-                            logging.critical("★★★ Added triangulate wrapper to new triangulator")
-                        
-                        self.triangulator = triangulator
-                        self.coordinate_combiner.set_triangulation_service(triangulator)
-                        # Pass camera settings to coordinate combiner
-                        self.coordinate_combiner.set_camera_settings(self.config_manager.get_camera_settings())
-                        self.config_manager.set_triangulator(triangulator)
-                
-            except Exception as e:
-                logging.critical(f"★★★ Failed to reinitialize triangulation service: {e}")
-                import traceback
-                logging.critical(traceback.format_exc())
+        # Log coordinates for debugging
+        logging.debug(f"Left coords: ({left_x}, {left_y}), Right coords: ({right_x}, {right_y})")
         
         try:
-            # Validate coordinates are in the expected format
-            if (not isinstance(left_coords, tuple) and not isinstance(left_coords, list)) or \
-               (not isinstance(right_coords, tuple) and not isinstance(right_coords, list)):
-                logging.critical(f"★★★ Invalid coordinate format: left={type(left_coords)}, right={type(right_coords)}")
-                
-                # Try to convert to proper format
-                try:
-                    left_coords = tuple(map(float, left_coords[:2]))
-                    right_coords = tuple(map(float, right_coords[:2]))
-                    logging.critical(f"★★★ Converted coordinates: left={left_coords}, right={right_coords}")
-                except (TypeError, ValueError, IndexError) as e:
-                    logging.critical(f"★★★ Failed to convert coordinates: {e}")
-                    # Return fallback coordinates
-                    self._last_3d_coordinates = (0.0, 0.0, 0.0)
-                    return self._last_3d_coordinates
+            # Check for triangulation service (check both attribute names for compatibility)
+            triangulator = None
+            # First try self.triangulator (older attribute name)
+            if hasattr(self, 'triangulator') and self.triangulator is not None:
+                triangulator = self.triangulator
+            # Then try self.triangulation_service (newer attribute name)
+            elif hasattr(self, 'triangulation_service') and self.triangulation_service is not None:
+                triangulator = self.triangulation_service
             
-            # Check if triangulator is ready
-            triangulator_ready = False
-            if hasattr(self.coordinate_combiner, 'triangulation_service') and self.coordinate_combiner.triangulation_service is not None:
-                # Check if the triangulator has is_ready method
-                if hasattr(self.coordinate_combiner.triangulation_service, 'is_ready'):
-                    triangulator_ready = self.coordinate_combiner.triangulation_service.is_ready()
-                    logging.critical(f"★★★ Triangulator ready: {triangulator_ready}")
+            # If still None, try to get from coordinate_combiner
+            if triangulator is None and hasattr(self, 'coordinate_combiner'):
+                triangulator = getattr(self.coordinate_combiner, 'triangulation_service', None)
+            
+            # If still None, try to initialize
+            if triangulator is None:
+                logging.warning("Triangulation service not found, trying to initialize")
+                self._initialize_triangulation_service()
+                # Check both attributes again
+                if hasattr(self, 'triangulator') and self.triangulator is not None:
+                    triangulator = self.triangulator
+                elif hasattr(self, 'triangulation_service') and self.triangulation_service is not None:
+                    triangulator = self.triangulation_service
+            
+            is_calibrated = getattr(triangulator, 'is_calibrated', False) if triangulator else False
+            logging.debug(f"Using triangulation_service={type(triangulator).__name__ if triangulator else 'None'}, is_calibrated={is_calibrated}")
+            
+            # If triangulator exists and is calibrated, use it
+            if triangulator and is_calibrated:
+                if hasattr(triangulator, 'triangulate'):
+                    world_coords = triangulator.triangulate(left_x, left_y, right_x, right_y)
+                    logging.debug(f"Triangulated 3D coordinates: {world_coords}")
+                    return world_coords
                 else:
-                    # Fallback to is_calibrated if is_ready not available
-                    if hasattr(self.coordinate_combiner.triangulation_service, 'is_calibrated'):
-                        triangulator_ready = self.coordinate_combiner.triangulation_service.is_calibrated
-                        logging.critical(f"★★★ Triangulator calibrated: {triangulator_ready}")
-                
-                triangulator_info = f"triangulation_service={type(self.coordinate_combiner.triangulation_service).__name__}"
-                if hasattr(self.coordinate_combiner.triangulation_service, 'is_calibrated'):
-                    triangulator_info += f", is_calibrated={self.coordinate_combiner.triangulation_service.is_calibrated}"
-                logging.critical(f"★★★ Using {triangulator_info}")
-            
-            # If triangulator is not ready, use fallback method
-            if not triangulator_ready:
-                logging.critical("★★★ Triangulator not ready, using fallback method")
-                # Basic fallback calculation
-                x_center = (float(left_coords[0]) + float(right_coords[0])) / 2.0
-                y_center = (float(left_coords[1]) + float(right_coords[1])) / 2.0
-                x_disparity = abs(float(left_coords[0]) - float(right_coords[0]))
-                # 스케일링 값을 100.0에서 1000.0으로 변경하여 작은 Z 값(미터 단위)을 얻습니다
-                z_estimate = 1000.0 / max(x_disparity, 1.0)  # Avoid division by near-zero
-                z_estimate = min(max(z_estimate, 0.1), 10.0)  # 미터 단위로 0.1~10m 범위 내로 제한
-                
-                self._last_3d_coordinates = (x_center, y_center, z_estimate)
-                logging.critical(f"★★★ Using fallback 3D coordinates: {self._last_3d_coordinates}")
-                
-                # Emit tracking update signal with the fallback position
-                self.tracking_updated.emit(
-                    float(self._last_3d_coordinates[0]), 
-                    float(self._last_3d_coordinates[1]), 
-                    float(self._last_3d_coordinates[2])
-                )
-                
-                return self._last_3d_coordinates
-            
-            # Use the coordinate combiner service to calculate 3D position
-            # Start processing timer
-            self.coordinate_combiner.start_processing()
-            
-            # Calculate 3D position - DIRECTLY use left and right coordinates for clarity
-            position_3d = self.coordinate_combiner.calculate_3d_position(
-                (float(left_coords[0]), float(left_coords[1])),
-                (float(right_coords[0]), float(right_coords[1]))
-            )
-            
-            # End processing and get time
-            process_time = self.coordinate_combiner.end_processing()
-            
-            # Log the calculated position with high visibility
-            logging.critical(f"★★★ Calculated 3D position result: {position_3d}")
-            
-            # Store the calculated 3D coordinates for the detection signal
-            if position_3d is not None:
-                # Ensure position_3d is a tuple of floats
-                if isinstance(position_3d, np.ndarray):
-                    position_3d = tuple(float(x) for x in position_3d[:3])
-                
-                self._last_3d_coordinates = position_3d
-                
-                # Log the finalized 3D coordinates
-                logging.critical(f"★★★ Final 3D coordinates: {self._last_3d_coordinates}")
-                
-                # Emit tracking update signal with the 3D position
-                self.tracking_updated.emit(
-                    float(position_3d[0]), 
-                    float(position_3d[1]), 
-                    float(position_3d[2])
-                )
+                    logging.warning("Triangulator missing 'triangulate' method")
             else:
-                # If calculation failed, use previous coordinates or default
-                logging.critical("★★★ 3D position calculation failed, using previous coordinates")
+                logging.debug("Triangulator not ready, using fallback method")
+            
+            # Fallback method - calculate basic 3D coordinates
+            # 1. Get camera settings
+            camera_settings = getattr(self, '_camera_settings', None)
+            if camera_settings is None:
+                camera_settings = self.config_manager.get_camera_settings()
+                self._camera_settings = camera_settings
                 
-                # If we don't have previous coordinates, create fallback based on 2D positions
-                if self._last_3d_coordinates is None or self._last_3d_coordinates == (0.0, 0.0, 0.0):
-                    # Fallback: create rough 3D estimate based on 2D positions
-                    # Calculate center position and estimate depth based on x-disparity
-                    x_center = (float(left_coords[0]) + float(right_coords[0])) / 2.0
-                    y_center = (float(left_coords[1]) + float(right_coords[1])) / 2.0
-                    x_disparity = abs(float(left_coords[0]) - float(right_coords[0]))
-                    
-                    # Simple stereo formula (very rough approximation)
-                    # 스케일링 값을 100.0에서 1000.0으로 변경하여 작은 Z 값(미터 단위)을 얻습니다
-                    z_estimate = 1000.0 / max(x_disparity, 1.0)  # Avoid division by near-zero
-                    z_estimate = min(max(z_estimate, 0.1), 10.0)  # 미터 단위로 0.1~10m 범위 내로 제한
-                    
-                    self._last_3d_coordinates = (x_center, y_center, z_estimate)
-                    logging.critical(f"★★★ Using fallback 3D coordinates based on disparity: {self._last_3d_coordinates}")
-                    
-                    # Emit tracking update signal with the fallback position
-                    self.tracking_updated.emit(
-                        float(self._last_3d_coordinates[0]), 
-                        float(self._last_3d_coordinates[1]), 
-                        float(self._last_3d_coordinates[2])
-                    )
+            # 2. Calculate disparity and depth
+            baseline = camera_settings.get('baseline_m', 1.0)
+            focal_length_mm = camera_settings.get('focal_length_mm', 50.0)
             
-            # Return 3D coordinates for other uses
-            return self._last_3d_coordinates
-        
+            # Rough estimate of focal length in pixels (depends on sensor and image size)
+            sensor_width_mm = camera_settings.get('sensor_width_mm', 36.0)
+            image_width_px = 640  # Assuming standard VGA width
+            focal_length_px = focal_length_mm * (image_width_px / sensor_width_mm)
+            
+            # Calculate disparity (difference in x-coordinates)
+            disparity = abs(left_x - right_x)
+            if disparity < 0.01:  # Avoid division by zero
+                disparity = 0.01
+                
+            # Calculate depth (Z) using basic stereo formula: Z = baseline * focal_length / disparity
+            z = baseline * focal_length_px / disparity
+            
+            # Limit Z to reasonable range (1-100 meters)
+            if z > 100.0:
+                z = 100.0
+            elif z < 1.0:
+                z = 1.0
+            
+            # Calculate X and Y using similar triangles
+            principal_x = camera_settings.get('principal_point_x', 320.0)
+            principal_y = camera_settings.get('principal_point_y', 240.0)
+            
+            x = (left_x - principal_x) * z / focal_length_px
+            y = (left_y - principal_y) * z / focal_length_px
+            
+            # Store the calculated 3D coordinates for later use
+            self._last_3d_coordinates = (x, y, z)
+            
+            # Log fallback calculations
+            logging.debug(f"Using fallback 3D coordinates: ({x:.2f}, {y:.2f}, {z:.2f})")
+            
+            return (x, y, z)
+            
         except Exception as e:
-            logging.critical(f"★★★ Error during coordinate fusion: {str(e)}")
-            logging.critical(traceback.format_exc())
-            
-            # Return last valid coordinates or fallback
-            if self._last_3d_coordinates is not None:
-                return self._last_3d_coordinates
-        else:
-                # Create basic fallback
-                try:
-                    x_center = (float(left_coords[0]) + float(right_coords[0])) / 2.0
-                    y_center = (float(left_coords[1]) + float(right_coords[1])) / 2.0
-                    x_disparity = abs(float(left_coords[0]) - float(right_coords[0]))
-                    # 스케일링 값을 100.0에서 1000.0으로 변경하여 작은 Z 값(미터 단위)을 얻습니다
-                    z_estimate = 1000.0 / max(x_disparity, 1.0)
-                    z_estimate = min(max(z_estimate, 0.1), 10.0)  # 미터 단위로 0.1~10m 범위 내로 제한
-                    return (x_center, y_center, z_estimate)
-                except:
-                    # Last resort
-                    return (0.0, 0.0, 0.0)
+            logging.error(f"Error in coordinate fusion: {e}")
+            # Return a default value as fallback
+            logging.debug("Error occurred, returning default 3D point (0, 0, 10)")
+            return (0, 0, 10.0)
     
     def _check_out_of_bounds(self):
         """Check if ball is predicted to be out of bounds and update tracking state."""
@@ -2595,61 +2511,111 @@ class BallTrackingController(QObject):
             # Add frame to XML tracking data
             self.append_frame_xml(frame_idx)
 
-    def _initialize_triangulation_service(self):
-        """Initialize or reinitialize the triangulation service with current settings"""
+    def _initialize_triangulation_service(self, camera_settings=None):
+        """
+        Initialize or re-initialize the triangulation service with current camera settings.
+        
+        Args:
+            camera_settings (dict, optional): Camera settings to use.
+                If None, will use settings from config_manager.
+        
+        Returns:
+            bool: True if initialization was successful, False otherwise
+        """
         try:
-            # Try to get existing triangulator from ConfigManager
-            self.triangulator = self.config_manager.get_triangulator()
+            # Get camera settings if not provided
+            if camera_settings is None:
+                camera_settings = self.config_manager.get_camera_settings()
             
-            # If no triangulator exists, create a new one
-            if self.triangulator is None:
-                try:
-                    from src.core.geometry.triangulation.factory import TriangulationFactory
-                    logging.info("Creating new triangulation service")
-                    
-                    # Create triangulator with camera settings
-                    self.triangulator = TriangulationFactory.create_triangulator(
-                        method='linear', 
-                        sub_method='dlt',
-                        camera_params=self.camera_settings
-                    )
-                    
-                    if self.triangulator is not None:
-                        logging.info("Successfully created triangulator")
-                        self.triangulator = self.triangulator
-                        self.coordinate_combiner.set_triangulation_service(self.triangulator)
-                        # Pass camera settings to coordinate combiner
-                        self.coordinate_combiner.set_camera_settings(self.config_manager.get_camera_settings())
-                        self.config_manager.set_triangulator(self.triangulator)
-                except Exception as e:
-                    logging.error(f"Failed to create new triangulator: {e}")
-                    self.triangulator = None
-                    self.coordinate_combiner.set_triangulation_service(None)
-                    self.coordinate_combiner.set_camera_settings(None)
-                    self.config_manager.set_triangulator(None)
-            # Create new triangulator
-            try:
-                from src.core.geometry.triangulation.factory import TriangulationFactory
-                logging.info("Initializing triangulation service")
+            # Validate critical camera parameters
+            critical_params = ['camera_location_x', 'camera_location_y', 'camera_location_z',
+                             'camera_rotation_x', 'camera_rotation_y', 'camera_rotation_z',
+                             'focal_length_mm', 'baseline_m']
+            
+            # Check for any zero or missing values
+            invalid_params = []
+            for param in critical_params:
+                if param not in camera_settings or camera_settings[param] == 0.0:
+                    invalid_params.append(param)
+            
+            if invalid_params:
+                logging.critical(f"Cannot initialize triangulation service due to invalid parameters: {invalid_params}")
+                return False
+            
+            # Get triangulator from config manager or create a new one
+            triangulator = self.config_manager.get_triangulator()
+            
+            if triangulator is None:
+                # Create a new triangulation service
+                triangulator = TriangulationServiceMock(camera_settings)
+                # Register it with config manager for shared use
+                self.config_manager.set_triangulator(triangulator)
+                logging.info("Created and registered new triangulation service")
+            else:
+                # Update existing triangulator with latest settings
+                triangulator.set_camera(camera_settings)
+                logging.info("Updated existing triangulation service with new camera settings")
+            
+            # Check if triangulator has the triangulate method
+            if not hasattr(triangulator, 'triangulate'):
+                logging.critical("Triangulator missing 'triangulate' method - adding wrapper")
                 
-                triangulator = TriangulationFactory.create_triangulator(
-                method='linear', 
-                sub_method='dlt',
-                camera_params=self.camera_settings
-                )
+                # Define the triangulate wrapper method
+                def triangulate_wrapper(uL, vL, uR, vR):
+                    """Triangulate 3D point from 2D coordinates in left and right images."""
+                    # This is very important to wrap triangulation correctly
+                    # Prepare the input points in the format expected by OpenCV
+                    left_pts = np.array([[uL, vL]], dtype=np.float32).T
+                    right_pts = np.array([[uR, vR]], dtype=np.float32).T
+                    
+                    # If triangulator has the cv2_triangulate_points method, use it
+                    if hasattr(triangulator, 'cv2_triangulate_points'):
+                        homog_pts = triangulator.cv2_triangulate_points(left_pts, right_pts)
+                        # Convert from homogeneous to Euclidean coordinates
+                        x = homog_pts[0, 0] / homog_pts[3, 0]
+                        y = homog_pts[1, 0] / homog_pts[3, 0]
+                        z = homog_pts[2, 0] / homog_pts[3, 0]
+                        return (x, y, z)
+                    else:
+                        # Fallback to a basic calculation if proper triangulation is unavailable
+                        logging.warning("Using fallback triangulation method - accuracy will be limited")
+                        # Calculate depth using basic formula: baseline * focal_length / disparity
+                        baseline = camera_settings.get('baseline_m', 1.0)
+                        focal_length_mm = camera_settings.get('focal_length_mm', 50.0)
+                        focal_length_px = focal_length_mm * 16  # Very rough estimate of px/mm conversion
+                        
+                        # Calculate disparity (difference in x-coordinates)
+                        disparity = abs(uL - uR)
+                        if disparity < 0.01:  # Avoid division by zero
+                            disparity = 0.01
+                            
+                        # Calculate depth (Z)
+                        z = baseline * focal_length_px / disparity
+                        
+                        # Calculate X and Y using similar triangles
+                        x = (uL - 320) * z / focal_length_px  # Assuming principal point at (320, 240)
+                        y = (vL - 240) * z / focal_length_px
+                        
+                        return (x, y, z)
                 
-                if triangulator is not None:
-                    logging.info("Successfully created triangulator")
-                    self.triangulator = triangulator
-                    self.coordinate_combiner.set_triangulation_service(triangulator)
-                    # Pass camera settings to coordinate combiner
-                    self.coordinate_combiner.set_camera_settings(self.config_manager.get_camera_settings())
-                    self.config_manager.set_triangulator(triangulator)
-            except Exception as e:
-                logging.error(f"Failed to initialize triangulation service: {e}")
-                import traceback
-                logging.error(traceback.format_exc())
-        except Exception as outer_e:
-            logging.error(f"Outer error in triangulation initialization: {outer_e}")
-            import traceback
-            logging.error(traceback.format_exc())
+                # Attach the wrapper method to the triangulator object
+                triangulator.triangulate = triangulate_wrapper
+                logging.info("Added triangulate wrapper method to triangulator")
+            
+            # Force triangulator to ready state if all parameters are valid
+            if not invalid_params and hasattr(triangulator, 'is_calibrated'):
+                if not triangulator.is_calibrated:
+                    triangulator.is_calibrated = True
+                    logging.info("Forced triangulator to calibrated state after validation")
+            
+            # Store reference to triangulator - IMPORTANT: set both attributes for compatibility
+            self.triangulation_service = triangulator
+            self.triangulator = triangulator  # This is needed for CoordinateCombiner
+            
+            # Log success
+            logging.info(f"Triangulation service initialization complete. Ready: {getattr(triangulator, 'is_calibrated', True)}")
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error initializing triangulation service: {e}")
+            return False

@@ -47,8 +47,16 @@ class SettingView(QWidget):
             "last_image_folder": ""
         }
         
-        # Load camera settings
+        # Load camera settings - Always get fresh settings from config
         self.camera_settings = self.config_manager.get_camera_settings()
+        logging.info(f"Loaded camera settings: {self.camera_settings}")
+        
+        # Check for zero values in critical parameters
+        critical_params = ['camera_location_x', 'camera_rotation_y', 'focal_length_mm', 'baseline_m']
+        invalid_params = [param for param in critical_params if param in self.camera_settings and self.camera_settings[param] == 0.0]
+        
+        if invalid_params:
+            logging.warning(f"Found zero values in critical camera parameters: {invalid_params}")
         
         # Set up UI
         self._setup_ui()
@@ -231,12 +239,20 @@ class SettingView(QWidget):
         self.camera_settings["principal_point_x"] = self.principal_point_x.value()
         self.camera_settings["principal_point_y"] = self.principal_point_y.value()
         
-        # Save to configuration
+        # Check for zero values in critical parameters
+        critical_params = ['camera_location_x', 'camera_rotation_y', 'focal_length_mm', 'baseline_m']
+        invalid_params = [param for param in critical_params if self.camera_settings[param] == 0.0]
+        
+        if invalid_params:
+            logging.warning(f"Setting zero values for critical camera parameters: {invalid_params}")
+            logging.warning("This may cause triangulation to fail")
+        
+        # Save to configuration - set_camera_settings will now force save
         self.config_manager.set_camera_settings(self.camera_settings)
         
         # Emit signal
         self.camera_settings_changed.emit(self.camera_settings.copy())
-        logging.debug("Camera settings updated")
+        logging.info("Camera settings updated and saved to configuration")
     
     def set_folder_path(self, folder_path):
         """
@@ -280,6 +296,13 @@ class SettingView(QWidget):
         for key, value in camera_settings.items():
             if key in self.camera_settings:
                 self.camera_settings[key] = value
+        
+        # Log any zero values in critical parameters
+        critical_params = ['camera_location_x', 'camera_rotation_y', 'focal_length_mm', 'baseline_m']
+        invalid_params = [param for param in critical_params if param in self.camera_settings and self.camera_settings[param] == 0.0]
+        
+        if invalid_params:
+            logging.warning(f"Setting UI with zero values for critical camera parameters: {invalid_params}")
         
         # Update UI controls
         self.camera_location_x.setValue(self.camera_settings["camera_location_x"])

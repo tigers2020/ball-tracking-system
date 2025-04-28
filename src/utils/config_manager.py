@@ -408,8 +408,9 @@ class ConfigManager:
         current_settings = self.get_camera_settings().copy()
         current_settings.update(camera_settings)
         self.set("camera_settings", current_settings)
-        # Don't save immediately, allow throttling
-        self.save_config(force=False)
+        # Force immediate save to ensure settings are persisted
+        self.save_config(force=True)
+        logging.info("Camera settings updated and saved to configuration file")
         
     def get_calibration_points(self):
         """

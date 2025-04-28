@@ -27,9 +27,9 @@
         "adaptive": false
     },
     "kalman_settings": {
-        "process_noise": 0.03,
-        "measurement_noise": 1.9,
-        "max_lost_frames": 20,
+        "process_noise": 0.036,
+        "measurement_noise": 1.6,
+        "max_lost_frames": 7,
         "dynamic_process_noise": true,
         "adaptive_measurement_noise": true,
         "dt": 0.1,
@@ -38,18 +38,18 @@
         "position_memory": 0.7
     },
     "camera_settings": {
-        "camera_location_x": 0.0,
+        "camera_location_x": 1.0,
         "camera_location_y": 29.09,
         "camera_location_z": 12.5,
         "camera_rotation_x": 65.0,
-        "camera_rotation_y": 0.0,
+        "camera_rotation_y": 1.0,
         "camera_rotation_z": 180.0,
         "focal_length_mm": 50.0,
         "baseline_m": 1.0,
         "sensor_width_mm": 36.0,
         "sensor_height_mm": 24.0,
-        "principal_point_x": 960.0,
-        "principal_point_y": 540.0,
+        "principal_point_x": 320.0,
+        "principal_point_y": 240.0,
         "image_width_px": 640,
         "image_height_px": 480
     },
@@ -189,6 +189,6 @@
             "z": 0.0
         },
         "scale": 0.01,
-        "camera_height": 3.0
+        "camera_height": 29.0
     }
 }

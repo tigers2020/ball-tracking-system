@@ -270,10 +270,20 @@ class TrackingOverlay(QWidget):
                     right_coords = tuple(right_coords)
                 else:
                     right_coords = (0.0, 0.0)
-                    
-            world_coords = tracking_data.get('world_coords') or tracking_data.get('world_3d', (0.0, 0.0, 0.0))
-            if world_coords is None or not isinstance(world_coords, tuple):
-                if isinstance(world_coords, (list, np.ndarray)):
+                
+            # Fix for numpy array world_coords - don't use 'or' operator with numpy arrays
+            if 'world_coords' in tracking_data and tracking_data['world_coords'] is not None:
+                world_coords = tracking_data['world_coords']
+            elif 'world_3d' in tracking_data and tracking_data['world_3d'] is not None:
+                world_coords = tracking_data['world_3d']
+            else:
+                world_coords = (0.0, 0.0, 0.0)
+                
+            # Convert numpy array to tuple if needed
+            if isinstance(world_coords, np.ndarray):
+                world_coords = tuple(float(v) for v in world_coords)
+            elif not isinstance(world_coords, tuple):
+                if isinstance(world_coords, list):
                     world_coords = tuple(world_coords)
                 else:
                     world_coords = (0.0, 0.0, 0.0)
