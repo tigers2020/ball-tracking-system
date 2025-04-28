@@ -204,8 +204,17 @@ class ImageView(QWidget):
         Args:
             enabled (bool): True to enable, False to disable
         """
+        # 오버레이 위젯 표시 설정
         self.tracking_overlay.setVisible(enabled)
         self.tracking_enabled = enabled
+        
+        # 확실하게 레이아웃에 추가되었는지 확인
+        if enabled and self.layout().indexOf(self.tracking_overlay) < 0:
+            # 레이아웃에 없으면 최상단에 추가
+            self.layout().insertWidget(0, self.tracking_overlay)
+            logging.info("Tracking overlay added to layout")
+        
+        logging.debug(f"Tracking overlay visibility set to {enabled}")
     
     def enable_analysis_tabs(self, enabled=True):
         """

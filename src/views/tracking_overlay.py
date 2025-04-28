@@ -159,6 +159,11 @@ class TrackingOverlay(QWidget):
                     'confidence': float
                 }
         """
+        # 디버그 로그 추가
+        logging.debug(f"TrackingOverlay.update_tracking_info called: frame={tracking_data.get('frame_idx')}, "
+                     f"left={tracking_data.get('left_2d')}, right={tracking_data.get('right_2d')}, "
+                     f"3D={tracking_data.get('world_3d')}")
+        
         # Update frame number
         if 'frame_idx' in tracking_data:
             self.frame_value_label.setText(str(tracking_data['frame_idx']))

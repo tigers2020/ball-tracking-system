@@ -147,14 +147,17 @@ class AppController(QObject):
         # Connect main window to game_analyzer for IN/OUT indication
         self.view.connect_game_analyzer(self.game_analyzer)
         
+        # Set up tracking overlay
+        self._setup_tracking_overlay()
+        
         # Initialize ball tracking settings dialog
         self.ball_tracking_dialog = None
         
         # Connect ball tracking button
         self.view.image_view.playback_controls.ball_tracking_clicked.connect(self._on_ball_tracking_button_clicked)
         
-        # 볼 트래킹 버튼 비활성화 (초기 상태)
-        self.view.image_view.playback_controls.ball_tracking_button.setEnabled(False)
+        # 볼 트래킹 버튼 활성화 (이미지 로드 후에 사용 가능하도록)
+        self.view.image_view.playback_controls.ball_tracking_button.setEnabled(True)
         
         # Connect ball_tracking signals to view
         self.ball_tracking_controller.mask_updated.connect(self._on_mask_updated)
@@ -180,9 +183,6 @@ class AppController(QObject):
         # Connect data export signals
         self.data_export_controller.export_successful.connect(self._on_data_exported)
         self.data_export_controller.import_successful.connect(self._on_data_imported)
-        
-        # 추가: 트래킹 좌표 오버레이 초기화 및 연결
-        self._setup_tracking_overlay()
     
     def _setup_tracking_overlay(self):
         """
