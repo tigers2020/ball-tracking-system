@@ -188,7 +188,7 @@ class CoordinateCombiner:
         """
         # Check if both coordinates are valid
         if left_coords is None or right_coords is None:
-            logging.debug("Cannot calculate 3D position: One or both 2D coordinates are None")
+            logging.error("Cannot calculate 3D position: One or both 2D coordinates are None")
             return None
         
         # Check if triangulation service is available
@@ -197,9 +197,12 @@ class CoordinateCombiner:
             return None
         
         try:
+            # 좌표 확인
+            logging.critical(f"calculate_3d_position called: left={left_coords}, right={right_coords}")
+            
             # Extract coordinates
-            x_left, y_left = left_coords
-            x_right, y_right = right_coords
+            x_left, y_left = float(left_coords[0]), float(left_coords[1])
+            x_right, y_right = float(right_coords[0]), float(right_coords[1])
             
             # Calculate disparity threshold - large disparity in y could indicate noise
             disparity_y = abs(y_left - y_right)
@@ -208,7 +211,13 @@ class CoordinateCombiner:
                 self.confidence *= max(0.5, 1.0 - (disparity_y - 30) / 100.0)  # Reduce confidence
             
             # Perform triangulation
+            logging.critical(f"Calling triangulation with: ({x_left}, {y_left}) and ({x_right}, {y_right})")
             world_coords = self.triangulation_service.triangulate(x_left, y_left, x_right, y_right)
+            logging.critical(f"Triangulation raw result: {world_coords}")
+            
+            if world_coords is None or (isinstance(world_coords, np.ndarray) and np.isnan(world_coords).any()):
+                logging.critical("Triangulation failed or returned NaN values")
+                return None
             
             if isinstance(world_coords, np.ndarray):
                 # Convert numpy array to tuple
@@ -221,11 +230,13 @@ class CoordinateCombiner:
             self.last_3d_position = position
             
             # Return the 3D position
-            logging.debug(f"Calculated 3D position: {position}")
+            logging.critical(f"Final calculated 3D position: {position}")
             return position
         
         except Exception as e:
             logging.error(f"Error during 3D position calculation: {str(e)}")
+            import traceback
+            logging.critical(traceback.format_exc())
             return None
     
     def process_frame(self, frame_idx, hsv_left, hsv_right, hough_left, hough_right, 

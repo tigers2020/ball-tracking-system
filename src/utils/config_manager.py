@@ -598,76 +598,70 @@ class ConfigManager:
     
     def get_camera_height(self):
         """
-        Get the camera height.
+        Get the camera height setting in meters.
         
         Returns:
             float: Camera height in meters
         """
-        coordinate_settings = self.get_coordinate_settings()
-        return coordinate_settings.get("camera_height", self.default_config["coordinate_settings"]["camera_height"])
+        return self.get_value("coordinate_settings", "camera_height", 
+                             self.default_config["coordinate_settings"]["camera_height"])
     
     def set_camera_height(self, height):
         """
-        Set the camera height.
+        Set the camera height setting in meters.
         
         Args:
             height (float): Camera height in meters
         """
-        coordinate_settings = self.get_coordinate_settings().copy()
-        coordinate_settings["camera_height"] = height
-        self.set("coordinate_settings", coordinate_settings)
-        # Don't save immediately, allow throttling
-        self.save_config(force=False)
+        coord_settings = self.get_coordinate_settings().copy()
+        coord_settings["camera_height"] = height
+        self.set_coordinate_settings(coord_settings)
         
     def get_camera_baseline(self):
         """
-        Get the stereo camera baseline.
+        Get the camera baseline distance in meters.
         
         Returns:
-            float: Baseline in meters
+            float: Camera baseline in meters
         """
-        camera_settings = self.get_camera_settings()
-        return camera_settings.get("baseline_m", self.default_config["camera_settings"]["baseline_m"])
+        return self.get_value("camera_settings", "baseline_m", 
+                             self.default_config["camera_settings"]["baseline_m"])
     
     def set_camera_baseline(self, baseline):
         """
-        Set the stereo camera baseline.
+        Set the camera baseline distance in meters.
         
         Args:
-            baseline (float): Baseline in meters
+            baseline (float): Camera baseline in meters
         """
         camera_settings = self.get_camera_settings().copy()
         camera_settings["baseline_m"] = baseline
-        self.set("camera_settings", camera_settings)
-        # Don't save immediately, allow throttling
-        self.save_config(force=False)
-    
+        self.set_camera_settings(camera_settings)
+        
     def get_camera_focal_length(self):
         """
-        Get the camera focal length.
+        Get the camera focal length setting in millimeters.
         
         Returns:
-            float: Focal length in millimeters
+            float: Camera focal length in millimeters
         """
-        camera_settings = self.get_camera_settings()
-        return camera_settings.get("focal_length_mm", self.default_config["camera_settings"]["focal_length_mm"])
+        return self.get_value("camera_settings", "focal_length_mm", 
+                             self.default_config["camera_settings"]["focal_length_mm"])
     
     def set_camera_focal_length(self, focal_length):
         """
-        Set the camera focal length.
+        Set the camera focal length setting in millimeters.
         
         Args:
-            focal_length (float): Focal length in millimeters
+            focal_length (float): Camera focal length in millimeters
         """
         camera_settings = self.get_camera_settings().copy()
         camera_settings["focal_length_mm"] = focal_length
-        self.set("camera_settings", camera_settings)
-        # Don't save immediately, allow throttling
-        self.save_config(force=False)
-    
+        self.set_camera_settings(camera_settings)
+        
     def get_camera_sensor_dimensions(self):
         """
-        Get the camera sensor dimensions.
+        Get the camera sensor dimensions in millimeters.
         
         Returns:
             tuple: (width, height) in millimeters
@@ -675,11 +669,11 @@ class ConfigManager:
         camera_settings = self.get_camera_settings()
         width = camera_settings.get("sensor_width_mm", self.default_config["camera_settings"]["sensor_width_mm"])
         height = camera_settings.get("sensor_height_mm", self.default_config["camera_settings"]["sensor_height_mm"])
-        return (width, height)
+        return width, height
     
     def set_camera_sensor_dimensions(self, width, height):
         """
-        Set the camera sensor dimensions.
+        Set the camera sensor dimensions in millimeters.
         
         Args:
             width (float): Sensor width in millimeters
@@ -688,6 +682,27 @@ class ConfigManager:
         camera_settings = self.get_camera_settings().copy()
         camera_settings["sensor_width_mm"] = width
         camera_settings["sensor_height_mm"] = height
-        self.set("camera_settings", camera_settings)
-        # Don't save immediately, allow throttling
-        self.save_config(force=False) 
+        self.set_camera_settings(camera_settings)
+        
+    def set_triangulator(self, triangulator):
+        """
+        Set the triangulation service instance for shared use across controllers.
+        
+        Args:
+            triangulator: Triangulation service instance
+        """
+        self._triangulator = triangulator
+        logging.critical("Triangulator registered in ConfigManager for shared use")
+        
+    def get_triangulator(self):
+        """
+        Get the registered triangulation service instance.
+        
+        Returns:
+            Triangulation service instance or None if not registered
+        """
+        if hasattr(self, '_triangulator'):
+            return self._triangulator
+        else:
+            logging.critical("No triangulator registered in ConfigManager")
+            return None 

@@ -181,35 +181,76 @@ class BallTrackingController(QObject):
         # Initialize triangulation service with camera settings
         self.camera_settings = self.config_manager.get_camera_settings()
         
-        # 실제 삼각측량 서비스 생성 (이전 TriangulationServiceMock 대신)
-        try:
-            # 기본 linear 방식의 triangulator 생성 (DLT 알고리즘 사용)
-            triangulation_config = {
-                'method': 'linear',
-                'sub_method': 'dlt'
-            }
-            self.triangulator = TriangulationFactory.create_triangulator_from_config(
-                triangulation_config,
-                self.camera_settings
-            )
-            
-            # triangulate 메서드를 wrapper 형태로 제공하여 기존 코드와 호환성 유지
-            def triangulate_wrapper(uL, vL, uR, vR):
-                points_2d = [(uL, vL), (uR, vR)]
-                point_3d = self.triangulator.triangulate_point(points_2d)
-                if point_3d is None:
-                    # 실패 시 기본 값 반환
-                    return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
-                return point_3d
+        # 먼저 ConfigManager에서 기존에 생성된 triangulator가 있는지 확인
+        self.triangulator = self.config_manager.get_triangulator()
+        
+        # 기존 triangulator가 없는 경우에만 새로 생성
+        if self.triangulator is None:
+            logging.critical("No pre-existing triangulator found in ConfigManager, creating new one...")
+            # 실제 삼각측량 서비스 생성 (이전 TriangulationServiceMock 대신)
+            try:
+                # 기본 linear 방식의 triangulator 생성 (DLT 알고리즘 사용)
+                triangulation_config = {
+                    'method': 'linear',
+                    'sub_method': 'dlt'
+                }
+                self.triangulator = TriangulationFactory.create_triangulator_from_config(
+                    triangulation_config,
+                    self.camera_settings
+                )
                 
-            # 원래 triangulate 메서드를 대체
-            self.triangulator.triangulate = triangulate_wrapper
+                # triangulate 메서드를 wrapper 형태로 제공하여 기존 코드와 호환성 유지
+                def triangulate_wrapper(uL, vL, uR, vR):
+                    points_2d = [(float(uL), float(vL)), (float(uR), float(vR))]
+                    logging.critical(f"Triangulating points: {points_2d}")
+                    
+                    # 삼각측량 실행
+                    point_3d = self.triangulator.triangulate_point(points_2d)
+                    logging.critical(f"Triangulation result: {point_3d}")
+                    
+                    if point_3d is None:
+                        # 실패 시 기본 값 반환
+                        logging.critical("Triangulation failed, returning default coordinates")
+                        return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                    
+                    # 확실히 numpy 배열로 변환
+                    return np.array([float(point_3d[0]), float(point_3d[1]), float(point_3d[2])])
+                    
+                # 원래 triangulate 메서드를 대체
+                self.triangulator.triangulate = triangulate_wrapper
+                
+                # ConfigManager에 등록하여 다른 컨트롤러에서도 사용할 수 있도록 함
+                self.config_manager.set_triangulator(self.triangulator)
+                
+                logging.critical("Created actual triangulation service with camera settings and registered with ConfigManager")
+            except Exception as e:
+                # 오류 발생 시 MockService로 폴백
+                logging.error(f"Error creating triangulator: {e}, falling back to mock")
+                self.triangulator = TriangulationServiceMock(self.camera_settings)
+        else:
+            logging.critical("Using pre-existing triangulator from ConfigManager")
             
-            logging.info("Created actual triangulation service with camera settings")
-        except Exception as e:
-            # 오류 발생 시 MockService로 폴백
-            logging.error(f"Error creating triangulator: {e}, falling back to mock")
-            self.triangulator = TriangulationServiceMock(self.camera_settings)
+            # 기존 triangulator에 wrapper가 없는 경우 추가 (호환성 보장)
+            if not hasattr(self.triangulator, 'triangulate') or callable(getattr(self.triangulator, 'triangulate')):
+                def triangulate_wrapper(uL, vL, uR, vR):
+                    points_2d = [(float(uL), float(vL)), (float(uR), float(vR))]
+                    logging.critical(f"Triangulating points: {points_2d}")
+                    
+                    # 삼각측량 실행
+                    point_3d = self.triangulator.triangulate_point(points_2d)
+                    logging.critical(f"Triangulation result: {point_3d}")
+                    
+                    if point_3d is None:
+                        # 실패 시 기본 값 반환
+                        logging.critical("Triangulation failed, returning default coordinates")
+                        return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                    
+                    # 확실히 numpy 배열로 변환
+                    return np.array([float(point_3d[0]), float(point_3d[1]), float(point_3d[2])])
+                
+                # 원래 triangulate 메서드를 대체
+                self.triangulator.triangulate = triangulate_wrapper
+                logging.critical("Added triangulate wrapper to existing triangulator")
         
         # Initialize coordinate combiner service
         self.coordinate_combiner = CoordinateCombiner(self.triangulator)
@@ -1063,7 +1104,10 @@ class BallTrackingController(QObject):
             self.coordinate_combiner.start_processing()
             
             # Calculate 3D position - DIRECTLY use left and right coordinates for clarity
-            position_3d = self.coordinate_combiner.calculate_3d_position(left_coords, right_coords)
+            position_3d = self.coordinate_combiner.calculate_3d_position(
+                (float(left_coords[0]), float(left_coords[1])),
+                (float(right_coords[0]), float(right_coords[1]))
+            )
             
             # End processing and get time
             process_time = self.coordinate_combiner.end_processing()
@@ -1089,8 +1133,8 @@ class BallTrackingController(QObject):
                     float(position_3d[2])
                 )
             else:
-                # If calculation failed, use default coordinates
-                logging.critical("★★★ 3D position calculation failed, using default (0,0,0)")
+                # If calculation failed, use previous coordinates or default
+                logging.critical("★★★ 3D position calculation failed, using previous coordinates")
                 if self._last_3d_coordinates is None:
                     self._last_3d_coordinates = (0.0, 0.0, 0.0)
             

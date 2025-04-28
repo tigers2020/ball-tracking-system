@@ -929,25 +929,61 @@ class CalibrationController(QObject):
         Load camera configuration settings.
         """
         if not self.config_manager:
-            logger.warning("No config manager available for loading camera settings")
+            logger.critical("No config manager available for loading camera settings")
             return
             
         # Get camera settings from config using the ConfigManager API
         camera_settings = self.config_manager.get_camera_settings()
         
         if not camera_settings:
-            logger.info("No camera settings found in configuration")
+            logger.critical("No camera settings found in configuration")
             return
             
+        # Log camera settings for verification
+        logger.critical(f"Loaded camera settings keys: {list(camera_settings.keys())}")
+        
         # Extract left and right camera settings
         left_camera = camera_settings.get("left_camera", {})
         right_camera = camera_settings.get("right_camera", {})
         
         # Check if we have valid settings
         if not left_camera or not right_camera:
-            logger.warning("Invalid camera settings in configuration")
+            logger.critical("Invalid camera settings in configuration")
             return
             
         # Set camera settings in the model
         self.model.set_camera_settings(left_camera, right_camera)
-        logger.info("Loaded camera settings from config") 
+        
+        # Apply camera settings to triangulation service
+        from src.core.geometry.triangulation.factory import TriangulationFactory
+        
+        try:
+            # 기본 linear 방식의 triangulator 생성 (DLT 알고리즘 사용)
+            triangulation_config = {
+                'method': 'linear',
+                'sub_method': 'dlt'
+            }
+            
+            # 실제 삼각측량 서비스 생성
+            triangulator = TriangulationFactory.create_triangulator_from_config(
+                triangulation_config,
+                camera_settings
+            )
+            
+            # 삼각측량 서비스 생성 성공 확인
+            if triangulator:
+                # 다른 컨트롤러에도 삼각측량 서비스를 사용할 수 있도록 ConfigManager에 등록
+                self.config_manager.set_triangulator(triangulator)
+                logger.critical("Successfully created and registered triangulation service with camera settings")
+                
+                # 서비스에 카메라 설정이 제대로 적용되었는지 검증
+                if hasattr(triangulator, 'is_configured') and triangulator.is_configured():
+                    logger.critical("Triangulation service is properly configured with camera settings")
+                else:
+                    logger.critical("Triangulation service not fully configured. Check camera parameters.")
+        except Exception as e:
+            logger.critical(f"Error creating triangulation service: {e}")
+            import traceback
+            logger.critical(traceback.format_exc())
+            
+        logger.critical("Loaded and applied camera settings from config") 

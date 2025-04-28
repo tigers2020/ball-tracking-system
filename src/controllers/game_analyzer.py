@@ -190,8 +190,71 @@ class GameAnalyzer(QObject):
             
         logging.info("Game analyzer initialized")
         
-        # Use mock triangulation service instead of real one
-        self.triangulator = TriangulationServiceMock()
+        # 실제 삼각측량 서비스 생성
+        try:
+            # 먼저 ConfigManager에서 기존에 생성된 triangulator가 있는지 확인
+            self.triangulator = self.config_manager.get_triangulator()
+            
+            # 기존 triangulator가 있는 경우 사용
+            if self.triangulator is not None:
+                logging.critical("GameAnalyzer: Using pre-existing triangulator from ConfigManager")
+            else:
+                # 기존 삼각측량 서비스가 없는 경우 새로 생성
+                # 카메라 설정 가져오기
+                camera_settings = self.config_manager.get_camera_settings()
+                
+                # 기본 linear 방식의 triangulator 생성 (DLT 알고리즘 사용)
+                triangulation_config = {
+                    'method': 'linear',
+                    'sub_method': 'dlt'
+                }
+                
+                # 실제 삼각측량 서비스 생성
+                from src.core.geometry.triangulation.factory import TriangulationFactory
+                self.triangulator = TriangulationFactory.create_triangulator_from_config(
+                    triangulation_config,
+                    camera_settings
+                )
+                
+                # 생성 성공시 ConfigManager에 등록
+                if self.triangulator:
+                    self.config_manager.set_triangulator(self.triangulator)
+                    logging.critical("GameAnalyzer: Created actual triangulation service with camera settings and registered with ConfigManager")
+        except Exception as e:
+            # 에러 발생시 로깅 후 모의 서비스로 폴백
+            logging.error(f"GameAnalyzer: Error creating triangulator: {e}, falling back to mock")
+            self.triangulator = TriangulationServiceMock()
+            
+        # 삼각측량 서비스 검증
+        if hasattr(self.triangulator, 'triangulate'):
+            logging.critical("GameAnalyzer: Triangulator has 'triangulate' method")
+        else:
+            logging.critical("GameAnalyzer: Triangulator missing 'triangulate' method - may cause errors")
+            
+        # 필요시 triangulate 메서드 래퍼 추가 - 없는 경우에만
+        if not hasattr(self.triangulator, 'triangulate') or not callable(getattr(self.triangulator, 'triangulate')):
+            def triangulate_wrapper(uL, vL, uR, vR):
+                points_2d = [(float(uL), float(vL)), (float(uR), float(vR))]
+                logging.critical(f"GameAnalyzer triangulating points: {points_2d}")
+                
+                # 삼각측량 실행
+                point_3d = self.triangulator.triangulate_point(points_2d)
+                logging.critical(f"GameAnalyzer triangulation result: {point_3d}")
+                
+                if point_3d is None:
+                    # 실패 시 기본 값 반환
+                    logging.critical("GameAnalyzer triangulation failed, returning default coordinates")
+                    # 기본값을 numpy 배열로 변환
+                    return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                
+                # 결과를 numpy 배열로 변환
+                if isinstance(point_3d, tuple):
+                    return np.array([float(point_3d[0]), float(point_3d[1]), float(point_3d[2])])
+                return point_3d
+                
+            # triangulate 메서드 추가
+            self.triangulator.triangulate = triangulate_wrapper
+            logging.critical("GameAnalyzer: Added triangulate wrapper method to triangulator")
         
         self.tracking_data = []
         self.current_game_state = GameState()
@@ -366,19 +429,41 @@ class GameAnalyzer(QObject):
         right_np = np.array([right_point], dtype=np.float32)
         
         # Log input coordinates for debugging
-        logging.info(f"[COORD DEBUG] Frame {frame_index} - Input coordinates: left={left_point}, right={right_point}")
+        logging.critical(f"[COORD DEBUG] Frame {frame_index} - Input coordinates: left={left_point}, right={right_point}")
         
-        # Triangulate 3D position
-        points_3d = self.triangulator.triangulate(left_np[0][0], left_np[0][1], right_np[0][0], right_np[0][1])
-        
-        if points_3d.size == 0:
+        # Triangulate 3D position - 직접 값을 넘기도록 수정
+        try:
+            # 삼각측량 서비스 직접 호출
+            points_3d = self.triangulator.triangulate(
+                float(left_np[0][0]), 
+                float(left_np[0][1]), 
+                float(right_np[0][0]), 
+                float(right_np[0][1])
+            )
+            
+            logging.critical(f"[COORD DEBUG] Frame {frame_index} - Triangulation result: {points_3d}")
+            
+            if isinstance(points_3d, np.ndarray) and points_3d.size > 0:
+                position_3d = points_3d
+                logging.critical(f"[COORD DEBUG] Frame {frame_index} - Using numpy array result")
+            elif isinstance(points_3d, tuple) and len(points_3d) >= 3:
+                position_3d = np.array(points_3d[:3])
+                logging.critical(f"[COORD DEBUG] Frame {frame_index} - Converted tuple to numpy array")
+            else:
+                logging.warning(f"Triangulation returned unexpected type: {type(points_3d)}")
+                return
+        except Exception as e:
+            logging.error(f"Triangulation error: {e}")
+            import traceback
+            logging.critical(traceback.format_exc())
+            return
+            
+        if points_3d is None or (isinstance(points_3d, np.ndarray) and points_3d.size == 0):
             logging.warning(f"Triangulation failed for frame {frame_index}")
             return
             
-        position_3d = points_3d
-        
         # Log triangulated result with detailed coordinates
-        logging.info(f"[COORD DEBUG] Frame {frame_index} - Original triangulated (world): "
+        logging.critical(f"[COORD DEBUG] Frame {frame_index} - Original triangulated (world): "
                     f"x={position_3d[0]:.3f}, y={position_3d[1]:.3f}, z={position_3d[2]:.3f}")
         
         # Initialize confidence score
@@ -401,7 +486,7 @@ class GameAnalyzer(QObject):
         velocity = kalman_result["velocity"]
         
         # Log Kalman filtered coordinates
-        logging.info(f"[COORD DEBUG] Frame {frame_index} - After Kalman (world): "
+        logging.critical(f"[COORD DEBUG] Frame {frame_index} - After Kalman (world): "
                     f"x={position_filtered[0]:.3f}, y={position_filtered[1]:.3f}, z={position_filtered[2]:.3f}, "
                     f"vx={velocity[0]:.3f}, vy={velocity[1]:.3f}, vz={velocity[2]:.3f}")
         
@@ -413,7 +498,7 @@ class GameAnalyzer(QObject):
         court_x, court_y, court_z = self.coordinate_service.world_to_court(position_filtered)
         
         # Log court coordinates (after conversion from world)
-        logging.info(f"[COORD DEBUG] Frame {frame_index} - Court coordinates: "
+        logging.critical(f"[COORD DEBUG] Frame {frame_index} - Court coordinates: "
                     f"x={court_x:.3f}, y={court_y:.3f}, z={court_z:.3f} | "
                     f"World->Court transformation applied")
         
