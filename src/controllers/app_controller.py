@@ -26,6 +26,8 @@ from src.controllers.game_analyzer import GameAnalyzer
 from src.views.ball_tracking_settings_dialog import BallTrackingSettingsDialog
 from src.controllers.calibration_controller import CalibrationController
 from src.controllers.data_export_controller import DataExportController
+from src.controllers.tracking_coordinates_controller import TrackingCoordinatesController
+from src.controllers.tracking_integration import setup_tracking_overlay
 
 
 class FrameLoaderThread(QThread):
@@ -178,6 +180,26 @@ class AppController(QObject):
         # Connect data export signals
         self.data_export_controller.export_successful.connect(self._on_data_exported)
         self.data_export_controller.import_successful.connect(self._on_data_imported)
+        
+        # 추가: 트래킹 좌표 오버레이 초기화 및 연결
+        self._setup_tracking_overlay()
+    
+    def _setup_tracking_overlay(self):
+        """
+        트래킹 좌표 오버레이 컴포넌트 초기화 및 연결
+        """
+        # 트래킹 좌표 컨트롤러 설정 및 연결
+        self.tracking_coord_controller = setup_tracking_overlay(
+            app_window=self,
+            ball_tracking_controller=self.ball_tracking_controller,
+            config_manager=self.config_manager,
+            image_view=self.view.image_view
+        )
+        
+        # 트래킹 오버레이 기능 활성화
+        self.view.image_view.enable_tracking_overlay(True)
+        
+        logging.info("Tracking coordinates overlay initialized and connected")
     
     def _connect_ball_tracking_to_game_analyzer(self):
         """

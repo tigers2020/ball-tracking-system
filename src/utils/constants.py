@@ -472,3 +472,34 @@ RIGHT_CAMERA_INDEX = 1
 # Tracking data storage path
 TRACKING_DATA_DIR = os.path.join(ROOT_DIR, "data", "tracking")
 DEFAULT_STORAGE_PATH = os.path.join(ROOT_DIR, "data") 
+
+# =============================================
+# Tracking Overlay Constants
+# =============================================
+
+@dataclass
+class TRACKING_OVERLAY:
+    """Tracking information overlay constants"""
+    HEIGHT: int = 40
+    FONT_SIZE: int = 10
+    PADDING: int = 10
+    SPACING: int = 15
+    BACKGROUND_COLOR: str = "rgba(40, 40, 60, 180)"
+    TEXT_COLOR: str = "#FFFFFF"
+    LABEL_COLOR: str = "#80d8ff"
+    UPDATE_INTERVAL_MS: int = 100
+    DECIMAL_PLACES_2D: int = 1
+    DECIMAL_PLACES_3D: int = 2
+    BORDER_RADIUS: int = 5
+    BORDER_COLOR: str = "rgba(100, 100, 255, 0.3)"
+    
+
+# Integrate UI constants that were previously in ui_constants.py
+# These are already defined in the WindowSize, Layout, Timing, etc. classes above
+# No need to duplicate
+
+# =============================================
+# File and Path Constants (merged with previous PATHS)
+# =============================================
+
+# FileDialog and Icons are already covered in the FILE_DIALOG and PATHS classes 

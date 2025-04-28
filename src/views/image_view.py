@@ -8,11 +8,12 @@ This module contains the ImageView class for the image view tab in the Stereo Im
 
 import logging
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QSplitter, QTabWidget
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Slot
 
 from src.views.image_view_widget import StereoImageViewWidget
 from src.views.playback_controls_widget import PlaybackControlsWidget
 from src.views.bounce_overlay import BounceOverlayWidget
+from src.views.tracking_overlay import TrackingOverlay
 from src.utils.ui_constants import Layout
 from src.utils.signal_binder import SignalBinder
 
@@ -42,12 +43,20 @@ class ImageView(QWidget):
         
         # Game analyzer reference
         self.game_analyzer = None
+        
+        # Tracking state
+        self.tracking_enabled = True
+        self.current_frame_idx = 0
     
     def _setup_ui(self):
         """Set up the user interface."""
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(Layout.MARGIN, Layout.MARGIN, Layout.MARGIN, Layout.MARGIN)
         main_layout.setSpacing(Layout.SPACING)
+        
+        # Create tracking overlay at the top
+        self.tracking_overlay = TrackingOverlay()
+        main_layout.addWidget(self.tracking_overlay)
         
         # Create splitter for image view and bounce overlay
         self.splitter = QSplitter(Qt.Horizontal)
@@ -95,6 +104,10 @@ class ImageView(QWidget):
         Returns:
             tuple: (left_success, right_success) indicating if each image was successfully set
         """
+        # Increment frame index
+        self.current_frame_idx += 1
+        
+        # Return the result of setting the images
         return self.stereo_view.set_images(left_image, right_image)
     
     def clear_images(self):
@@ -104,6 +117,13 @@ class ImageView(QWidget):
         # Reset bounce overlay
         if hasattr(self, 'bounce_overlay'):
             self.bounce_overlay.reset()
+        
+        # Reset tracking overlay
+        if hasattr(self, 'tracking_overlay'):
+            self.tracking_overlay.reset_data()
+        
+        # Reset frame index
+        self.current_frame_idx = 0
     
     def is_skipping_frames(self):
         """
@@ -177,6 +197,16 @@ class ImageView(QWidget):
         else:
             self.splitter.setSizes([int(self.width()), 0])
     
+    def enable_tracking_overlay(self, enabled=True):
+        """
+        Enable or disable tracking coordinates overlay.
+        
+        Args:
+            enabled (bool): True to enable, False to disable
+        """
+        self.tracking_overlay.setVisible(enabled)
+        self.tracking_enabled = enabled
+    
     def enable_analysis_tabs(self, enabled=True):
         """
         Enable or disable analysis tabs.
@@ -196,6 +226,33 @@ class ImageView(QWidget):
         """
         self.stereo_view.set_images(left_circle_image, right_circle_image)
     
+    @Slot(dict)
+    def update_tracking_info(self, tracking_data):
+        """
+        Update tracking information overlay.
+        
+        Args:
+            tracking_data (dict): Dictionary containing tracking information
+                {
+                    'frame_idx': int,
+                    'left_2d': (x, y) or None, 
+                    'right_2d': (x, y) or None,
+                    'world_3d': (x, y, z) or None,
+                    'processing_time': float,
+                    'status': str,
+                    'confidence': float
+                }
+        """
+        if not self.tracking_enabled:
+            return
+            
+        # Add frame index if not present
+        if 'frame_idx' not in tracking_data:
+            tracking_data['frame_idx'] = self.current_frame_idx
+            
+        # Update the tracking overlay
+        self.tracking_overlay.update_tracking_info(tracking_data)
+    
     def connect_ball_tracking_controller(self, controller):
         """
         Connect to a ball tracking controller to receive updates.
@@ -208,13 +265,44 @@ class ImageView(QWidget):
             signal_mappings = {
                 "mask_updated": self.set_masks,
                 "roi_updated": self.set_rois,
-                "circles_processed": self.set_circle_images
+                "circles_processed": self.set_circle_images,
+                "tracking_updated": self.update_tracking_info
             }
             
             # Connect all signals using SignalBinder
             SignalBinder.bind_all(controller, self, signal_mappings)
             
+            # 추가: detection_updated 신호를 _on_detection_updated 메서드에 직접 연결
+            controller.detection_updated.connect(self._on_detection_updated)
+            
             logging.info("Connected to ball tracking controller")
+    
+    @Slot(int, float, tuple, tuple, tuple)
+    def _on_detection_updated(self, frame_idx, detection_rate, left_coords, right_coords, position_coords):
+        """
+        Handle detection updates from ball tracking controller.
+        
+        Args:
+            frame_idx (int): Frame index
+            detection_rate (float): Detection rate
+            left_coords (tuple): Left camera coordinates (x, y)
+            right_coords (tuple): Right camera coordinates (x, y)
+            position_coords (tuple): 3D world coordinates (x, y, z)
+        """
+        # 이 메서드는 BallTrackingController의 detection_updated 신호와 연결됨
+        # 트래킹 오버레이 직접 업데이트를 위한 데이터 생성
+        tracking_data = {
+            'frame_idx': frame_idx,
+            'left_2d': left_coords if left_coords else None,
+            'right_2d': right_coords if right_coords else None,
+            'world_3d': position_coords if position_coords else None,
+            'status': 'Tracking' if detection_rate > 0.2 else 'Lost',
+            'confidence': detection_rate,
+            'processing_time': 0.0  # 별도 처리 시간 측정 없이 0으로 설정
+        }
+        
+        # 트래킹 오버레이 업데이트
+        self.update_tracking_info(tracking_data)
             
     def connect_game_analyzer(self, analyzer):
         """
