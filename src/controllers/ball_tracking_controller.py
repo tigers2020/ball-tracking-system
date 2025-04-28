@@ -64,6 +64,8 @@ class TriangulationServiceMock:
         z = abs(uL - uR) / 10.0  # 디스패리티에 기반한 깊이 추정
         return np.array([x, y, z])
 
+# 추가해야 하는 임포트
+from src.controllers.triangulation_service import TriangulationService
 
 class TrackingState(Enum):
     """Enum representing the state of ball tracking."""
@@ -249,7 +251,7 @@ class BallTrackingController(QObject):
             self.model.set_hough_settings(hough_settings)
         elif hasattr(self.model, 'hough_settings'):
             self.model.hough_settings = hough_settings
-            
+        
         # Initialize services
         self.hsv_mask_generator = HSVMaskGenerator(hsv_values)
         self.roi_computer = ROIComputer()
@@ -304,10 +306,10 @@ class BallTrackingController(QObject):
     @property
     def detection_stats(self):
         """
-        Property getter for detection statistics.
+        Get detection statistics.
         """
         if hasattr(self.model, 'detection_stats'):
-          return self.model.detection_stats
+            return self.model.detection_stats
         else:
             # Return internal detection stats if model doesn't have this attribute
             return self._detection_stats
@@ -1113,7 +1115,7 @@ class BallTrackingController(QObject):
         """
         if left_coords is None or right_coords is None:
             return None
-        
+    
         # Extract coordinates
         left_x, left_y = left_coords
         right_x, right_y = right_coords
@@ -2546,8 +2548,8 @@ class BallTrackingController(QObject):
             triangulator = self.config_manager.get_triangulator()
             
             if triangulator is None:
-                # Create a new triangulation service
-                triangulator = TriangulationServiceMock(camera_settings)
+                # Create a new triangulation service using the proper implementation
+                triangulator = TriangulationService(camera_settings)
                 # Register it with config manager for shared use
                 self.config_manager.set_triangulator(triangulator)
                 logging.info("Created and registered new triangulation service")
@@ -2558,62 +2560,14 @@ class BallTrackingController(QObject):
             
             # Check if triangulator has the triangulate method
             if not hasattr(triangulator, 'triangulate'):
-                logging.critical("Triangulator missing 'triangulate' method - adding wrapper")
-                
-                # Define the triangulate wrapper method
-                def triangulate_wrapper(uL, vL, uR, vR):
-                    """Triangulate 3D point from 2D coordinates in left and right images."""
-                    # This is very important to wrap triangulation correctly
-                    # Prepare the input points in the format expected by OpenCV
-                    left_pts = np.array([[uL, vL]], dtype=np.float32).T
-                    right_pts = np.array([[uR, vR]], dtype=np.float32).T
-                    
-                    # If triangulator has the cv2_triangulate_points method, use it
-                    if hasattr(triangulator, 'cv2_triangulate_points'):
-                        homog_pts = triangulator.cv2_triangulate_points(left_pts, right_pts)
-                        # Convert from homogeneous to Euclidean coordinates
-                        x = homog_pts[0, 0] / homog_pts[3, 0]
-                        y = homog_pts[1, 0] / homog_pts[3, 0]
-                        z = homog_pts[2, 0] / homog_pts[3, 0]
-                        return (x, y, z)
-                    else:
-                        # Fallback to a basic calculation if proper triangulation is unavailable
-                        logging.warning("Using fallback triangulation method - accuracy will be limited")
-                        # Calculate depth using basic formula: baseline * focal_length / disparity
-                        baseline = camera_settings.get('baseline_m', 1.0)
-                        focal_length_mm = camera_settings.get('focal_length_mm', 50.0)
-                        focal_length_px = focal_length_mm * 16  # Very rough estimate of px/mm conversion
-                        
-                        # Calculate disparity (difference in x-coordinates)
-                        disparity = abs(uL - uR)
-                        if disparity < 0.01:  # Avoid division by zero
-                            disparity = 0.01
-                            
-                        # Calculate depth (Z)
-                        z = baseline * focal_length_px / disparity
-                        
-                        # Calculate X and Y using similar triangles
-                        x = (uL - 320) * z / focal_length_px  # Assuming principal point at (320, 240)
-                        y = (vL - 240) * z / focal_length_px
-                        
-                        return (x, y, z)
-                
-                # Attach the wrapper method to the triangulator object
-                triangulator.triangulate = triangulate_wrapper
-                logging.info("Added triangulate wrapper method to triangulator")
-            
-            # Force triangulator to ready state if all parameters are valid
-            if not invalid_params and hasattr(triangulator, 'is_calibrated'):
-                if not triangulator.is_calibrated:
-                    triangulator.is_calibrated = True
-                    logging.info("Forced triangulator to calibrated state after validation")
+                logging.critical("Triangulator missing 'triangulate' method - this should not happen with TriangulationService")
             
             # Store reference to triangulator - IMPORTANT: set both attributes for compatibility
             self.triangulation_service = triangulator
             self.triangulator = triangulator  # This is needed for CoordinateCombiner
             
             # Log success
-            logging.info(f"Triangulation service initialization complete. Ready: {getattr(triangulator, 'is_calibrated', True)}")
+            logging.info(f"Triangulation service initialization complete. Ready: {getattr(triangulator, 'is_configured', lambda: True)()}")
             return True
             
         except Exception as e:

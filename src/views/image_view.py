@@ -292,7 +292,7 @@ class ImageView(QWidget):
                 logging.critical(f"ERROR updating tracking overlay: {str(e)}")
                 import traceback
                 logging.critical(traceback.format_exc())
-    
+            
     def connect_game_analyzer(self, analyzer):
         """
         Connect to a game analyzer controller to receive updates.

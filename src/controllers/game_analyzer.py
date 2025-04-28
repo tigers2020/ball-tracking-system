@@ -223,7 +223,7 @@ class GameAnalyzer(QObject):
         except Exception as e:
             # 에러 발생시 로깅 후 모의 서비스로 폴백
             logging.error(f"GameAnalyzer: Error creating triangulator: {e}, falling back to mock")
-            self.triangulator = TriangulationServiceMock()
+        self.triangulator = TriangulationServiceMock()
             
         # 삼각측량 서비스 검증
         if hasattr(self.triangulator, 'triangulate'):
@@ -461,7 +461,7 @@ class GameAnalyzer(QObject):
         if points_3d is None or (isinstance(points_3d, np.ndarray) and points_3d.size == 0):
             logging.warning(f"Triangulation failed for frame {frame_index}")
             return
-            
+        
         # Log triangulated result with detailed coordinates
         logging.critical(f"[COORD DEBUG] Frame {frame_index} - Original triangulated (world): "
                     f"x={position_3d[0]:.3f}, y={position_3d[1]:.3f}, z={position_3d[2]:.3f}")

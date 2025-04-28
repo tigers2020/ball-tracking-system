@@ -8,7 +8,7 @@ bounces of the ball based on its trajectory.
 """
 
 import numpy as np
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 
 
 class BounceDetector:
@@ -35,6 +35,9 @@ class BounceDetector:
         self.velocity_change_threshold = 0.5  # Velocity change threshold for bounce detection
         self.height_threshold = 0.1  # Height threshold for bounce detection (m)
         self.threshold_factor = threshold_factor  # Factor to adjust bounce detection sensitivity
+        self.min_bounce_interval = 0.2  # Minimum time between bounces (seconds)
+        self.acceleration_threshold = 5.0  # Minimum vertical acceleration for bounce detection
+        self.confidence_threshold = 0.6  # Minimum confidence for a bounce to be valid
         
         # Debug information
         self.debug_info = {}
@@ -70,22 +73,42 @@ class BounceDetector:
         # Calculate accelerations
         accelerations = self._calculate_accelerations(velocities, timestamps[1:])
         
-        # Detect bounce candidates using vertical velocity changes
-        bounce_candidates = self._detect_velocity_changes(
+        # Detect bounce candidates using different methods
+        velocity_candidates = self._detect_velocity_changes(
             positions[1:-1],  # Exclude first and last positions
             velocities,
             accelerations,
             timestamps[1:-1]  # Timestamps corresponding to positions[1:-1]
         )
         
+        height_candidates = self._detect_height_minima(
+            positions[1:-1],
+            timestamps[1:-1]
+        )
+        
+        # Combine all candidates
+        all_candidates = velocity_candidates + height_candidates
+        
+        # Calculate confidence scores for each candidate
+        scored_candidates = self._score_candidates(
+            all_candidates,
+            positions,
+            velocities,
+            accelerations,
+            timestamps
+        )
+        
         # Filter bounce candidates based on proximity to the court height
-        bounces = self._filter_by_height(bounce_candidates, positions, timestamps)
+        # and minimum interval between bounces
+        bounces = self._filter_candidates(scored_candidates, positions, timestamps)
         
         # Store debugger information
         self.debug_info = {
             'velocities': velocities,
             'accelerations': accelerations,
-            'bounce_candidates': bounce_candidates,
+            'velocity_candidates': velocity_candidates,
+            'height_candidates': height_candidates,
+            'scored_candidates': scored_candidates,
             'bounces': bounces
         }
         
@@ -116,17 +139,14 @@ class BounceDetector:
         
         Args:
             velocities: Array of velocities of shape (N, 3)
-            timestamps: Array of timestamps (len = N+1)
+            timestamps: Array of timestamps of shape (N+1)
             
         Returns:
             Array of accelerations of shape (N-1, 3)
         """
-        if len(velocities) < 2:
-            return np.zeros((0, 3))
-        
         accelerations = np.zeros((len(velocities) - 1, 3))
         for i in range(len(velocities) - 1):
-            dt = timestamps[i+2] - timestamps[i+1]
+            dt = timestamps[i+1] - timestamps[i]
             if dt > 0:
                 accelerations[i] = (velocities[i+1] - velocities[i]) / dt
         
@@ -156,27 +176,117 @@ class BounceDetector:
         # which indicates a bounce (ball moving downward, then upward)
         for i in range(1, len(velocities) - 1):
             # Check if the vertical velocity changes from negative to positive or is close to zero
-            if (velocities[i-1][2] < 0 and velocities[i][2] > 0) or \
-               (abs(velocities[i][2]) < 0.1 and velocities[i-1][2] < 0):
+            if (velocities[i-1][2] < -self.velocity_change_threshold and velocities[i][2] > 0) or \
+               (abs(velocities[i][2]) < 0.1 and velocities[i-1][2] < -self.velocity_change_threshold):
                 
                 # Additional check: significant vertical acceleration
-                if i-1 < len(accelerations) and accelerations[i-1][2] > 5.0:  # About half of gravity
+                if i-1 < len(accelerations) and accelerations[i-1][2] > self.acceleration_threshold:
                     # The bounce position is between positions[i-1] and positions[i]
                     # We approximate it by interpolation
                     idx = i - 1  # Index in the original positions array
-                    bounce_candidates.append((idx, positions[i-1], timestamps[i-1]))
+                    bounce_candidates.append((idx, positions[i-1], timestamps[i-1], 'velocity'))
         
         return bounce_candidates
     
-    def _filter_by_height(self, 
-                        bounce_candidates: List[Tuple[int, np.ndarray, float]], 
+    def _detect_height_minima(self,
+                             positions: np.ndarray,
+                             timestamps: np.ndarray) -> List[Tuple[int, np.ndarray, float]]:
+        """
+        Detect local minima in height that might indicate bounces.
+        
+        Args:
+            positions: Array of 3D positions of shape (N, 3)
+            timestamps: Array of timestamps
+            
+        Returns:
+            List of tuples (index, position, timestamp) of bounce candidates
+        """
+        bounce_candidates = []
+        
+        if len(positions) < 3:
+            return bounce_candidates
+            
+        # Find local minima in height (z-coordinate)
+        for i in range(1, len(positions) - 1):
+            # Check if position[i] is a local minimum in height
+            if (positions[i][2] < positions[i-1][2] and
+                positions[i][2] < positions[i+1][2] and
+                positions[i][2] < self.height_threshold + self.court_height):
+                
+                idx = i  # Index in the original positions array
+                bounce_candidates.append((idx, positions[i], timestamps[i], 'height'))
+                
+        return bounce_candidates
+    
+    def _score_candidates(self,
+                        candidates: List[Tuple[int, np.ndarray, float, str]],
+                        positions: np.ndarray,
+                        velocities: np.ndarray,
+                        accelerations: np.ndarray,
+                        timestamps: np.ndarray) -> List[Tuple[int, np.ndarray, float, float]]:
+        """
+        Calculate confidence scores for bounce candidates.
+        
+        Args:
+            candidates: List of tuples (index, position, timestamp, method) of bounce candidates
+            positions: Array of all 3D positions
+            velocities: Array of all velocities
+            accelerations: Array of all accelerations
+            timestamps: Array of all timestamps
+            
+        Returns:
+            List of tuples (index, position, timestamp, confidence) with calculated confidence scores
+        """
+        scored_candidates = []
+        
+        for idx, position, timestamp, method in candidates:
+            # Initialize score components
+            height_score = 0.0
+            velocity_score = 0.0
+            acceleration_score = 0.0
+            
+            # Calculate height score (higher when closer to court height)
+            height_diff = abs(position[2] - self.court_height)
+            if height_diff < self.height_threshold:
+                height_score = 1.0 - (height_diff / self.height_threshold)
+            
+            # Calculate velocity score if we have valid indices
+            if 0 <= idx < len(velocities) and idx+1 < len(velocities):
+                prev_vel = velocities[idx][2]
+                next_vel = velocities[idx+1][2]
+                
+                # Velocity should change from negative to positive
+                if prev_vel < 0 and next_vel > 0:
+                    velocity_magnitude = abs(next_vel - prev_vel)
+                    velocity_score = min(1.0, velocity_magnitude / (2 * self.velocity_change_threshold))
+            
+            # Calculate acceleration score if we have valid indices
+            if 0 <= idx < len(accelerations):
+                acc = accelerations[idx][2]
+                if acc > self.acceleration_threshold:
+                    acceleration_score = min(1.0, acc / (2 * self.acceleration_threshold))
+            
+            # Combine scores with weights
+            if method == 'velocity':
+                # For velocity-based candidates, weight velocity change more heavily
+                confidence = 0.3 * height_score + 0.5 * velocity_score + 0.2 * acceleration_score
+            else:  # height
+                # For height-based candidates, weight height more heavily
+                confidence = 0.5 * height_score + 0.3 * velocity_score + 0.2 * acceleration_score
+            
+            scored_candidates.append((idx, position, timestamp, confidence))
+        
+        return scored_candidates
+    
+    def _filter_candidates(self, 
+                        scored_candidates: List[Tuple[int, np.ndarray, float, float]], 
                         positions: np.ndarray,
                         timestamps: np.ndarray) -> List[Tuple[int, np.ndarray]]:
         """
-        Filter bounce candidates based on their proximity to the court height.
+        Filter bounce candidates based on confidence and minimum interval between bounces.
         
         Args:
-            bounce_candidates: List of tuples (index, position, timestamp) of bounce candidates
+            scored_candidates: List of tuples (index, position, timestamp, confidence)
             positions: Array of all 3D positions
             timestamps: Array of all timestamps
             
@@ -184,29 +294,24 @@ class BounceDetector:
             List of tuples (index, position) of confirmed bounces
         """
         bounces = []
-        min_interval = 0.2  # Minimum time between bounces (seconds)
         
-        if not bounce_candidates:
+        if not scored_candidates:
             return []
         
         # Sort candidates by timestamp
-        bounce_candidates.sort(key=lambda x: x[2])
+        scored_candidates.sort(key=lambda x: x[2])
         
-        # Adaptive height threshold based on ball heights in the trajectory
-        heights = positions[:, 2]
-        max_height = np.max(heights)
-        adaptive_threshold = max(self.height_threshold, max_height * self.threshold_factor)
+        # First filter by confidence threshold
+        confident_candidates = [c for c in scored_candidates if c[3] >= self.confidence_threshold]
         
-        last_bounce_time = -min_interval * 2
+        last_bounce_time = -self.min_bounce_interval * 2
         
-        for idx, position, timestamp in bounce_candidates:
-            # Check if the bounce is close to the court height
-            if abs(position[2] - self.court_height) < adaptive_threshold:
-                # Check if enough time has passed since the last bounce
-                if timestamp - last_bounce_time >= min_interval:
-                    # We have a valid bounce
-                    bounces.append((idx, position))
-                    last_bounce_time = timestamp
+        for idx, position, timestamp, confidence in confident_candidates:
+            # Check if enough time has passed since the last bounce
+            if timestamp - last_bounce_time >= self.min_bounce_interval:
+                # We have a valid bounce
+                bounces.append((idx, position))
+                last_bounce_time = timestamp
         
         return bounces
     
