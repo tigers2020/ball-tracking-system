@@ -52,6 +52,7 @@ class ImageView(QWidget):
         
         # Add tracking overlay at the top
         self.tracking_overlay = TrackingOverlay()
+        self.tracking_overlay.setVisible(True)  # Explicitly set to visible
         main_layout.addWidget(self.tracking_overlay)
         
         # Create splitter for image view and bounce overlay
@@ -194,7 +195,22 @@ class ImageView(QWidget):
             enabled (bool): True to enable, False to disable
         """
         if hasattr(self, 'tracking_overlay'):
+            logging.info(f"Setting tracking overlay visibility to {enabled}")
             self.tracking_overlay.setVisible(enabled)
+            
+            if enabled:
+                # Force repaint and raise to top
+                self.tracking_overlay.raise_()
+                self.tracking_overlay.repaint()
+                
+                # Log current state
+                logging.info(f"Tracking overlay state after enabling: visible={self.tracking_overlay.isVisible()}, size={self.tracking_overlay.size()}")
+                
+                # Make sure it's still in the layout
+                if self.tracking_overlay.parent() != self:
+                    logging.warning("Tracking overlay parent is not the image view, re-adding to layout")
+                    main_layout = self.layout()
+                    main_layout.insertWidget(0, self.tracking_overlay)
     
     def enable_analysis_tabs(self, enabled=True):
         """
@@ -215,6 +231,31 @@ class ImageView(QWidget):
         """
         self.stereo_view.set_images(left_circle_image, right_circle_image)
     
+    def connect_ball_tracking_controller(self, controller):
+        """
+        Connect to a ball tracking controller to receive updates.
+        
+        Args:
+            controller: BallTrackingController instance
+        """
+        if controller:
+            # DISCONNECT ANY EXISTING CONNECTIONS FIRST
+            try:
+                controller.detection_updated.disconnect()
+            except:
+                pass
+                
+            # Direct signal connection for detection updates
+            controller.detection_updated.connect(self._on_detection_updated)
+            
+            # Connect other signals directly
+            controller.mask_updated.connect(self.set_masks)
+            controller.roi_updated.connect(self.set_rois)
+            controller.circles_processed.connect(self.set_circle_images)
+            
+            # Log debug information
+            logging.critical("DIRECT SIGNAL CONNECTION ESTABLISHED: detection_updated -> _on_detection_updated")
+    
     @Slot(int, float, tuple, tuple, tuple)
     def _on_detection_updated(self, frame_idx, detection_rate, left_coords, right_coords, position_coords):
         """
@@ -227,45 +268,31 @@ class ImageView(QWidget):
             right_coords (tuple): Right image coordinates (x, y)
             position_coords (tuple): 3D world coordinates (x, y, z) in meters
         """
-        logging.debug(f"Detection updated - Frame: {frame_idx}, Coords: L={left_coords}, R={right_coords}, 3D={position_coords}")
+        logging.critical(f"★★★ RECEIVED SIGNAL! Frame: {frame_idx}, L={left_coords}, R={right_coords}, 3D={position_coords}")
         
-        # Prepare tracking data dictionary
-        tracking_data = {
-            'frame_idx': frame_idx,
-            'left_coords': left_coords,
-            'right_coords': right_coords,
-            'world_coords': position_coords,
-            'process_time': detection_rate,
-            'status': 'Tracking' if all(coord is not None for coord in [left_coords, right_coords, position_coords]) else 'Lost',
-            'confidence': 100.0 if all(coord is not None for coord in [left_coords, right_coords, position_coords]) else 0.0
-        }
-        
-        # Update tracking overlay
-        if hasattr(self, 'tracking_overlay'):
-            self.tracking_overlay.update_tracking_info(tracking_data)
-            logging.debug("Tracking overlay updated with detection data")
-    
-    def connect_ball_tracking_controller(self, controller):
-        """
-        Connect to a ball tracking controller to receive updates.
-        
-        Args:
-            controller: BallTrackingController instance
-        """
-        if controller:
-            # Define signal mappings
-            signal_mappings = {
-                "mask_updated": self.set_masks,
-                "roi_updated": self.set_rois,
-                "circles_processed": self.set_circle_images,
-                "detection_updated": self._on_detection_updated
+        # DIRECT METHOD CALL (bypass signals)
+        if hasattr(self, 'tracking_overlay') and self.tracking_overlay is not None:
+            # Create dict with correct data
+            tracking_data = {
+                'frame_idx': frame_idx,
+                'left_coords': left_coords if left_coords is not None else (0.0, 0.0),
+                'right_coords': right_coords if right_coords is not None else (0.0, 0.0),
+                'world_coords': position_coords if position_coords is not None else (0.0, 0.0, 0.0),
+                'process_time': detection_rate,
+                'status': 'Tracking' if left_coords is not None and right_coords is not None else 'Lost',
+                'confidence': 100.0 if left_coords is not None and right_coords is not None else 0.0
             }
             
-            # Connect all signals using SignalBinder
-            SignalBinder.bind_all(controller, self, signal_mappings)
-            
-            logging.info("Connected to ball tracking controller")
-            
+            # DIRECT METHOD CALL - Forcibly update overlay
+            try:
+                logging.critical(f"★★★ Calling update_tracking_info directly with data: {tracking_data}")
+                self.tracking_overlay.update_tracking_info(tracking_data)
+                self.tracking_overlay.repaint()  # Force immediate repaint
+            except Exception as e:
+                logging.critical(f"ERROR updating tracking overlay: {str(e)}")
+                import traceback
+                logging.critical(traceback.format_exc())
+    
     def connect_game_analyzer(self, analyzer):
         """
         Connect to a game analyzer controller to receive updates.

@@ -20,6 +20,9 @@ from typing import Dict, List, Tuple, Optional, Any, Union
 import traceback
 from enum import Enum
 
+# Triangulation 모듈 추가
+from src.core.geometry.triangulation.factory import TriangulationFactory
+
 from src.models.tracking_data_model import TrackingDataModel
 from src.services.hsv_mask_generator import HSVMaskGenerator
 from src.services.roi_computer import ROIComputer
@@ -177,7 +180,36 @@ class BallTrackingController(QObject):
         
         # Initialize triangulation service with camera settings
         self.camera_settings = self.config_manager.get_camera_settings()
-        self.triangulator = TriangulationServiceMock(self.camera_settings)
+        
+        # 실제 삼각측량 서비스 생성 (이전 TriangulationServiceMock 대신)
+        try:
+            # 기본 linear 방식의 triangulator 생성 (DLT 알고리즘 사용)
+            triangulation_config = {
+                'method': 'linear',
+                'sub_method': 'dlt'
+            }
+            self.triangulator = TriangulationFactory.create_triangulator_from_config(
+                triangulation_config,
+                self.camera_settings
+            )
+            
+            # triangulate 메서드를 wrapper 형태로 제공하여 기존 코드와 호환성 유지
+            def triangulate_wrapper(uL, vL, uR, vR):
+                points_2d = [(uL, vL), (uR, vR)]
+                point_3d = self.triangulator.triangulate_point(points_2d)
+                if point_3d is None:
+                    # 실패 시 기본 값 반환
+                    return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                return point_3d
+                
+            # 원래 triangulate 메서드를 대체
+            self.triangulator.triangulate = triangulate_wrapper
+            
+            logging.info("Created actual triangulation service with camera settings")
+        except Exception as e:
+            # 오류 발생 시 MockService로 폴백
+            logging.error(f"Error creating triangulator: {e}, falling back to mock")
+            self.triangulator = TriangulationServiceMock(self.camera_settings)
         
         # Initialize coordinate combiner service
         self.coordinate_combiner = CoordinateCombiner(self.triangulator)
@@ -1019,71 +1051,55 @@ class BallTrackingController(QObject):
     def _fuse_coordinates(self, left_coords, right_coords):
         """Calculate 3D position from 2D coordinates using triangulation."""
         if left_coords is None or right_coords is None:
-            logging.debug("Skipping coordinate fusion: One or both coordinates are None")
-            return
+            logging.critical("Skipping coordinate fusion: One or both coordinates are None")
+            return None
         
-        # Log input coordinates
-        logging.debug(f"Fusing coordinates: left={left_coords}, right={right_coords}")
+        # Log input coordinates with high visibility
+        logging.critical(f"★★★ Fusing coordinates: left={left_coords}, right={right_coords}")
         
         try:
             # Use the coordinate combiner service to calculate 3D position
-            # Get additional detection coordinates
-            left_hsv_coords = getattr(self.model, 'left_hsv_center', None)
-            right_hsv_coords = getattr(self.model, 'right_hsv_center', None)
-            
-            # Use Hough circle coordinates as the main detection method
-            left_hough_coords = left_coords
-            right_hough_coords = right_coords
-            
-            # Get Kalman filter predictions
-            left_kalman_coords = self.kalman_processor.get_prediction("left")
-            right_kalman_coords = self.kalman_processor.get_prediction("right")
-            
-            # Extract just position from Kalman predictions (ignore velocity)
-            if left_kalman_coords is not None:
-                left_kalman_coords = (left_kalman_coords[0], left_kalman_coords[1])
-            if right_kalman_coords is not None:
-                right_kalman_coords = (right_kalman_coords[0], right_kalman_coords[1])
-            
             # Start processing timer
             self.coordinate_combiner.start_processing()
             
-            # Combine left and right coordinates separately
-            left_combined = self.coordinate_combiner.combine_coordinates(
-                left_hsv_coords, left_hough_coords, left_kalman_coords)
-            
-            right_combined = self.coordinate_combiner.combine_coordinates(
-                right_hsv_coords, right_hough_coords, right_kalman_coords)
-            
-            # Calculate 3D position
-            position_3d = self.coordinate_combiner.calculate_3d_position(left_combined, right_combined)
+            # Calculate 3D position - DIRECTLY use left and right coordinates for clarity
+            position_3d = self.coordinate_combiner.calculate_3d_position(left_coords, right_coords)
             
             # End processing and get time
             process_time = self.coordinate_combiner.end_processing()
             
+            # Log the calculated position with high visibility
+            logging.critical(f"★★★ Calculated 3D position result: {position_3d}")
+            
             # Store the calculated 3D coordinates for the detection signal
             if position_3d is not None:
+                # Ensure position_3d is a tuple of floats
+                if isinstance(position_3d, np.ndarray):
+                    position_3d = tuple(float(x) for x in position_3d[:3])
+                
                 self._last_3d_coordinates = position_3d
-            elif self._last_3d_coordinates is None:
-                self._last_3d_coordinates = (0.0, 0.0, 0.0)
-            
-            # Log the calculated position
-            if position_3d is not None:
-                logging.debug(f"Calculated 3D position: {position_3d}")
+                
+                # Log the finalized 3D coordinates
+                logging.critical(f"★★★ Final 3D coordinates: {self._last_3d_coordinates}")
                 
                 # Emit tracking update signal with the 3D position
-                self.tracking_updated.emit(float(position_3d[0]), float(position_3d[1]), float(position_3d[2]))
-            
-            # Emit detection update signal with current state
-            frame_idx = self._frame_counter
-            self._update_detection_signal(frame_idx, process_time, left_combined, right_combined)
+                self.tracking_updated.emit(
+                    float(position_3d[0]), 
+                    float(position_3d[1]), 
+                    float(position_3d[2])
+                )
+            else:
+                # If calculation failed, use default coordinates
+                logging.critical("★★★ 3D position calculation failed, using default (0,0,0)")
+                if self._last_3d_coordinates is None:
+                    self._last_3d_coordinates = (0.0, 0.0, 0.0)
             
             # Return 3D coordinates for other uses
             return self._last_3d_coordinates
         
         except Exception as e:
-            logging.error(f"Error during coordinate fusion: {str(e)}")
-            logging.debug(traceback.format_exc())
+            logging.critical(f"★★★ Error during coordinate fusion: {str(e)}")
+            logging.critical(traceback.format_exc())
             return None
     
     def _check_out_of_bounds(self):
@@ -1199,22 +1215,56 @@ class BallTrackingController(QObject):
     
     def _update_detection_signal(self, frame_idx, timestamp, ball_center_left, ball_center_right):
         """Update detection signal with current ball tracking status."""
-        if self.state != TrackingState.TRACKING:
-            return
-
+        # Log the current state to understand why it might not be emitting
+        logging.critical(f"★★★ UPDATE DETECTION SIGNAL CALLED: State={self.state}, Frame={frame_idx}")
+        
+        # Remove the early return condition - always emit the signal
+        # if self.state != TrackingState.TRACKING:
+        #     return
+            
         # Get ball coordinates or None if not detected
         left_coords = ball_center_left if ball_center_left is not None else None
         right_coords = ball_center_right if ball_center_right is not None else None
         
         # Position coordinates from _last_3d_coordinates (from _fuse_coordinates)
         position_coords = self._last_3d_coordinates if hasattr(self, '_last_3d_coordinates') and self._last_3d_coordinates is not None else (0.0, 0.0, 0.0)
+        
+        # Ensure coordinates are valid tuples
+        if left_coords is None:
+            left_coords = (0.0, 0.0)
+        elif not isinstance(left_coords, tuple):
+            try:
+                left_coords = tuple(map(float, left_coords))
+            except:
+                left_coords = (0.0, 0.0)
+                
+        if right_coords is None:
+            right_coords = (0.0, 0.0)
+        elif not isinstance(right_coords, tuple):
+            try:
+                right_coords = tuple(map(float, right_coords))
+            except:
+                right_coords = (0.0, 0.0)
+                
+        if position_coords is None:
+            position_coords = (0.0, 0.0, 0.0)
+        elif not isinstance(position_coords, tuple):
+            try:
+                position_coords = tuple(map(float, position_coords[:3]))
+            except:
+                position_coords = (0.0, 0.0, 0.0)
             
         # Log information before emitting the signal
-        logging.debug(f"Emitting detection_updated: frame={frame_idx}, time={timestamp:.3f}, " 
-                     f"left={left_coords}, right={right_coords}, pos={position_coords}")
+        logging.critical(f"★★★ EMITTING SIGNAL: detection_updated - Frame: {frame_idx}, L={left_coords}, R={right_coords}, 3D={position_coords}")
         
         # Emit the signal with the coordinates
-        self.detection_updated.emit(frame_idx, timestamp, left_coords, right_coords, position_coords)
+        try:
+            self.detection_updated.emit(frame_idx, timestamp, left_coords, right_coords, position_coords)
+            logging.critical(f"★★★ SIGNAL EMITTED SUCCESSFULLY: detection_updated")
+        except Exception as e:
+            logging.critical(f"★★★ ERROR EMITTING SIGNAL: {str(e)}")
+            import traceback
+            logging.critical(traceback.format_exc())
     
     def detect_circles_in_roi(self):
         """
