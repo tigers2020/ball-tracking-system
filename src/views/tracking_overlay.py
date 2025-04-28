@@ -33,8 +33,6 @@ class TrackingOverlay(QWidget):
         """
         super(TrackingOverlay, self).__init__(parent)
         
-        logging.debug("Initializing TrackingOverlay widget")
-        
         # Set up the UI
         self._setup_ui()
         
@@ -43,8 +41,6 @@ class TrackingOverlay(QWidget):
         
     def _setup_ui(self):
         """Set up the tracking overlay user interface."""
-        logging.debug("Setting up TrackingOverlay UI")
-        
         # Main layout
         self.main_layout = QHBoxLayout(self)
         self.main_layout.setContentsMargins(
@@ -185,13 +181,9 @@ class TrackingOverlay(QWidget):
         processing_layout.addWidget(self.fps_label)
         
         self.main_layout.addWidget(self.processing_group)
-        
-        logging.debug("TrackingOverlay UI setup complete")
     
     def reset_tracking_info(self):
         """Reset all tracking information to default values."""
-        logging.debug("Resetting TrackingOverlay info")
-        
         self.update_tracking_info({
             'frame_idx': 0,
             'left_coords': (0, 0),
@@ -223,6 +215,7 @@ class TrackingOverlay(QWidget):
         if tracking_data is None:
             tracking_data = {}
             
+        # Log received data for debugging
         logging.debug(f"Updating tracking overlay with data: {tracking_data}")
         
         # Get values with key compatibility for different naming conventions

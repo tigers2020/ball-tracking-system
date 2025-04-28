@@ -232,9 +232,9 @@ class ImageView(QWidget):
         # Prepare tracking data dictionary
         tracking_data = {
             'frame_idx': frame_idx,
-            'left_2d': left_coords,
-            'right_2d': right_coords,
-            'world_3d': position_coords,
+            'left_coords': left_coords,
+            'right_coords': right_coords,
+            'world_coords': position_coords,
             'process_time': detection_rate,
             'status': 'Tracking' if all(coord is not None for coord in [left_coords, right_coords, position_coords]) else 'Lost',
             'confidence': 100.0 if all(coord is not None for coord in [left_coords, right_coords, position_coords]) else 0.0
