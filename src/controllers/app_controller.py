@@ -165,6 +165,15 @@ class AppController(QObject):
         # Set the config manager to the calibration controller
         self.view.calibration_controller.set_config_manager(self.config_manager)
         
+        # 주입이 제대로 이루어졌는지 확인
+        if self.view.calibration_controller.config_manager is None:
+            logging.critical("ConfigManager was not properly injected to CalibrationController!")
+        else:
+            logging.critical("ConfigManager successfully injected to CalibrationController")
+            # 명시적으로 카메라 설정과 교정점 로드 호출
+            self.view.calibration_controller._load_cameras_settings()
+            self.view.calibration_controller._load_points_from_config()
+        
         # Connect parameter_manager signals to controllers
         self._connect_parameter_manager_signals()
         

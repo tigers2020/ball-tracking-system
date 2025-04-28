@@ -942,6 +942,47 @@ class CalibrationController(QObject):
         # Log camera settings for verification
         logger.critical(f"Loaded camera settings keys: {list(camera_settings.keys())}")
         
+        # 이미지 사이즈 검증 및 업데이트
+        calibration_data = self.config_manager.get_calibration_points()
+        if calibration_data:
+            # 이미지 크기가 0인지 확인
+            left_size = calibration_data.get("left_image_size", {})
+            right_size = calibration_data.get("right_image_size", {})
+            
+            # 업데이트 여부 추적
+            updated = False
+            
+            if left_size.get("width", 0) == 0 or left_size.get("height", 0) == 0:
+                # camera_settings에서 이미지 크기 가져오기
+                img_width = camera_settings.get("image_width_px", 640)
+                img_height = camera_settings.get("image_height_px", 480)
+                
+                logger.critical(f"Updating left_image_size from 0 to {img_width}x{img_height}")
+                
+                # 업데이트
+                calibration_data["left_image_size"] = {"width": img_width, "height": img_height}
+                updated = True
+            else:
+                logger.critical(f"left_image_size is already set: {left_size}")
+                
+            if right_size.get("width", 0) == 0 or right_size.get("height", 0) == 0:
+                # camera_settings에서 이미지 크기 가져오기
+                img_width = camera_settings.get("image_width_px", 640)
+                img_height = camera_settings.get("image_height_px", 480)
+                
+                logger.critical(f"Updating right_image_size from 0 to {img_width}x{img_height}")
+                
+                # 업데이트
+                calibration_data["right_image_size"] = {"width": img_width, "height": img_height}
+                updated = True
+            else:
+                logger.critical(f"right_image_size is already set: {right_size}")
+                
+            # 업데이트된 데이터 저장
+            if updated:
+                self.config_manager.set_calibration_points(calibration_data)
+                logger.critical("Updated calibration points with correct image sizes")
+        
         # Extract left and right camera settings
         left_camera = camera_settings.get("left_camera", {})
         right_camera = camera_settings.get("right_camera", {})
