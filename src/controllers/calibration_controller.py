@@ -925,77 +925,78 @@ class CalibrationController(QObject):
         return same_row or same_column 
 
     def _load_cameras_settings(self):
-        """
-        Load camera configuration settings.
-        """
-        if not self.config_manager:
-            logger.critical("No config manager available for loading camera settings")
-            return
+        """Load camera settings from config."""
+        if self.config_manager is None:
+            logging.critical("No config manager available for loading camera settings")
+            return False
             
-        # Get camera settings from config using the ConfigManager API
+        # Get camera settings from config
         camera_settings = self.config_manager.get_camera_settings()
-        
         if not camera_settings:
-            logger.critical("No camera settings found in configuration")
-            return
+            logging.critical("No camera settings found in configuration")
+            return False
             
-        # Log camera settings for verification
-        logger.critical(f"Loaded camera settings keys: {list(camera_settings.keys())}")
+        # Check if all required settings are present
+        required_settings = [
+            'camera_location_x', 'camera_location_y', 'camera_location_z',
+            'camera_rotation_x', 'camera_rotation_y', 'camera_rotation_z',
+            'focal_length_mm', 'baseline_m', 'sensor_width_mm', 'sensor_height_mm',
+            'principal_point_x', 'principal_point_y', 'image_width_px', 'image_height_px'
+        ]
         
-        # 이미지 사이즈 검증 및 업데이트
-        calibration_data = self.config_manager.get_calibration_points()
-        if calibration_data:
-            # 이미지 크기가 0인지 확인
-            left_size = calibration_data.get("left_image_size", {})
-            right_size = calibration_data.get("right_image_size", {})
+        missing_settings = [s for s in required_settings if s not in camera_settings]
+        if missing_settings:
+            logging.critical(f"Missing camera settings: {missing_settings}")
+            return False
             
-            # 업데이트 여부 추적
-            updated = False
+        # Check if any settings have invalid values (zero or None)
+        invalid_settings = [s for s in required_settings if s in camera_settings and (camera_settings[s] is None or camera_settings[s] == 0)]
+        if invalid_settings:
+            logging.critical(f"Invalid (zero or None) camera settings: {invalid_settings}")
+            # Don't return False here, just log a warning and continue
             
-            if left_size.get("width", 0) == 0 or left_size.get("height", 0) == 0:
-                # camera_settings에서 이미지 크기 가져오기
-                img_width = camera_settings.get("image_width_px", 640)
-                img_height = camera_settings.get("image_height_px", 480)
-                
-                logger.critical(f"Updating left_image_size from 0 to {img_width}x{img_height}")
-                
-                # 업데이트
-                calibration_data["left_image_size"] = {"width": img_width, "height": img_height}
-                updated = True
-            else:
-                logger.critical(f"left_image_size is already set: {left_size}")
-                
-            if right_size.get("width", 0) == 0 or right_size.get("height", 0) == 0:
-                # camera_settings에서 이미지 크기 가져오기
-                img_width = camera_settings.get("image_width_px", 640)
-                img_height = camera_settings.get("image_height_px", 480)
-                
-                logger.critical(f"Updating right_image_size from 0 to {img_width}x{img_height}")
-                
-                # 업데이트
-                calibration_data["right_image_size"] = {"width": img_width, "height": img_height}
-                updated = True
-            else:
-                logger.critical(f"right_image_size is already set: {right_size}")
-                
-            # 업데이트된 데이터 저장
-            if updated:
-                self.config_manager.set_calibration_points(calibration_data)
-                logger.critical("Updated calibration points with correct image sizes")
-        
-        # Extract left and right camera settings
-        left_camera = camera_settings.get("left_camera", {})
-        right_camera = camera_settings.get("right_camera", {})
-        
-        # Check if we have valid settings
-        if not left_camera or not right_camera:
-            logger.critical("Invalid camera settings in configuration")
-            return
+        # Make sure image dimensions are valid
+        if camera_settings['image_width_px'] <= 0 or camera_settings['image_height_px'] <= 0:
+            logging.critical(f"Invalid image dimensions: {camera_settings['image_width_px']}x{camera_settings['image_height_px']}")
+            # Fix the dimensions
+            camera_settings['image_width_px'] = 640  # Default to 640x480 if invalid
+            camera_settings['image_height_px'] = 480
             
-        # Set camera settings in the model
-        self.model.set_camera_settings(left_camera, right_camera)
+        # Make sure principal point is within image dimensions
+        if camera_settings['principal_point_x'] > camera_settings['image_width_px'] or camera_settings['principal_point_y'] > camera_settings['image_height_px']:
+            logging.critical(f"Principal point outside image dimensions: ({camera_settings['principal_point_x']}, {camera_settings['principal_point_y']})")
+            # Fix principal point to center of image
+            camera_settings['principal_point_x'] = camera_settings['image_width_px'] / 2
+            camera_settings['principal_point_y'] = camera_settings['image_height_px'] / 2
+            logging.critical(f"Adjusted principal point to image center: ({camera_settings['principal_point_x']}, {camera_settings['principal_point_y']})")
+            
+        # Store camera settings
+        self.camera_settings = camera_settings
         
-        # Apply camera settings to triangulation service
+        # Update model with camera settings
+        self.model.camera_settings = camera_settings
+        
+        # Check for stereo baseline
+        if self.camera_settings.get('baseline_m', 0) <= 0:
+            logging.critical("Invalid stereo baseline. Setting default value.")
+            self.camera_settings['baseline_m'] = 1.0  # Default to 1 meter if invalid
+            
+        # Log the loaded settings
+        logging.info(f"Loaded camera settings: {camera_settings}")
+        logging.critical(f"Camera settings loaded successfully. Baseline: {self.camera_settings['baseline_m']}m, Focal: {self.camera_settings['focal_length_mm']}mm")
+        
+        # Explicitly update config manager with potentially fixed values
+        self.config_manager.set_camera_settings(self.camera_settings)
+        
+        # Create triangulator with the loaded settings
+        self._create_triangulator()
+        
+        return True
+
+    def _create_triangulator(self):
+        """
+        Create and register a triangulation service with the loaded camera settings.
+        """
         from src.core.geometry.triangulation.factory import TriangulationFactory
         
         try:
@@ -1008,7 +1009,7 @@ class CalibrationController(QObject):
             # 실제 삼각측량 서비스 생성
             triangulator = TriangulationFactory.create_triangulator_from_config(
                 triangulation_config,
-                camera_settings
+                self.camera_settings
             )
             
             # 삼각측량 서비스 생성 성공 확인

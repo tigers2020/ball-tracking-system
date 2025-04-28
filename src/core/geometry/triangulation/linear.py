@@ -361,51 +361,87 @@ class LinearTriangulator(AbstractTriangulator):
             # Default to DLT
             return self._triangulate_dlt(points_2d)
             
-    def calculate_reprojection_error(self, 
-                                    point_3d: np.ndarray, 
-                                    points_2d: List[Union[Tuple[float, float], np.ndarray]]) -> float:
+    def calculate_reprojection_error(self, point_3d: np.ndarray, points_2d: List[Tuple[float, float]]) -> float:
         """
-        Calculate the reprojection error for a triangulated point.
+        Calculate reprojection error for a triangulated point.
         
         Args:
             point_3d: Triangulated 3D point
             points_2d: List of 2D points used for triangulation
             
         Returns:
-            Mean squared reprojection error
+            float: Average reprojection error in pixels
         """
-        if not self.is_calibrated or point_3d is None:
+        if point_3d is None or len(points_2d) < 2:
             return float('inf')
             
-        # Convert to homogeneous coordinates
-        point_h = np.append(point_3d, 1.0)
+        # 3D 점을 동차 좌표로 변환
+        point_3d_h = np.append(point_3d, 1.0)
         
-        # Calculate reprojection errors for all cameras
-        squared_errors = []
+        total_error = 0.0
+        for i, (u, v) in enumerate(points_2d):
+            if i >= len(self.P):
+                break
+                
+            # 3D 점을 2D로 재투영
+            p2d_h = self.P[i] @ point_3d_h
+            p2d = p2d_h[:2] / p2d_h[2]
+            
+            # 원래 2D 점과의 유클리드 거리 계산
+            error = np.sqrt((p2d[0] - u)**2 + (p2d[1] - v)**2)
+            total_error += error
+            
+        # 평균 오차 반환
+        return total_error / len(points_2d)
+
+    def is_ready(self) -> bool:
+        """
+        Check if the triangulator is properly calibrated and ready for triangulation.
         
-        for i, P in enumerate(self.P):
-            if i >= len(points_2d) or points_2d[i] is None:
-                continue
-                
-            # Project 3D point to image
-            projected_h = np.dot(P, point_h)
+        Returns:
+            bool: True if the triangulator is calibrated, False otherwise
+        """
+        # 기본적인 카메라 매트릭스와 프로젝션 매트릭스가 설정되었는지 확인
+        if not hasattr(self, 'P') or self.P is None or len(self.P) < 2:
+            logging.warning("Projection matrices not set up properly")
+            return False
             
-            # Check for division by zero
-            if abs(projected_h[2]) < 1e-8:
-                continue
-                
-            # Convert to image coordinates
-            projected = projected_h[:2] / projected_h[2]
+        if not hasattr(self, 'K') or self.K is None or len(self.K) < 2:
+            logging.warning("Camera matrices not set up properly")
+            return False
             
-            # Calculate error
-            point_2d = np.array(points_2d[i][:2])
-            error = point_2d - projected
-            squared_error = np.sum(error ** 2)
+        return self.is_calibrated
+    
+    def is_valid_point(self, point_3d: np.ndarray) -> bool:
+        """
+        Check if a 3D point is valid based on various criteria.
+        
+        Args:
+            point_3d: 3D point coordinates
             
-            squared_errors.append(squared_error)
+        Returns:
+            bool: True if the point is valid, False otherwise
+        """
+        # 기본 검사 1: None이 아닌지 확인
+        if point_3d is None:
+            logging.warning("Point is None")
+            return False
             
-        if not squared_errors:
-            return float('inf')
+        # 기본 검사 2: NaN 또는 Inf 값을 포함하는지 확인
+        if np.any(np.isnan(point_3d)) or np.any(np.isinf(point_3d)):
+            logging.warning(f"Point contains NaN or Inf values: {point_3d}")
+            return False
             
-        # Return mean squared error
-        return np.mean(squared_errors) 
+        # 기본 검사 3: 적절한 크기를 가지는지 확인 (범위 검사)
+        # 이 값들은 적용 대상에 따라 조정해야 함
+        max_distance = 10.0  # 최대 10m 거리로 제한
+        if np.linalg.norm(point_3d) > max_distance:
+            logging.warning(f"Point too far from origin: {np.linalg.norm(point_3d)}m")
+            return False
+            
+        # 기본 검사 4: z 좌표가 양수인지 확인 (카메라 앞에 있어야 함)
+        if point_3d[2] < 0:
+            logging.warning(f"Point has negative Z coordinate: {point_3d[2]}")
+            return False
+            
+        return True 

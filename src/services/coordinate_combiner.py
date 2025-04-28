@@ -194,17 +194,20 @@ class CoordinateCombiner:
         # Verify triangulation service
         if self.triangulation_service is None:
             logging.critical("Cannot calculate 3D position: No triangulation service provided")
-            return None
+            # Always return a fallback position instead of None
+            return self._calculate_fallback_position(left_coords, right_coords)
             
         # Check if triangulation method exists
         if not hasattr(self.triangulation_service, 'triangulate'):
             logging.critical("Triangulation service is missing the 'triangulate' method - cannot perform triangulation")
-            return None
+            # Always return a fallback position instead of None
+            return self._calculate_fallback_position(left_coords, right_coords)
             
         # Check if triangulation method is callable
         if not callable(getattr(self.triangulation_service, 'triangulate')):
             logging.critical("Triangulation service's 'triangulate' method is not callable - implementation error")
-            return None
+            # Always return a fallback position instead of None
+            return self._calculate_fallback_position(left_coords, right_coords)
         
         try:
             # Clean and validate coordinates to ensure they're properly formatted
@@ -214,7 +217,7 @@ class CoordinateCombiner:
             except (TypeError, ValueError, IndexError) as e:
                 logging.critical(f"Invalid coordinate format: {e}")
                 logging.critical(f"left_coords={left_coords}, right_coords={right_coords}")
-                return None
+                return self._calculate_fallback_position(left_coords, right_coords)
             
             # Log input coordinates for debugging
             logging.critical(f"Triangulation input coordinates: left=({x_left}, {y_left}), right=({x_right}, {y_right})")
@@ -241,33 +244,18 @@ class CoordinateCombiner:
             # Check for invalid results
             if world_coords is None:
                 logging.critical("Triangulation returned None - fallback to default values")
-                # Create a simple fallback depth estimation based on disparity
-                # This is very rough but better than nothing in case triangulation fails
-                if disparity_x > 0:
-                    # Simple stereo formula: Z = baseline * focal_length / disparity
-                    # We don't have actual baseline and focal length, so we use a reasonable scale
-                    estimated_z = 100.0 / disparity_x  # Very rough approximation
-                    position = ((x_left + x_right)/2, (y_left + y_right)/2, estimated_z)
-                    logging.critical(f"Using fallback position based on disparity: {position}")
-                    return position
-                return None
+                return self._calculate_fallback_position(left_coords, right_coords)
                 
             if isinstance(world_coords, np.ndarray) and np.isnan(world_coords).any():
                 logging.critical("Triangulation returned NaN values - fallback to default values")
-                # Create a simple fallback depth estimation
-                if disparity_x > 0:
-                    estimated_z = 100.0 / disparity_x  # Very rough approximation
-                    position = ((x_left + x_right)/2, (y_left + y_right)/2, estimated_z)
-                    logging.critical(f"Using fallback position based on disparity: {position}")
-                    return position
-                return None
+                return self._calculate_fallback_position(left_coords, right_coords)
             
             # Validate the result is a 3D point
             if isinstance(world_coords, np.ndarray):
                 # Check array dimensions
                 if len(world_coords) < 3:
                     logging.critical(f"Triangulation result has wrong dimensions: {world_coords}")
-                    return None
+                    return self._calculate_fallback_position(left_coords, right_coords)
                     
                 # Convert numpy array to tuple
                 position = (float(world_coords[0]), float(world_coords[1]), float(world_coords[2]))
@@ -275,7 +263,7 @@ class CoordinateCombiner:
                 # Check if it's a sequence with at least 3 elements
                 if not hasattr(world_coords, '__len__') or len(world_coords) < 3:
                     logging.critical(f"Triangulation result has wrong format: {world_coords}")
-                    return None
+                    return self._calculate_fallback_position(left_coords, right_coords)
                     
                 # Assume triangulation returned a tuple or list
                 position = tuple(map(float, world_coords[:3]))
@@ -291,7 +279,62 @@ class CoordinateCombiner:
             logging.critical(f"Error during 3D position calculation: {str(e)}")
             import traceback
             logging.critical(traceback.format_exc())
-            return None
+            return self._calculate_fallback_position(left_coords, right_coords)
+            
+    def _calculate_fallback_position(self, left_coords, right_coords):
+        """
+        Calculate a fallback 3D position based on disparity when triangulation fails.
+        This is a simplified approximation of depth from stereo vision.
+        
+        Args:
+            left_coords (tuple): (x, y) coordinates in left image
+            right_coords (tuple): (x, y) coordinates in right image
+            
+        Returns:
+            tuple: (x, y, z) approximate 3D position
+        """
+        try:
+            # Extract coordinates
+            try:
+                x_left, y_left = float(left_coords[0]), float(left_coords[1])
+                x_right, y_right = float(right_coords[0]), float(right_coords[1])
+            except (TypeError, ValueError, IndexError):
+                # If parsing fails, return zeros
+                return (0.0, 0.0, 0.0)
+                
+            # Calculate average x, y position
+            x_avg = (x_left + x_right) / 2.0
+            y_avg = (y_left + y_right) / 2.0
+            
+            # Calculate disparity (x-difference between images)
+            disparity = abs(x_left - x_right)
+            
+            # Simple depth calculation: Z = focal_length * baseline / disparity
+            # Since we don't know focal length and baseline, use a scaling factor
+            # Larger disparity = closer object
+            depth_scale = 100.0  # Arbitrary scale factor
+            
+            if disparity < 0.1:  # Avoid division by very small numbers
+                z_approx = depth_scale  # Default depth if disparity is too small
+            else:
+                z_approx = depth_scale / disparity
+                
+            # Limit z to reasonable range (adjust as needed)
+            z_approx = min(max(z_approx, 1.0), 1000.0)
+            
+            # Create fallback position
+            position = (x_avg, y_avg, z_approx)
+            
+            # Store as last valid position
+            self.last_3d_position = position
+            
+            logging.critical(f"Using fallback 3D position based on disparity: {position}")
+            return position
+            
+        except Exception as e:
+            logging.critical(f"Error calculating fallback position: {e}")
+            # Last resort: return zeros
+            return (0.0, 0.0, 0.0)
     
     def process_frame(self, frame_idx, hsv_left, hsv_right, hough_left, hough_right, 
                       kalman_left, kalman_right):

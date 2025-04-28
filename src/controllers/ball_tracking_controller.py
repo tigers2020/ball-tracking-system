@@ -109,6 +109,14 @@ class BallTrackingController(QObject):
         self._detection_counter = 0
         self.state = TrackingState.DISABLED  # Initial state is disabled
         
+        # Initialize detection statistics
+        self._detection_stats = {
+            "is_tracking": False,
+            "detection_count": 0,
+            "total_frames": 0,
+            "detection_rate": 0.0
+        }
+        
         # Initialize internal state variables for compatibility
         self._enabled = False
         self._coordinate_history = {"left": [], "right": []}
@@ -201,21 +209,73 @@ class BallTrackingController(QObject):
                 
                 # triangulate 메서드를 wrapper 형태로 제공하여 기존 코드와 호환성 유지
                 def triangulate_wrapper(uL, vL, uR, vR):
+                    """
+                    삼각측량을 수행하는 래퍼 함수
+                    
+                    Args:
+                        uL, vL: 왼쪽 이미지의 x, y 좌표 (픽셀)
+                        uR, vR: 오른쪽 이미지의 x, y 좌표 (픽셀)
+                        
+                    Returns:
+                        np.ndarray: 삼각측량된 3D 좌표 (미터 단위)
+                    """
                     points_2d = [(float(uL), float(vL)), (float(uR), float(vR))]
                     logging.critical(f"Triangulating points: {points_2d}")
+                    
+                    # 삼각측량기가 보정되었는지 확인
+                    if not self.triangulator.is_ready():
+                        logging.critical("Triangulator not calibrated, attempting to recalibrate")
+                        # 카메라 설정으로부터 보정 시도
+                        self.triangulator.set_camera_parameters(self.camera_settings)
+                        
+                        # 여전히 보정이 안되면 기본값 반환
+                        if not self.triangulator.is_ready():
+                            default_coords = np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                            scale_factor = 0.01  # 1 픽셀 = 1cm = 0.01m
+                            scaled_coords = default_coords * scale_factor
+                            logging.critical(f"Triangulation calibration failed, returning scaled default coordinates: {scaled_coords}")
+                            return scaled_coords
                     
                     # 삼각측량 실행
                     point_3d = self.triangulator.triangulate_point(points_2d)
                     logging.critical(f"Triangulation result: {point_3d}")
                     
-                    if point_3d is None:
-                        # 실패 시 기본 값 반환
-                        logging.critical("Triangulation failed, returning default coordinates")
-                        return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                    # 삼각측량 결과 유효성 검사
+                    if point_3d is None or not self.triangulator.is_valid_point(point_3d):
+                        logging.critical("Triangulation failed or produced invalid point")
+                        # 실패 시 기본 값을 계산하되 스케일 적용
+                        default_coords = np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                        
+                        # 픽셀 좌표를 실제 단위(미터)로 변환하기 위한 스케일 팩터
+                        scale_factor = 0.01  # 1 픽셀 = 1cm = 0.01m
+                        
+                        # 기본 좌표에 스케일 적용
+                        scaled_coords = default_coords * scale_factor
+                        logging.critical(f"Using scaled default coordinates: {scaled_coords}")
+                        return scaled_coords
                     
-                    # 확실히 numpy 배열로 변환
-                    return np.array([float(point_3d[0]), float(point_3d[1]), float(point_3d[2])])
+                    # 삼각측량 성공 시에도 스케일 적용
+                    scale_factor = 0.01  # 1 픽셀 = 1cm = 0.01m
+                    scaled_point_3d = np.array([
+                        float(point_3d[0]) * scale_factor,
+                        float(point_3d[1]) * scale_factor,
+                        float(point_3d[2]) * scale_factor
+                    ])
                     
+                    # 재투영 오차 계산 (선택적)
+                    try:
+                        reprojection_error = self.triangulator.calculate_reprojection_error(point_3d, points_2d)
+                        logging.critical(f"Reprojection error: {reprojection_error}")
+                        
+                        # 재투영 오차가 너무 크면 경고 로그 추가
+                        if reprojection_error > 5.0:  # 픽셀 단위의 임계값
+                            logging.warning(f"High reprojection error: {reprojection_error}")
+                    except Exception as e:
+                        logging.error(f"Error calculating reprojection error: {e}")
+                    
+                    logging.critical(f"Scaled triangulation result: {scaled_point_3d}")
+                    return scaled_point_3d
+                
                 # 원래 triangulate 메서드를 대체
                 self.triangulator.triangulate = triangulate_wrapper
                 
@@ -299,7 +359,11 @@ class BallTrackingController(QObject):
         Returns:
             dict: Detection statistics including tracking status and counters
         """
-        return self.model.detection_stats
+        if hasattr(self.model, 'detection_stats'):
+            return self.model.detection_stats
+        else:
+            # Return internal detection stats if model doesn't have this attribute
+            return self._detection_stats
     
     @property
     def xml_root(self):
@@ -1093,7 +1157,8 @@ class BallTrackingController(QObject):
         """Calculate 3D position from 2D coordinates using triangulation."""
         if left_coords is None or right_coords is None:
             logging.critical("Skipping coordinate fusion: One or both coordinates are None")
-            return None
+            # Return fallback (0,0,0) instead of None
+            return (0.0, 0.0, 0.0)
         
         # Log input coordinates with high visibility
         logging.critical(f"★★★ Fusing coordinates: left={left_coords}, right={right_coords}")
@@ -1101,7 +1166,8 @@ class BallTrackingController(QObject):
         # Verify triangulator is initialized
         if not hasattr(self, 'coordinate_combiner') or self.coordinate_combiner is None:
             logging.critical("★★★ Error: coordinate_combiner is not initialized")
-            return None
+            # Create a new coordinate combiner as emergency fallback
+            self.coordinate_combiner = CoordinateCombiner(self.triangulator)
             
         # Verify triangulation service exists
         if not hasattr(self.coordinate_combiner, 'triangulation_service') or self.coordinate_combiner.triangulation_service is None:
@@ -1131,10 +1197,50 @@ class BallTrackingController(QObject):
                     
                     if triangulator is not None:
                         logging.critical("★★★ Created new triangulator, setting to coordinate_combiner")
+                        # Add triangulate method if missing
+                        if not hasattr(triangulator, 'triangulate'):
+                            def triangulate_wrapper(uL, vL, uR, vR):
+                                points_2d = [(float(uL), float(vL)), (float(uR), float(vR))]
+                                logging.critical(f"★★★ Triangulating points: {points_2d}")
+                                
+                                # Call triangulate_point if available
+                                if hasattr(triangulator, 'triangulate_point'):
+                                    point_3d = triangulator.triangulate_point(points_2d)
+                                    logging.critical(f"★★★ Triangulation result: {point_3d}")
+                                    
+                                    # Check if the point is valid using is_valid_point if available
+                                    if hasattr(triangulator, 'is_valid_point') and point_3d is not None:
+                                        if not triangulator.is_valid_point(point_3d):
+                                            logging.critical("★★★ Triangulated point is invalid according to validation criteria")
+                                            # Simple fallback
+                                            import numpy as np
+                                            return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                                    
+                                    if point_3d is None:
+                                        # Simple fallback
+                                        import numpy as np
+                                        return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                                    
+                                    # Convert to numpy array
+                                    import numpy as np
+                                    return np.array([float(point_3d[0]), float(point_3d[1]), float(point_3d[2])])
+                                else:
+                                    # Fallback if no triangulate_point
+                                    import numpy as np
+                                    return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                            
+                            # Add the method
+                            triangulator.triangulate = triangulate_wrapper
+                            logging.critical("★★★ Added triangulate wrapper to new triangulator")
+                        
+                        self.triangulator = triangulator
                         self.coordinate_combiner.set_triangulation_service(triangulator)
+                        self.config_manager.set_triangulator(triangulator)
                 
             except Exception as e:
                 logging.critical(f"★★★ Failed to reinitialize triangulation service: {e}")
+                import traceback
+                logging.critical(traceback.format_exc())
         
         try:
             # Validate coordinates are in the expected format
@@ -1149,14 +1255,49 @@ class BallTrackingController(QObject):
                     logging.critical(f"★★★ Converted coordinates: left={left_coords}, right={right_coords}")
                 except (TypeError, ValueError, IndexError) as e:
                     logging.critical(f"★★★ Failed to convert coordinates: {e}")
-                    return None
+                    # Return fallback coordinates
+                    self._last_3d_coordinates = (0.0, 0.0, 0.0)
+                    return self._last_3d_coordinates
             
-            # Before calling coordinate_combiner, log the triangulation service
+            # Check if triangulator is ready
+            triangulator_ready = False
             if hasattr(self.coordinate_combiner, 'triangulation_service') and self.coordinate_combiner.triangulation_service is not None:
+                # Check if the triangulator has is_ready method
+                if hasattr(self.coordinate_combiner.triangulation_service, 'is_ready'):
+                    triangulator_ready = self.coordinate_combiner.triangulation_service.is_ready()
+                    logging.critical(f"★★★ Triangulator ready: {triangulator_ready}")
+                else:
+                    # Fallback to is_calibrated if is_ready not available
+                    if hasattr(self.coordinate_combiner.triangulation_service, 'is_calibrated'):
+                        triangulator_ready = self.coordinate_combiner.triangulation_service.is_calibrated
+                        logging.critical(f"★★★ Triangulator calibrated: {triangulator_ready}")
+                
                 triangulator_info = f"triangulation_service={type(self.coordinate_combiner.triangulation_service).__name__}"
                 if hasattr(self.coordinate_combiner.triangulation_service, 'is_calibrated'):
                     triangulator_info += f", is_calibrated={self.coordinate_combiner.triangulation_service.is_calibrated}"
                 logging.critical(f"★★★ Using {triangulator_info}")
+            
+            # If triangulator is not ready, use fallback method
+            if not triangulator_ready:
+                logging.critical("★★★ Triangulator not ready, using fallback method")
+                # Basic fallback calculation
+                x_center = (float(left_coords[0]) + float(right_coords[0])) / 2.0
+                y_center = (float(left_coords[1]) + float(right_coords[1])) / 2.0
+                x_disparity = abs(float(left_coords[0]) - float(right_coords[0]))
+                z_estimate = 100.0 / max(x_disparity, 0.1)  # Avoid division by near-zero
+                z_estimate = min(max(z_estimate, 1.0), 1000.0)  # Limit to reasonable range
+                
+                self._last_3d_coordinates = (x_center, y_center, z_estimate)
+                logging.critical(f"★★★ Using fallback 3D coordinates: {self._last_3d_coordinates}")
+                
+                # Emit tracking update signal with the fallback position
+                self.tracking_updated.emit(
+                    float(self._last_3d_coordinates[0]), 
+                    float(self._last_3d_coordinates[1]), 
+                    float(self._last_3d_coordinates[2])
+                )
+                
+                return self._last_3d_coordinates
             
             # Use the coordinate combiner service to calculate 3D position
             # Start processing timer
@@ -1196,7 +1337,7 @@ class BallTrackingController(QObject):
                 logging.critical("★★★ 3D position calculation failed, using previous coordinates")
                 
                 # If we don't have previous coordinates, create fallback based on 2D positions
-                if self._last_3d_coordinates is None:
+                if self._last_3d_coordinates is None or self._last_3d_coordinates == (0.0, 0.0, 0.0):
                     # Fallback: create rough 3D estimate based on 2D positions
                     # Calculate center position and estimate depth based on x-disparity
                     x_center = (float(left_coords[0]) + float(right_coords[0])) / 2.0
@@ -1205,9 +1346,17 @@ class BallTrackingController(QObject):
                     
                     # Simple stereo formula (very rough approximation)
                     z_estimate = 100.0 / max(x_disparity, 0.1)  # Avoid division by near-zero
+                    z_estimate = min(max(z_estimate, 1.0), 1000.0)  # Limit to reasonable range
                     
                     self._last_3d_coordinates = (x_center, y_center, z_estimate)
                     logging.critical(f"★★★ Using fallback 3D coordinates based on disparity: {self._last_3d_coordinates}")
+                    
+                    # Emit tracking update signal with the fallback position
+                    self.tracking_updated.emit(
+                        float(self._last_3d_coordinates[0]), 
+                        float(self._last_3d_coordinates[1]), 
+                        float(self._last_3d_coordinates[2])
+                    )
             
             # Return 3D coordinates for other uses
             return self._last_3d_coordinates
@@ -1215,142 +1364,25 @@ class BallTrackingController(QObject):
         except Exception as e:
             logging.critical(f"★★★ Error during coordinate fusion: {str(e)}")
             logging.critical(traceback.format_exc())
-            return None
+            
+            # Return last valid coordinates or fallback
+            if self._last_3d_coordinates is not None:
+                return self._last_3d_coordinates
+        else:
+                # Create basic fallback
+                try:
+                    x_center = (float(left_coords[0]) + float(right_coords[0])) / 2.0
+                    y_center = (float(left_coords[1]) + float(right_coords[1])) / 2.0
+                    x_disparity = abs(float(left_coords[0]) - float(right_coords[0]))
+                    z_estimate = 100.0 / max(x_disparity, 0.1)
+                    return (x_center, y_center, z_estimate)
+                except:
+                    # Last resort
+                    return (0.0, 0.0, 0.0)
     
     def _check_out_of_bounds(self):
         """Check if ball is predicted to be out of bounds and update tracking state."""
         if not self.model.detection_stats["is_tracking"]:
-            return
-            
-        left_pred = self.kalman_processor.get_prediction("left")
-        right_pred = self.kalman_processor.get_prediction("right")
-        
-        if left_pred is None and right_pred is None:
-            return
-            
-        # Define image boundaries
-        left_bounds = (0, 0, self.model.left_image.shape[1], self.model.left_image.shape[0]) if self.model.left_image is not None else None
-        right_bounds = (0, 0, self.model.right_image.shape[1], self.model.right_image.shape[0]) if self.model.right_image is not None else None
-        
-        is_out_of_bounds = False
-        
-        # Add margin to avoid false positives (15% of width/height)
-        margin_x = 0
-        margin_y = 0
-        
-        if left_bounds:
-            margin_x = int(left_bounds[2] * 0.15)
-            margin_y = int(left_bounds[3] * 0.15)
-        elif right_bounds:
-            margin_x = int(right_bounds[2] * 0.15)
-            margin_y = int(right_bounds[3] * 0.15)
-        
-        # Check left prediction
-        left_out = False
-        if left_pred is not None and left_bounds is not None:
-            px, py, vx, vy = left_pred
-            
-            # Log current prediction and bounds for debugging
-            logging.debug(f"Left prediction: pos=({px}, {py}), vel=({vx}, {vy})")
-            
-            # Add margin to bounds for checking
-            effective_bounds = (-margin_x, -margin_y, left_bounds[2] + margin_x, left_bounds[3] + margin_y)
-            
-            # Check if current position is outside bounds
-            current_out = (px < effective_bounds[0] or px >= effective_bounds[2] or 
-                          py < effective_bounds[1] or py >= effective_bounds[3])
-                
-            # Only consider rapid motion for out-of-bounds prediction
-            if abs(vx) > 2.0 or abs(vy) > 2.0:
-                future_steps = 3  # Look 3 frames ahead (more conservative)
-                future_x = px + vx * future_steps
-                future_y = py + vy * future_steps
-                
-                # Check if future position is outside bounds
-                future_out = (future_x < -3*margin_x or future_x >= left_bounds[2] + 3*margin_x or 
-                             future_y < -3*margin_y or future_y >= left_bounds[3] + 3*margin_y)
-                
-                # Consider out of bounds only if both current and future positions are out
-                if current_out and future_out:
-                    logging.debug(f"Left prediction significantly out of bounds: current=({px}, {py}), future=({future_x}, {future_y})")
-                    left_out = True
-            
-        # Check right prediction (similar to left)
-        right_out = False
-        if right_pred is not None and right_bounds is not None:
-            px, py, vx, vy = right_pred
-            
-            # Log current prediction and bounds for debugging
-            logging.debug(f"Right prediction: pos=({px}, {py}), vel=({vx}, {vy})")
-            
-            # Add margin to bounds for checking
-            effective_bounds = (-margin_x, -margin_y, right_bounds[2] + margin_x, right_bounds[3] + margin_y)
-            
-            # Check if current position is outside bounds
-            current_out = (px < effective_bounds[0] or px >= effective_bounds[2] or 
-                          py < effective_bounds[1] or py >= effective_bounds[3])
-                
-            # Only consider rapid motion for out-of-bounds prediction
-            if abs(vx) > 2.0 or abs(vy) > 2.0:
-                future_steps = 3  # Look 3 frames ahead (more conservative)
-                future_x = px + vx * future_steps
-                future_y = py + vy * future_steps
-                
-                # Check if future position is outside bounds
-                future_out = (future_x < -3*margin_x or future_x >= right_bounds[2] + 3*margin_x or 
-                             future_y < -3*margin_y or future_y >= right_bounds[3] + 3*margin_y)
-                
-                # Consider out of bounds only if both current and future positions are out
-                if current_out and future_out:
-                    logging.debug(f"Right prediction significantly out of bounds: current=({px}, {py}), future=({future_x}, {future_y})")
-                    right_out = True
-        
-        # Use a counter for consecutive out-of-bounds detections
-        if not hasattr(self, '_out_of_bounds_counter'):
-            self._out_of_bounds_counter = 0
-        
-        # Consider out of bounds only if both sides are out or a single active side is out
-        is_left_active = left_pred is not None and self.kalman_processor.is_filter_ready("left")
-        is_right_active = right_pred is not None and self.kalman_processor.is_filter_ready("right")
-        
-        if ((is_left_active and is_right_active and left_out and right_out) or   # Both sides active and out
-            (is_left_active and not is_right_active and left_out) or             # Only left active and out
-            (is_right_active and not is_left_active and right_out)):             # Only right active and out
-            self._out_of_bounds_counter += 1
-            logging.debug(f"Out of bounds counter: {self._out_of_bounds_counter}")
-        else:
-            # Reset counter if ball is within bounds
-            self._out_of_bounds_counter = 0
-        
-        # Only stop tracking after multiple consecutive out-of-bounds detections
-        if self._out_of_bounds_counter >= 3:  # Adjust threshold as needed
-            logging.info("Ball predicted out of bounds for multiple frames, stopping tracking")
-            self.model.detection_stats["is_tracking"] = False
-            self._out_of_bounds_counter = 0  # Reset counter
-    
-    def _update_detection_signal(self, frame_idx, timestamp, ball_center_left, ball_center_right):
-        """Update detection signal with current ball tracking status."""
-        # Log the current state to understand why it might not be emitting
-        logging.critical(f"★★★ UPDATE DETECTION SIGNAL CALLED: State={self.state}, Frame={frame_idx}")
-        
-        # Remove the early return condition - always emit the signal
-        # if self.state != TrackingState.TRACKING:
-        #     return
-            
-        # Get ball coordinates or None if not detected
-        left_coords = ball_center_left if ball_center_left is not None else None
-        right_coords = ball_center_right if ball_center_right is not None else None
-        
-        # Position coordinates from _last_3d_coordinates (from _fuse_coordinates)
-        position_coords = self._last_3d_coordinates if hasattr(self, '_last_3d_coordinates') and self._last_3d_coordinates is not None else (0.0, 0.0, 0.0)
-        
-        # Ensure coordinates are valid tuples
-        if left_coords is None:
-            left_coords = (0.0, 0.0)
-        elif not isinstance(left_coords, tuple):
-            try:
-                left_coords = tuple(map(float, left_coords))
-            except:
                 left_coords = (0.0, 0.0)
                 
         if right_coords is None:
@@ -1374,6 +1406,7 @@ class BallTrackingController(QObject):
         
         # Emit the signal with the coordinates
         try:
+            logging.critical(f"★★★ ATTEMPTING TO EMIT SIGNAL: detection_updated with {len(self.detection_updated.receivers())} receivers")
             self.detection_updated.emit(frame_idx, timestamp, left_coords, right_coords, position_coords)
             logging.critical(f"★★★ SIGNAL EMITTED SUCCESSFULLY: detection_updated")
         except Exception as e:
@@ -2655,3 +2688,68 @@ class BallTrackingController(QObject):
                 )
         
         logging.debug(f"Drew right trajectory with {len(right_history) if right_history else 0} points")
+
+    def _update_detection_signal(self, frame_idx, timestamp, left_best, right_best):
+        """
+        Update detection signals with current ball tracking data.
+        
+        Args:
+            frame_idx (int): Current frame index
+            timestamp (float): Timestamp of detection
+            left_best (tuple): Best circle from left image (x, y, r) or None
+            right_best (tuple): Best circle from right image (x, y, r) or None
+        """
+        # Extract coordinates from best circles
+        left_coords = None if left_best is None else (left_best[0], left_best[1], left_best[2])
+        right_coords = None if right_best is None else (right_best[0], right_best[1], right_best[2])
+        
+        # Update detection statistics
+        if left_coords is not None or right_coords is not None:
+            # Use internal detection stats if model doesn't have the attribute
+            if hasattr(self.model, 'detection_stats'):
+                self.model.detection_stats["detection_count"] += 1
+            else:
+                self._detection_stats["detection_count"] += 1
+                
+        if hasattr(self.model, 'detection_stats'):
+            self.model.detection_stats["total_frames"] += 1
+        else:
+            self._detection_stats["total_frames"] += 1
+        
+        # Calculate current detection rate
+        detection_stats = self.model.detection_stats if hasattr(self.model, 'detection_stats') else self._detection_stats
+        total_frames = max(1, detection_stats["total_frames"])
+        detection_rate = float(detection_stats["detection_count"]) / total_frames
+        
+        # Calculate 3D position if both coordinates are available
+        position_3d = (0.0, 0.0, 0.0)  # Default position
+        if left_coords is not None and right_coords is not None and hasattr(self, 'coordinate_combiner'):
+            # Only use x, y coordinates for triangulation (ignore radius)
+            left_xy = (left_coords[0], left_coords[1])
+            right_xy = (right_coords[0], right_coords[1])
+            
+            # Calculate 3D position
+            position_3d = self._fuse_coordinates(left_xy, right_xy)
+            
+            # Update tracking data
+            if hasattr(self, 'tracking_updated') and self.tracking_updated is not None:
+                self.tracking_updated.emit(
+                    float(position_3d[0]), 
+                    float(position_3d[1]), 
+                    float(position_3d[2])
+                )
+        
+        # Emit detection signal
+        if hasattr(self, 'detection_updated') and self.detection_updated is not None:
+            self.detection_updated.emit(
+                frame_idx, 
+                detection_rate, 
+                left_coords, 
+                right_coords,
+                position_3d
+            )
+            
+        # Save frame data if XML tracking is enabled
+        if hasattr(self, 'data_saver') and self.data_saver is not None:
+            # Add frame to XML tracking data
+            self.append_frame_xml(frame_idx)

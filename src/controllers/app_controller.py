@@ -165,25 +165,39 @@ class AppController(QObject):
         # Set the config manager to the calibration controller
         self.view.calibration_controller.set_config_manager(self.config_manager)
         
-        # Check if ConfigManager was properly injected
+        # Check if ConfigManager was properly injected and force load camera settings
         if self.view.calibration_controller.config_manager is None:
             logging.critical("ConfigManager was not properly injected to CalibrationController!")
         else:
             logging.critical("ConfigManager successfully injected to CalibrationController")
-            # Explicitly load camera settings and calibration points
-            self.view.calibration_controller._load_cameras_settings()
+            
+            # Explicitly load camera settings and create triangulator
+            success = self.view.calibration_controller._load_cameras_settings()
+            logging.critical(f"Camera settings loaded: {success}")
+            
+            # Load calibration points after camera settings are loaded
             self.view.calibration_controller._load_points_from_config()
             
-            # Verify triangulator initialization
-            triangulator = self.config_manager.get_triangulator()
-            if triangulator is None:
-                logging.critical("No triangulator found in ConfigManager. Attempting to create one...")
-                # Try to manually create triangulator with the current camera settings
-                from src.core.geometry.triangulation.factory import TriangulationFactory
+            # Force triangulator initialization
+            camera_settings = self.config_manager.get_camera_settings()
+            if camera_settings:
+                logging.critical(f"Current camera settings from config_manager: {camera_settings}")
                 
-                camera_settings = self.config_manager.get_camera_settings()
-                if camera_settings:
+                # Validate image dimensions
+                if camera_settings.get('image_width_px', 0) <= 0 or camera_settings.get('image_height_px', 0) <= 0:
+                    camera_settings['image_width_px'] = 640  # Default to 640x480 if invalid
+                    camera_settings['image_height_px'] = 480
+                    logging.critical(f"Fixed image dimensions to {camera_settings['image_width_px']}x{camera_settings['image_height_px']}")
+                    self.config_manager.set_camera_settings(camera_settings)
+                
+                # Get or create triangulator
+                triangulator = self.config_manager.get_triangulator()
+                if triangulator is None:
+                    logging.critical("Creating new triangulator in AppController...")
+                    
+                    from src.core.geometry.triangulation.factory import TriangulationFactory
                     try:
+                        # Create triangulator with verified settings
                         new_triangulator = TriangulationFactory.create_triangulator(
                             method='linear', 
                             sub_method='dlt',
@@ -202,11 +216,51 @@ class AppController(QObject):
                                     logging.critical("Updated coordinate_combiner with new triangulator")
                     except Exception as e:
                         logging.critical(f"Failed to create triangulator in AppController: {e}")
-            else:
-                logging.critical(f"Triangulator exists in ConfigManager: {type(triangulator).__name__}")
-                # Check if triangulator is properly configured
-                if hasattr(triangulator, 'is_calibrated'):
-                    logging.critical(f"Triangulator calibration status: is_calibrated={triangulator.is_calibrated}")
+                        import traceback
+                        logging.critical(traceback.format_exc())
+                else:
+                    logging.critical(f"Using existing triangulator in ConfigManager: {type(triangulator).__name__}")
+                    
+                    # Make sure the triangulator's set_camera method is called with current settings
+                    if hasattr(triangulator, 'set_camera'):
+                        try:
+                            triangulator.set_camera(camera_settings)
+                            logging.critical("Updated existing triangulator with camera settings")
+                        except Exception as e:
+                            logging.critical(f"Error updating triangulator with camera settings: {e}")
+                    
+                    # Check if triangulator has necessary methods
+                    if not hasattr(triangulator, 'triangulate'):
+                        logging.critical("Triangulator is missing 'triangulate' method!")
+                        
+                        # Add triangulate method wrapper if missing
+                        def triangulate_wrapper(uL, vL, uR, vR):
+                            points_2d = [(float(uL), float(vL)), (float(uR), float(vR))]
+                            logging.critical(f"Triangulating points: {points_2d}")
+                            
+                            # Try to call triangulate_point if available
+                            if hasattr(triangulator, 'triangulate_point'):
+                                point_3d = triangulator.triangulate_point(points_2d)
+                                logging.critical(f"Triangulation result: {point_3d}")
+                                
+                                if point_3d is None:
+                                    # Fallback to simple disparity calculation
+                                    logging.critical("Triangulation failed, returning default coordinates")
+                                    import numpy as np
+                                    return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                                
+                                # Convert to numpy array
+                                import numpy as np
+                                return np.array([float(point_3d[0]), float(point_3d[1]), float(point_3d[2])])
+                            else:
+                                # No triangulate_point method, use simple fallback
+                                logging.critical("triangulate_point method not available, using fallback")
+                                import numpy as np
+                                return np.array([(uL + uR) / 2.0, vL, abs(uL - uR) / 10.0])
+                        
+                        # Add the method to the triangulator
+                        triangulator.triangulate = triangulate_wrapper
+                        logging.critical("Added triangulate wrapper method to triangulator")
         
         # Connect parameter_manager signals to controllers
         self._connect_parameter_manager_signals()

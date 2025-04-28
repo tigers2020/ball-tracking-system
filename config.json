@@ -49,7 +49,7 @@
         "sensor_width_mm": 36.0,
         "sensor_height_mm": 24.0,
         "principal_point_x": 960.0,
-        "principal_point_y": 5.0,
+        "principal_point_y": 540.0,
         "image_width_px": 640,
         "image_height_px": 480
     },
