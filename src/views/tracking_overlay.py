@@ -142,71 +142,63 @@ class TrackingOverlay(QWidget):
         self.time_value_label.setText("-- ms")
         self.status_value_label.setText("No tracking")
     
-    @Slot(dict)
-    def update_tracking_info(self, tracking_data):
-        """
-        Update tracking information display.
+    def update_tracking_info(self, tracking_data=None):
+        """Update tracking information display with current tracking data.
         
         Args:
             tracking_data (dict): Dictionary containing tracking information
-                {
-                    'frame_idx': int,
-                    'left_2d': (x, y) or None,
-                    'right_2d': (x, y) or None,
-                    'world_3d': (x, y, z) or None,
-                    'processing_time': float,
-                    'status': str,
-                    'confidence': float
-                }
         """
-        # 디버그 로그 추가
-        logging.debug(f"TrackingOverlay.update_tracking_info called: frame={tracking_data.get('frame_idx')}, "
-                     f"left={tracking_data.get('left_2d')}, right={tracking_data.get('right_2d')}, "
-                     f"3D={tracking_data.get('world_3d')}")
+        if tracking_data is None:
+            tracking_data = {}
+            
+        # Log for debugging
+        logging.debug(f"Updating tracking overlay with data: {tracking_data}")
         
-        # Update frame number
-        if 'frame_idx' in tracking_data:
-            self.frame_value_label.setText(str(tracking_data['frame_idx']))
+        # Update frame index
+        frame_idx = tracking_data.get('frame_idx', 'N/A')
+        self.frame_value_label.setText(f"Frame: {frame_idx}")
         
-        # Update 2D left coordinates
-        if 'left_2d' in tracking_data and tracking_data['left_2d'] is not None:
-            x, y = tracking_data['left_2d']
-            self.left_2d_value_label.setText(
-                f"({x:.{TRACKING_OVERLAY.DECIMAL_PLACES_2D}f}, "
-                f"{y:.{TRACKING_OVERLAY.DECIMAL_PLACES_2D}f})"
-            )
+        # 키 이름 호환성 처리 추가 - left/right/world 좌표에 대해 두 가지 키 모두 지원
+        left_coords = tracking_data.get('left_coords') or tracking_data.get('left_2d', (0, 0))
+        right_coords = tracking_data.get('right_coords') or tracking_data.get('right_2d', (0, 0))
+        world_coords = tracking_data.get('world_coords') or tracking_data.get('world_3d', (0, 0, 0))
+        
+        if left_coords:
+            left_x, left_y = left_coords
+            self.left_2d_value_label.setText(f"Left: ({left_x:.1f}, {left_y:.1f})")
         else:
-            self.left_2d_value_label.setText("(--, --)")
-        
-        # Update 2D right coordinates
-        if 'right_2d' in tracking_data and tracking_data['right_2d'] is not None:
-            x, y = tracking_data['right_2d']
-            self.right_2d_value_label.setText(
-                f"({x:.{TRACKING_OVERLAY.DECIMAL_PLACES_2D}f}, "
-                f"{y:.{TRACKING_OVERLAY.DECIMAL_PLACES_2D}f})"
-            )
+            self.left_2d_value_label.setText("Left: (-, -)")
+            
+        if right_coords:
+            right_x, right_y = right_coords
+            self.right_2d_value_label.setText(f"Right: ({right_x:.1f}, {right_y:.1f})")
         else:
-            self.right_2d_value_label.setText("(--, --)")
+            self.right_2d_value_label.setText("Right: (-, -)")
         
-        # Update 3D world coordinates
-        if 'world_3d' in tracking_data and tracking_data['world_3d'] is not None:
-            x, y, z = tracking_data['world_3d']
-            self.world_3d_value_label.setText(
-                f"({x:.{TRACKING_OVERLAY.DECIMAL_PLACES_3D}f} m, "
-                f"{y:.{TRACKING_OVERLAY.DECIMAL_PLACES_3D}f} m, "
-                f"{z:.{TRACKING_OVERLAY.DECIMAL_PLACES_3D}f} m)"
-            )
+        # Update world coordinates
+        if world_coords:
+            x, y, z = world_coords
+            self.world_3d_value_label.setText(f"World: ({x:.2f}, {y:.2f}, {z:.2f})")
         else:
-            self.world_3d_value_label.setText("(--, --, --)")
+            self.world_3d_value_label.setText("World: (-, -, -)")
         
-        # Update processing time
-        if 'processing_time' in tracking_data:
-            self.time_value_label.setText(f"{tracking_data['processing_time']:.1f} ms")
+        # Update processing time - 키 이름 호환성 처리 추가
+        process_time = tracking_data.get('process_time') or tracking_data.get('processing_time', 0.0)
+        self.time_value_label.setText(f"Process: {process_time:.1f} ms")
         
-        # Update status/confidence
-        if 'status' in tracking_data:
-            status_text = tracking_data['status']
-            if 'confidence' in tracking_data and tracking_data['confidence'] is not None:
-                confidence = tracking_data['confidence']
-                status_text += f" ({confidence:.0%})"
-            self.status_value_label.setText(status_text) 
+        # Update status
+        status = tracking_data.get('status', 'No data')
+        self.status_value_label.setText(f"Status: {status}")
+        
+        # Highlight status with color based on success/failure
+        if status.lower() in ['success', 'detected', 'tracking']:
+            self.status_value_label.setStyleSheet("QLabel { color: green; }")
+        elif status.lower() in ['lost', 'not detected']:
+            self.status_value_label.setStyleSheet("QLabel { color: orange; }")
+        elif status.lower() in ['error', 'failed']:
+            self.status_value_label.setStyleSheet("QLabel { color: red; }")
+        else:
+            self.status_value_label.setStyleSheet("")  # Reset to default
+            
+        # Force immediate update to prevent visual lag
+        self.update() 

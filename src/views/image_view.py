@@ -298,6 +298,9 @@ class ImageView(QWidget):
             right_coords (tuple): Right camera coordinates (x, y)
             position_coords (tuple): 3D world coordinates (x, y, z)
         """
+        # 로깅 강화: 탐지 업데이트 수신 로그 추가
+        logging.debug(f"ImageView received detection update: frame={frame_idx}, rate={detection_rate}, left={left_coords}, right={right_coords}, 3D={position_coords}")
+        
         # 이 메서드는 BallTrackingController의 detection_updated 신호와 연결됨
         # 트래킹 오버레이 직접 업데이트를 위한 데이터 생성
         tracking_data = {
@@ -312,6 +315,9 @@ class ImageView(QWidget):
         
         # 트래킹 오버레이 업데이트
         self.update_tracking_info(tracking_data)
+        
+        # 로깅 강화: 트래킹 오버레이 업데이트 후 로그 추가
+        logging.debug(f"Tracking overlay updated with frame={frame_idx}, status={'Tracking' if detection_rate > 0.2 else 'Lost'}")
             
     def connect_game_analyzer(self, analyzer):
         """

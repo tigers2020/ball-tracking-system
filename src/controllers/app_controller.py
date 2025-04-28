@@ -199,7 +199,21 @@ class AppController(QObject):
         # 트래킹 오버레이 기능 활성화
         self.view.image_view.enable_tracking_overlay(True)
         
+        # 직접 signal-slot 연결 추가 (signal_binder 문제 해결)
+        # ball_tracking_controller의 detection_updated 시그널과 image_view의 _on_detection_updated 메소드 연결
+        self.ball_tracking_controller.detection_updated.connect(
+            self.view.image_view._on_detection_updated
+        )
+
+        # 트래킹 활성화 상태 로깅
         logging.info("Tracking coordinates overlay initialized and connected")
+        logging.debug(f"Tracking overlay visible: {self.view.image_view.tracking_overlay.isVisible()}")
+        logging.debug(f"Ball tracking controller enabled: {self.ball_tracking_controller.is_enabled}")
+        
+        # Ball tracking 버튼이 있는지 확인하고 활성화
+        if hasattr(self.view.image_view.playback_controls, 'ball_tracking_button'):
+            self.view.image_view.playback_controls.ball_tracking_button.setEnabled(True)
+            logging.debug("Ball tracking button enabled")
     
     def _connect_ball_tracking_to_game_analyzer(self):
         """
