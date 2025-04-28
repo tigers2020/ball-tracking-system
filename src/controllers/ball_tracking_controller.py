@@ -26,6 +26,7 @@ from src.services.roi_computer import ROIComputer
 from src.services.circle_detector import CircleDetector
 from src.services.kalman_processor import KalmanProcessor
 from src.services.data_saver import DataSaver
+from src.services.coordinate_combiner import CoordinateCombiner
 from src.utils.config_manager import ConfigManager
 from src.utils.coord_utils import fuse_coordinates
 from src.utils.constants import HSV, ROI, COLOR, STEREO, TRACKING, ANALYSIS, HOUGH
@@ -177,6 +178,11 @@ class BallTrackingController(QObject):
         # Initialize triangulation service with camera settings
         self.camera_settings = self.config_manager.get_camera_settings()
         self.triangulator = TriangulationServiceMock(self.camera_settings)
+        
+        # Initialize coordinate combiner service
+        self.coordinate_combiner = CoordinateCombiner(self.triangulator)
+        # Set initial weights based on detection reliability
+        self.coordinate_combiner.set_detection_weights(0.3, 0.4, 0.3)  # HSV, Hough, Kalman
         
         self.data_saver = DataSaver()
         
@@ -1019,34 +1025,65 @@ class BallTrackingController(QObject):
         # Log input coordinates
         logging.debug(f"Fusing coordinates: left={left_coords}, right={right_coords}")
         
-        # Check disparity threshold (acceptable difference between y-coordinates)
-        disparity_y = abs(left_coords[1] - right_coords[1])
-        if disparity_y > 30:  # Threshold value can be adjusted
-            logging.warning(f"Large y-disparity between left and right coordinates: {disparity_y}")
-            return
-        
         try:
-            # Use our mock triangulation service to get 3D coordinates
-            x_left, y_left = left_coords[0], left_coords[1]
-            x_right, y_right = right_coords[0], right_coords[1]
+            # Use the coordinate combiner service to calculate 3D position
+            # Get additional detection coordinates
+            left_hsv_coords = getattr(self.model, 'left_hsv_center', None)
+            right_hsv_coords = getattr(self.model, 'right_hsv_center', None)
             
-            # Do the triangulation
-            x, y, z = self.triangulator.triangulate(x_left, y_left, x_right, y_right)
+            # Use Hough circle coordinates as the main detection method
+            left_hough_coords = left_coords
+            right_hough_coords = right_coords
+            
+            # Get Kalman filter predictions
+            left_kalman_coords = self.kalman_processor.get_prediction("left")
+            right_kalman_coords = self.kalman_processor.get_prediction("right")
+            
+            # Extract just position from Kalman predictions (ignore velocity)
+            if left_kalman_coords is not None:
+                left_kalman_coords = (left_kalman_coords[0], left_kalman_coords[1])
+            if right_kalman_coords is not None:
+                right_kalman_coords = (right_kalman_coords[0], right_kalman_coords[1])
+            
+            # Start processing timer
+            self.coordinate_combiner.start_processing()
+            
+            # Combine left and right coordinates separately
+            left_combined = self.coordinate_combiner.combine_coordinates(
+                left_hsv_coords, left_hough_coords, left_kalman_coords)
+            
+            right_combined = self.coordinate_combiner.combine_coordinates(
+                right_hsv_coords, right_hough_coords, right_kalman_coords)
+            
+            # Calculate 3D position
+            position_3d = self.coordinate_combiner.calculate_3d_position(left_combined, right_combined)
+            
+            # End processing and get time
+            process_time = self.coordinate_combiner.end_processing()
             
             # Store the calculated 3D coordinates for the detection signal
-            self._last_3d_coordinates = (float(x), float(y), float(z))
+            if position_3d is not None:
+                self._last_3d_coordinates = position_3d
+            elif self._last_3d_coordinates is None:
+                self._last_3d_coordinates = (0.0, 0.0, 0.0)
             
             # Log the calculated position
-            logging.debug(f"Calculated 3D position: ({x:.2f}, {y:.2f}, {z:.2f})")
+            if position_3d is not None:
+                logging.debug(f"Calculated 3D position: {position_3d}")
+                
+                # Emit tracking update signal with the 3D position
+                self.tracking_updated.emit(float(position_3d[0]), float(position_3d[1]), float(position_3d[2]))
             
-            # Emit tracking update signal with the 3D position
-            self.tracking_updated.emit(float(x), float(y), float(z))
+            # Emit detection update signal with current state
+            frame_idx = self._frame_counter
+            self._update_detection_signal(frame_idx, process_time, left_combined, right_combined)
             
             # Return 3D coordinates for other uses
             return self._last_3d_coordinates
         
         except Exception as e:
             logging.error(f"Error during coordinate fusion: {str(e)}")
+            logging.debug(traceback.format_exc())
             return None
     
     def _check_out_of_bounds(self):
@@ -2019,19 +2056,24 @@ class BallTrackingController(QObject):
 
     def update_camera_settings(self, camera_settings: Dict[str, Any]) -> None:
         """
-        Update camera settings for 3D triangulation.
+        Update camera settings and reconfigure triangulation service.
         
         Args:
-            camera_settings: Camera configuration parameters
+            camera_settings (Dict[str, Any]): Camera settings dictionary
         """
-        self.camera_settings = camera_settings.copy()
+        self.camera_settings = camera_settings
         
         # Update triangulation service with new settings
         if hasattr(self, 'triangulator') and self.triangulator is not None:
-            self.triangulator.set_camera(self.camera_settings)
-            logging.info("Camera settings updated for triangulation")
-            
-        # Save settings to configuration
+            self.triangulator.set_camera(camera_settings)
+            logging.info("Updated triangulation service with new camera settings")
+        
+        # Update coordinate combiner's triangulation service
+        if hasattr(self, 'coordinate_combiner') and self.coordinate_combiner is not None:
+            self.coordinate_combiner.set_triangulation_service(self.triangulator)
+            logging.info("Updated coordinate combiner with new triangulation service")
+        
+        # Save settings to config
         self.config_manager.set_camera_settings(camera_settings)
 
     def set_hough_circle_settings(self, hough_settings):

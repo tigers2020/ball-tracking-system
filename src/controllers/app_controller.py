@@ -26,8 +26,6 @@ from src.controllers.game_analyzer import GameAnalyzer
 from src.views.ball_tracking_settings_dialog import BallTrackingSettingsDialog
 from src.controllers.calibration_controller import CalibrationController
 from src.controllers.data_export_controller import DataExportController
-from src.controllers.tracking_coordinates_controller import TrackingCoordinatesController
-from src.controllers.tracking_integration import setup_tracking_overlay
 
 
 class FrameLoaderThread(QThread):
@@ -147,17 +145,14 @@ class AppController(QObject):
         # Connect main window to game_analyzer for IN/OUT indication
         self.view.connect_game_analyzer(self.game_analyzer)
         
-        # Set up tracking overlay
-        self._setup_tracking_overlay()
-        
         # Initialize ball tracking settings dialog
         self.ball_tracking_dialog = None
         
         # Connect ball tracking button
         self.view.image_view.playback_controls.ball_tracking_clicked.connect(self._on_ball_tracking_button_clicked)
         
-        # 볼 트래킹 버튼 활성화 (이미지 로드 후에 사용 가능하도록)
-        self.view.image_view.playback_controls.ball_tracking_button.setEnabled(True)
+        # 볼 트래킹 버튼 비활성화 (초기 상태)
+        self.view.image_view.playback_controls.ball_tracking_button.setEnabled(False)
         
         # Connect ball_tracking signals to view
         self.ball_tracking_controller.mask_updated.connect(self._on_mask_updated)
@@ -183,57 +178,6 @@ class AppController(QObject):
         # Connect data export signals
         self.data_export_controller.export_successful.connect(self._on_data_exported)
         self.data_export_controller.import_successful.connect(self._on_data_imported)
-    
-    def _setup_tracking_overlay(self):
-        """
-        트래킹 좌표 오버레이 컴포넌트 초기화 및 연결
-        """
-        logging.info("Setting up tracking overlay component...")
-        
-        # 이미지 뷰에 트래킹 오버레이가 있는지 확인
-        if not hasattr(self.view.image_view, 'tracking_overlay') or not self.view.image_view.tracking_overlay:
-            logging.error("ImageView does not have tracking_overlay attribute")
-            return
-            
-        # TrackingOverlay 객체 참조 획득
-        tracking_overlay = self.view.image_view.tracking_overlay
-        logging.debug(f"TrackingOverlay object: {tracking_overlay}")
-        
-        # 트래킹 좌표 컨트롤러 설정 및 연결
-        self.tracking_coord_controller = setup_tracking_overlay(
-            app_window=self,
-            ball_tracking_controller=self.ball_tracking_controller,
-            config_manager=self.config_manager,
-            image_view=self.view.image_view
-        )
-        
-        # 트래킹 오버레이 기능 활성화
-        self.view.image_view.enable_tracking_overlay(True)
-        
-        # 직접 signal-slot 연결 추가 (signal_binder 문제 해결)
-        # ball_tracking_controller의 detection_updated 시그널과 image_view의 _on_detection_updated 메소드 연결
-        self.ball_tracking_controller.detection_updated.connect(
-            self.view.image_view._on_detection_updated
-        )
-        
-        # ball_tracking_controller의 detection_updated 시그널과 TrackingOverlay의 on_detection_updated 메소드 직접 연결
-        logging.info("Connecting detection_updated signal directly to TrackingOverlay.on_detection_updated")
-        if hasattr(tracking_overlay, 'on_detection_updated'):
-            self.ball_tracking_controller.detection_updated.connect(tracking_overlay.on_detection_updated)
-            logging.info("Direct connection established")
-        else:
-            logging.error("TrackingOverlay does not have on_detection_updated method")
-
-        # 트래킹 활성화 상태 로깅
-        logging.info("Tracking coordinates overlay initialized and connected")
-        logging.debug(f"Tracking overlay visible: {self.view.image_view.tracking_overlay.isVisible()}")
-        logging.debug(f"Tracking overlay in layout: {self.view.image_view.layout().indexOf(self.view.image_view.tracking_overlay) >= 0}")
-        logging.debug(f"Ball tracking controller enabled: {self.ball_tracking_controller.is_enabled}")
-        
-        # Ball tracking 버튼이 있는지 확인하고 활성화
-        if hasattr(self.view.image_view.playback_controls, 'ball_tracking_button'):
-            self.view.image_view.playback_controls.ball_tracking_button.setEnabled(True)
-            logging.debug("Ball tracking button enabled")
     
     def _connect_ball_tracking_to_game_analyzer(self):
         """

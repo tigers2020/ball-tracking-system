@@ -43,10 +43,6 @@ class ImageView(QWidget):
         
         # Game analyzer reference
         self.game_analyzer = None
-        
-        # Tracking state
-        self.tracking_enabled = True
-        self.current_frame_idx = 0
     
     def _setup_ui(self):
         """Set up the user interface."""
@@ -54,17 +50,9 @@ class ImageView(QWidget):
         main_layout.setContentsMargins(Layout.MARGIN, Layout.MARGIN, Layout.MARGIN, Layout.MARGIN)
         main_layout.setSpacing(Layout.SPACING)
         
-        # Create tracking overlay at the top
+        # Add tracking overlay at the top
         self.tracking_overlay = TrackingOverlay()
-        
-        # 트래킹 오버레이 가시성 및 스타일 설정
-        self.tracking_overlay.setVisible(True)  # 명시적으로 가시성 설정
-        self.tracking_overlay.setStyleSheet("background-color: rgba(40, 40, 60, 180); color: white;")  # 배경색 설정
-        self.tracking_overlay.setMinimumHeight(40)  # 최소 높이 설정
-        
-        # 트래킹 오버레이 레이아웃에 추가 (맨 위)
         main_layout.addWidget(self.tracking_overlay)
-        logging.info("TrackingOverlay added to layout")
         
         # Create splitter for image view and bounce overlay
         self.splitter = QSplitter(Qt.Horizontal)
@@ -112,10 +100,6 @@ class ImageView(QWidget):
         Returns:
             tuple: (left_success, right_success) indicating if each image was successfully set
         """
-        # Increment frame index
-        self.current_frame_idx += 1
-        
-        # Return the result of setting the images
         return self.stereo_view.set_images(left_image, right_image)
     
     def clear_images(self):
@@ -128,10 +112,7 @@ class ImageView(QWidget):
         
         # Reset tracking overlay
         if hasattr(self, 'tracking_overlay'):
-            self.tracking_overlay.reset_data()
-        
-        # Reset frame index
-        self.current_frame_idx = 0
+            self.tracking_overlay.reset_tracking_info()
     
     def is_skipping_frames(self):
         """
@@ -207,22 +188,13 @@ class ImageView(QWidget):
     
     def enable_tracking_overlay(self, enabled=True):
         """
-        Enable or disable tracking coordinates overlay.
+        Enable or disable tracking overlay view.
         
         Args:
             enabled (bool): True to enable, False to disable
         """
-        # 오버레이 위젯 표시 설정
-        self.tracking_overlay.setVisible(enabled)
-        self.tracking_enabled = enabled
-        
-        # 확실하게 레이아웃에 추가되었는지 확인
-        if enabled and self.layout().indexOf(self.tracking_overlay) < 0:
-            # 레이아웃에 없으면 최상단에 추가
-            self.layout().insertWidget(0, self.tracking_overlay)
-            logging.info("Tracking overlay added to layout")
-        
-        logging.debug(f"Tracking overlay visibility set to {enabled}")
+        if hasattr(self, 'tracking_overlay'):
+            self.tracking_overlay.setVisible(enabled)
     
     def enable_analysis_tabs(self, enabled=True):
         """
@@ -243,32 +215,35 @@ class ImageView(QWidget):
         """
         self.stereo_view.set_images(left_circle_image, right_circle_image)
     
-    @Slot(dict)
-    def update_tracking_info(self, tracking_data):
+    @Slot(int, float, tuple, tuple, tuple)
+    def _on_detection_updated(self, frame_idx, detection_rate, left_coords, right_coords, position_coords):
         """
-        Update tracking information overlay.
+        Handle detection updates from the ball tracking controller.
         
         Args:
-            tracking_data (dict): Dictionary containing tracking information
-                {
-                    'frame_idx': int,
-                    'left_2d': (x, y) or None, 
-                    'right_2d': (x, y) or None,
-                    'world_3d': (x, y, z) or None,
-                    'processing_time': float,
-                    'status': str,
-                    'confidence': float
-                }
+            frame_idx (int): Current frame index
+            detection_rate (float): Detection processing time in milliseconds
+            left_coords (tuple): Left image coordinates (x, y)
+            right_coords (tuple): Right image coordinates (x, y)
+            position_coords (tuple): 3D world coordinates (x, y, z) in meters
         """
-        if not self.tracking_enabled:
-            return
-            
-        # Add frame index if not present
-        if 'frame_idx' not in tracking_data:
-            tracking_data['frame_idx'] = self.current_frame_idx
-            
-        # Update the tracking overlay
-        self.tracking_overlay.update_tracking_info(tracking_data)
+        logging.debug(f"Detection updated - Frame: {frame_idx}, Coords: L={left_coords}, R={right_coords}, 3D={position_coords}")
+        
+        # Prepare tracking data dictionary
+        tracking_data = {
+            'frame_idx': frame_idx,
+            'left_2d': left_coords,
+            'right_2d': right_coords,
+            'world_3d': position_coords,
+            'process_time': detection_rate,
+            'status': 'Tracking' if all(coord is not None for coord in [left_coords, right_coords, position_coords]) else 'Lost',
+            'confidence': 100.0 if all(coord is not None for coord in [left_coords, right_coords, position_coords]) else 0.0
+        }
+        
+        # Update tracking overlay
+        if hasattr(self, 'tracking_overlay'):
+            self.tracking_overlay.update_tracking_info(tracking_data)
+            logging.debug("Tracking overlay updated with detection data")
     
     def connect_ball_tracking_controller(self, controller):
         """
@@ -283,56 +258,13 @@ class ImageView(QWidget):
                 "mask_updated": self.set_masks,
                 "roi_updated": self.set_rois,
                 "circles_processed": self.set_circle_images,
-                "tracking_updated": self.update_tracking_info
+                "detection_updated": self._on_detection_updated
             }
             
             # Connect all signals using SignalBinder
             SignalBinder.bind_all(controller, self, signal_mappings)
             
-            # 추가 1: detection_updated 신호를 _on_detection_updated 메서드에 직접 연결
-            controller.detection_updated.connect(self._on_detection_updated)
-            
-            # 추가 2: detection_updated 신호를 TrackingOverlay에도 직접 연결 
-            if hasattr(self, 'tracking_overlay') and self.tracking_overlay:
-                logging.info("Connecting detection_updated signal directly to TrackingOverlay")
-                controller.detection_updated.connect(self.tracking_overlay.on_detection_updated)
-            else:
-                logging.warning("TrackingOverlay not found, direct connection skipped")
-            
             logging.info("Connected to ball tracking controller")
-    
-    @Slot(int, float, tuple, tuple, tuple)
-    def _on_detection_updated(self, frame_idx, detection_rate, left_coords, right_coords, position_coords):
-        """
-        Handle detection updates from ball tracking controller.
-        
-        Args:
-            frame_idx (int): Frame index
-            detection_rate (float): Detection rate
-            left_coords (tuple): Left camera coordinates (x, y)
-            right_coords (tuple): Right camera coordinates (x, y)
-            position_coords (tuple): 3D world coordinates (x, y, z)
-        """
-        # 로깅 강화: 탐지 업데이트 수신 로그 추가
-        logging.debug(f"ImageView received detection update: frame={frame_idx}, rate={detection_rate}, left={left_coords}, right={right_coords}, 3D={position_coords}")
-        
-        # 이 메서드는 BallTrackingController의 detection_updated 신호와 연결됨
-        # 트래킹 오버레이 직접 업데이트를 위한 데이터 생성
-        tracking_data = {
-            'frame_idx': frame_idx,
-            'left_2d': left_coords if left_coords else None,
-            'right_2d': right_coords if right_coords else None,
-            'world_3d': position_coords if position_coords else None,
-            'status': 'Tracking' if detection_rate > 0.2 else 'Lost',
-            'confidence': detection_rate,
-            'processing_time': 0.0  # 별도 처리 시간 측정 없이 0으로 설정
-        }
-        
-        # 트래킹 오버레이 업데이트
-        self.update_tracking_info(tracking_data)
-        
-        # 로깅 강화: 트래킹 오버레이 업데이트 후 로그 추가
-        logging.debug(f"Tracking overlay updated with frame={frame_idx}, status={'Tracking' if detection_rate > 0.2 else 'Lost'}")
             
     def connect_game_analyzer(self, analyzer):
         """

@@ -8,7 +8,6 @@ This file contains all the constants used in the UI.
 
 import os
 from pathlib import Path
-from dataclasses import dataclass
 
 
 # Get the absolute path to the root directory
@@ -103,19 +102,3 @@ class ROI:
     FILL_COLOR = (0, 0, 255, 64)  # BGRA format (Red with transparency)
     CENTER_MARKER_SIZE = 5
     CENTER_MARKER_COLOR = (255, 255, 255)  # BGR format (White) 
-
-@dataclass
-class TRACKING_OVERLAY:
-    """Tracking information overlay constants"""
-    HEIGHT: int = 40
-    FONT_SIZE: int = 10
-    PADDING: int = 10
-    SPACING: int = 15
-    BACKGROUND_COLOR: str = "rgba(40, 40, 60, 180)"
-    TEXT_COLOR: str = "#FFFFFF"
-    LABEL_COLOR: str = "#80d8ff"
-    UPDATE_INTERVAL_MS: int = 100
-    DECIMAL_PLACES_2D: int = 1
-    DECIMAL_PLACES_3D: int = 2
-    BORDER_RADIUS: int = 5
-    BORDER_COLOR: str = "rgba(100, 100, 255, 0.3)" 
